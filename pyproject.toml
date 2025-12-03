@@ -58,7 +58,10 @@ target-version = ["py311", "py312"]
 [tool.ruff]
 line-length = 88
 target-version = "py311"
+
+[tool.ruff.lint]
 select = ["E", "F", "I", "N", "W"]
+ignore = ["N806"]  # Allow uppercase variable names (e.g., X, X_train for ML)
 
 [tool.mypy]
 python_version = "3.11"

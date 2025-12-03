@@ -1,6 +1,7 @@
 """
 Tool for generating descriptive statistics of DataFrame columns.
 """
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
@@ -9,38 +10,39 @@ from stats_compass_core.registry import registry
 
 class DescribeInput(BaseModel):
     """Input schema for describe tool."""
-    
+
     percentiles: list[float] | None = Field(
-        default=None,
-        description="List of percentiles to include (between 0 and 1)"
+        default=None, description="List of percentiles to include (between 0 and 1)"
     )
     include: str | list[str] | None = Field(
         default=None,
-        description="Data types to include ('all', 'number', 'object', 'category', 'datetime')"
+        description=(
+            "Data types to include "
+            "('all', 'number', 'object', 'category', 'datetime')"
+        ),
     )
     exclude: str | list[str] | None = Field(
-        default=None,
-        description="Data types to exclude"
+        default=None, description="Data types to exclude"
     )
 
 
 @registry.register(
     category="eda",
     input_schema=DescribeInput,
-    description="Generate descriptive statistics for DataFrame"
+    description="Generate descriptive statistics for DataFrame",
 )
 def describe(df: pd.DataFrame, params: DescribeInput) -> pd.DataFrame:
     """
     Generate descriptive statistics that summarize the central tendency,
     dispersion and shape of a dataset's distribution.
-    
+
     Args:
         df: Input DataFrame
         params: Parameters for describe operation
-    
+
     Returns:
         DataFrame containing descriptive statistics
-    
+
     Raises:
         ValueError: If percentiles are out of range or incompatible types specified
     """
@@ -49,7 +51,7 @@ def describe(df: pd.DataFrame, params: DescribeInput) -> pd.DataFrame:
         for p in params.percentiles:
             if not 0 <= p <= 1:
                 raise ValueError(f"Percentiles must be between 0 and 1, got {p}")
-    
+
     # Build kwargs for describe
     kwargs = {}
     if params.percentiles:
@@ -58,7 +60,7 @@ def describe(df: pd.DataFrame, params: DescribeInput) -> pd.DataFrame:
         kwargs["include"] = params.include
     if params.exclude:
         kwargs["exclude"] = params.exclude
-    
+
     try:
         return df.describe(**kwargs)
     except Exception as e:
