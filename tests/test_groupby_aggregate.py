@@ -107,14 +107,9 @@ class TestGroupByAggregate:
 
     def test_invalid_aggregation_function(self) -> None:
         """Test error with invalid aggregation function."""
-        df = pd.DataFrame({"category": ["A", "B"], "value": ["x", "y"]})  # Non-numeric
+        df = pd.DataFrame({"category": ["A", "B"], "value": ["x", "y"]})
 
-        params = GroupByAggregateInput(
-            by=["category"],
-            agg_func={"value": "sum"},  # Can't sum strings meaningfully in this context
-        )
-        # This might not fail for string concatenation,
-        # so let's use a clearly invalid func
+        # Use a clearly invalid aggregation function that pandas won't recognize
         params = GroupByAggregateInput(
             by=["category"], agg_func={"value": "invalid_function"}
         )
