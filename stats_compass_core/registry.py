@@ -35,7 +35,6 @@ class ToolRegistry:
         name: str | None = None,
         input_schema: type[BaseModel] | None = None,
         description: str = "",
-        auto: bool = True,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator to register a tool function.
@@ -45,7 +44,6 @@ class ToolRegistry:
             name: Optional tool name (defaults to function name)
             input_schema: Optional Pydantic schema for input validation
             description: Optional tool description
-            auto: If True, tool will be auto-discovered during registry initialization
 
         Returns:
             Decorated function

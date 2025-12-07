@@ -5,19 +5,9 @@ Tool for training a linear regression model.
 import pandas as pd
 from pydantic import BaseModel, Field
 
+from stats_compass_core.ml.common import TrainedModelResult
+
 from stats_compass_core.registry import registry
-
-
-class TrainedModelResult(BaseModel):
-    """Result of model training."""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    model: object
-    feature_columns: list[str]
-    target_column: str
-    train_score: float
-    n_samples: int
 
 
 class TrainLinearRegressionInput(BaseModel):
