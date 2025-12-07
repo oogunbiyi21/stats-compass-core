@@ -35,6 +35,7 @@ class ToolRegistry:
         name: str | None = None,
         input_schema: type[BaseModel] | None = None,
         description: str = "",
+        auto: bool = True,
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator to register a tool function.
@@ -44,6 +45,7 @@ class ToolRegistry:
             name: Optional tool name (defaults to function name)
             input_schema: Optional Pydantic schema for input validation
             description: Optional tool description
+            auto: If True, tool will be auto-discovered during registry initialization
 
         Returns:
             Decorated function
@@ -59,6 +61,8 @@ class ToolRegistry:
                 description=description or func.__doc__ or "",
             )
             self._tools[f"{category}.{tool_name}"] = metadata
+            # Mark function as a registered tool for auto-discovery filtering
+            func.__tool_registered__ = True  # type: ignore
             return func
 
         return decorator
@@ -94,7 +98,9 @@ class ToolRegistry:
         Automatically discover and import all tool modules.
 
         This method walks through all category folders and imports
-        all Python modules to trigger tool registration.
+        Python modules that contain registered tools. Modules are only
+        imported if they use the @registry.register decorator, which
+        prevents accidental registration of helper files.
         """
         package_dir = Path(__file__).parent
 
@@ -103,8 +109,9 @@ class ToolRegistry:
             if not category_path.exists():
                 continue
 
-            # Import all modules in the category
+            # Import all non-private modules in the category
             for module_info in pkgutil.iter_modules([str(category_path)]):
+                # Skip private modules (starting with _)
                 if module_info.name.startswith("_"):
                     continue
 
@@ -112,6 +119,7 @@ class ToolRegistry:
                 try:
                     importlib.import_module(module_name)
                 except Exception as e:
+                    # Log warning but continue with other modules
                     print(f"Warning: Failed to import {module_name}: {e}")
 
 

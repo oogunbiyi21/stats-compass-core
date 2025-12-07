@@ -1,5 +1,29 @@
 # API Reference
 
+## Architecture Overview
+
+**stats-compass-core** follows a clean three-layer architecture:
+
+1. **stats-compass-core** (this package) - Pure Python tools
+   - Deterministic pandas-based data operations
+   - No UI, no LLM adapters, no orchestration code
+   - Pure functions with Pydantic validation
+   - Core library that other layers depend on
+
+2. **stats-compass-mcp** (separate package) - JSON/LLM adaptor layer
+   - MCP (Model Context Protocol) server implementation
+   - Converts tool I/O to/from JSON for LLM consumption
+   - Handles DataFrame serialization
+   - **Not part of this repository**
+
+3. **stats-compass-app** (separate package) - SaaS orchestrator
+   - Streamlit or web UI
+   - User workflows and orchestration
+   - Multi-tool pipelines
+   - **Not part of this repository**
+
+**Important:** This repository (`stats-compass-core`) must never import Streamlit, LangChain, MCP, or any UI/orchestration code. It is a pure data tools library.
+
 ## Registry
 
 ### `ToolRegistry`

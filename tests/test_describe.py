@@ -3,7 +3,7 @@
 import pandas as pd
 import pytest
 
-from stats_compass_core.eda.describe import DescribeInput, describe
+from stats_compass_core.eda.describe import DescribeInput, DescribeResult, describe
 
 
 class TestDescribe:
@@ -16,13 +16,14 @@ class TestDescribe:
         params = DescribeInput()
         result = describe(df, params)
 
-        assert isinstance(result, pd.DataFrame)
-        assert "A" in result.columns
-        assert "B" in result.columns
-        assert "mean" in result.index
-        assert "std" in result.index
-        assert result.loc["mean", "A"] == 3.0
-        assert result.loc["mean", "B"] == 30.0
+        assert isinstance(result, DescribeResult)
+        assert isinstance(result.statistics, pd.DataFrame)
+        assert "A" in result.statistics.columns
+        assert "B" in result.statistics.columns
+        assert "mean" in result.statistics.index
+        assert "std" in result.statistics.index
+        assert result.statistics.loc["mean", "A"] == 3.0
+        assert result.statistics.loc["mean", "B"] == 30.0
 
     def test_describe_with_percentiles(self) -> None:
         """Test describe with custom percentiles."""
@@ -31,9 +32,9 @@ class TestDescribe:
         params = DescribeInput(percentiles=[0.1, 0.5, 0.9])
         result = describe(df, params)
 
-        assert "10%" in result.index
-        assert "50%" in result.index
-        assert "90%" in result.index
+        assert "10%" in result.statistics.index
+        assert "50%" in result.statistics.index
+        assert "90%" in result.statistics.index
 
     def test_describe_include_all(self) -> None:
         """Test describe with include='all'."""
@@ -48,9 +49,9 @@ class TestDescribe:
         params = DescribeInput(include="all")
         result = describe(df, params)
 
-        assert "numeric" in result.columns
-        assert "string" in result.columns
-        assert "category" in result.columns
+        assert "numeric" in result.statistics.columns
+        assert "string" in result.statistics.columns
+        assert "category" in result.statistics.columns
 
     def test_describe_include_numeric_only(self) -> None:
         """Test describe with numeric columns only."""
@@ -61,9 +62,9 @@ class TestDescribe:
         params = DescribeInput(include="number")
         result = describe(df, params)
 
-        assert "numeric1" in result.columns
-        assert "numeric2" in result.columns
-        assert "string" not in result.columns
+        assert "numeric1" in result.statistics.columns
+        assert "numeric2" in result.statistics.columns
+        assert "string" not in result.statistics.columns
 
     def test_describe_exclude_numeric(self) -> None:
         """Test describe excluding numeric columns."""
@@ -72,8 +73,8 @@ class TestDescribe:
         params = DescribeInput(exclude="number")
         result = describe(df, params)
 
-        assert "numeric" not in result.columns
-        assert "string" in result.columns
+        assert "numeric" not in result.statistics.columns
+        assert "string" in result.statistics.columns
 
     def test_describe_invalid_percentile(self) -> None:
         """Test error with invalid percentile values."""
@@ -96,7 +97,8 @@ class TestDescribe:
         params = DescribeInput()
         result = describe(df, params)
 
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, DescribeResult)
+        assert isinstance(result.statistics, pd.DataFrame)
 
     def test_describe_with_na_values(self) -> None:
         """Test describe with NA values."""
@@ -105,10 +107,11 @@ class TestDescribe:
         params = DescribeInput()
         result = describe(df, params)
 
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result, DescribeResult)
+        assert isinstance(result.statistics, pd.DataFrame)
         # describe() automatically excludes NA values
-        assert result.loc["count", "A"] == 4.0
-        assert result.loc["count", "B"] == 4.0
+        assert result.statistics.loc["count", "A"] == 4.0
+        assert result.statistics.loc["count", "B"] == 4.0
 
     def test_describe_mixed_types(self) -> None:
         """Test describe with mixed data types."""
@@ -125,7 +128,7 @@ class TestDescribe:
         params = DescribeInput()
         result = describe(df, params)
 
-        assert "int_col" in result.columns
-        assert "float_col" in result.columns
+        assert "int_col" in result.statistics.columns
+        assert "float_col" in result.statistics.columns
         # bool is treated as numeric by pandas
-        assert "str_col" not in result.columns
+        assert "str_col" not in result.statistics.columns

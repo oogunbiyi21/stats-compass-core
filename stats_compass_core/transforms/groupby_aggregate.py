@@ -7,6 +7,23 @@ from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
 
+# Valid aggregation functions supported by this tool
+# This is a deliberately constrained list to ensure deterministic behavior
+# Contributors can expand this list by adding new pandas aggregation functions
+VALID_AGGS = [
+    "sum",
+    "mean",
+    "median",
+    "min",
+    "max",
+    "std",
+    "var",
+    "count",
+    "first",
+    "last",
+    "nunique",
+]
+
 
 class GroupByAggregateInput(BaseModel):
     """Input schema for groupby_aggregate tool."""

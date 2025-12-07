@@ -3,7 +3,7 @@ Tool for generating descriptive statistics of DataFrame columns.
 """
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from stats_compass_core.registry import registry
 
@@ -26,12 +26,20 @@ class DescribeInput(BaseModel):
     )
 
 
+class DescribeResult(BaseModel):
+    """Result of describe operation."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    statistics: pd.DataFrame
+
+
 @registry.register(
     category="eda",
     input_schema=DescribeInput,
     description="Generate descriptive statistics for DataFrame",
 )
-def describe(df: pd.DataFrame, params: DescribeInput) -> pd.DataFrame:
+def describe(df: pd.DataFrame, params: DescribeInput) -> DescribeResult:
     """
     Generate descriptive statistics that summarize the central tendency,
     dispersion and shape of a dataset's distribution.
@@ -41,7 +49,7 @@ def describe(df: pd.DataFrame, params: DescribeInput) -> pd.DataFrame:
         params: Parameters for describe operation
 
     Returns:
-        DataFrame containing descriptive statistics
+        DescribeResult containing DataFrame with descriptive statistics
 
     Raises:
         ValueError: If percentiles are out of range or incompatible types specified
@@ -62,6 +70,7 @@ def describe(df: pd.DataFrame, params: DescribeInput) -> pd.DataFrame:
         kwargs["exclude"] = params.exclude
 
     try:
-        return df.describe(**kwargs)
+        stats_df = df.describe(**kwargs)
+        return DescribeResult(statistics=stats_df)
     except Exception as e:
         raise ValueError(f"Describe operation failed: {str(e)}") from e
