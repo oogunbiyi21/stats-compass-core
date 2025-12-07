@@ -2,25 +2,24 @@
 Tool for creating line plots from DataFrame columns.
 """
 
+import base64
+from io import BytesIO
+from typing import Any
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-
-
-class LineplotResult(BaseModel):
-    """Result of lineplot creation."""
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    figure: object
-    x_column: str | None
-    y_column: str
+from stats_compass_core.state import DataFrameState
+from stats_compass_core.results import ChartResult
 
 
 class LineplotInput(BaseModel):
     """Input schema for lineplot tool."""
 
+    dataframe_name: str | None = Field(
+        default=None, description="Name of DataFrame to plot. Uses active if not specified."
+    )
     x_column: str | None = Field(
         default=None, description="Name of the column for x-axis. If None, uses index"
     )
@@ -34,6 +33,7 @@ class LineplotInput(BaseModel):
     marker: str | None = Field(
         default=None, description="Marker style (e.g., 'o', 's', '^')"
     )
+    dpi: int = Field(default=100, ge=50, le=300, description="Resolution in dots per inch")
 
 
 @registry.register(
@@ -41,18 +41,18 @@ class LineplotInput(BaseModel):
     input_schema=LineplotInput,
     description="Create a line plot from DataFrame columns",
 )
-def lineplot(df: pd.DataFrame, params: LineplotInput) -> LineplotResult:
+def lineplot(state: DataFrameState, params: LineplotInput) -> ChartResult:
     """
     Create a line plot from DataFrame columns.
 
     Note: Requires matplotlib to be installed (install with 'plots' extra).
 
     Args:
-        df: Input DataFrame
+        state: DataFrameState containing the DataFrame to plot
         params: Parameters for line plot creation
 
     Returns:
-        LineplotResult containing the matplotlib figure object
+        ChartResult containing base64-encoded PNG image
 
     Raises:
         ImportError: If matplotlib is not installed
@@ -65,6 +65,9 @@ def lineplot(df: pd.DataFrame, params: LineplotInput) -> LineplotResult:
             "matplotlib is required for plotting tools. "
             "Install with: pip install stats-compass-core[plots]"
         ) from e
+
+    df = state.get_dataframe(params.dataframe_name)
+    source_name = params.dataframe_name or state._active_dataframe
 
     # Validate y column exists
     if params.y_column not in df.columns:
@@ -95,13 +98,37 @@ def lineplot(df: pd.DataFrame, params: LineplotInput) -> LineplotResult:
         ax.plot(x_data, y_data, linewidth=2)
 
     # Set labels and title
+    title = params.title or f"{params.y_column} vs {x_label}"
     ax.set_xlabel(x_label)
     ax.set_ylabel(y_label)
-    ax.set_title(params.title or f"{params.y_column} vs {x_label}")
+    ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
 
-    return LineplotResult(
-        figure=fig, x_column=params.x_column, y_column=params.y_column
+    # Convert figure to base64 PNG
+    buf = BytesIO()
+    fig.savefig(buf, format='png', dpi=params.dpi, bbox_inches='tight')
+    buf.seek(0)
+    image_base64 = base64.b64encode(buf.read()).decode('utf-8')
+    buf.close()
+    plt.close(fig)
+
+    # Collect metadata
+    metadata: dict[str, Any] = {
+        "x_column": params.x_column,
+        "y_column": params.y_column,
+        "data_points": len(df),
+        "marker": params.marker,
+        "figsize": params.figsize,
+        "dpi": params.dpi,
+    }
+
+    return ChartResult(
+        image_base64=image_base64,
+        image_format="png",
+        title=title,
+        chart_type="lineplot",
+        dataframe_name=source_name,
+        metadata=metadata,
     )

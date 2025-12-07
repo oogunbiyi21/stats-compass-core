@@ -1,1 +1,1 @@
-"""Tests for stats-compass-core."""
+# Tests package

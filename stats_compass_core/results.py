@@ -1,0 +1,328 @@
+"""
+Base result models for MCP-compatible tool returns.
+
+All tool results must be JSON-serializable. These Pydantic models
+provide the common return types for different categories of tools.
+"""
+
+from typing import Any
+
+import numpy as np
+import pandas as pd
+from pydantic import BaseModel, Field
+
+
+def dataframe_to_json_safe_records(df: pd.DataFrame, max_rows: int | None = None) -> list[dict[str, Any]]:
+    """
+    Convert a DataFrame to a list of JSON-safe dicts.
+    
+    Handles NaN, NaT, Inf values by converting them to None.
+    Converts numpy types to Python native types.
+    Converts Timestamps to ISO format strings.
+    
+    Args:
+        df: DataFrame to convert
+        max_rows: Optional limit on number of rows to include
+        
+    Returns:
+        List of dicts suitable for JSON serialization
+    """
+    if max_rows is not None and len(df) > max_rows:
+        df = df.head(max_rows)
+    
+    records = df.to_dict(orient="records")
+    
+    # Normalize each record to be JSON-safe
+    safe_records = []
+    for record in records:
+        safe_record = {}
+        for key, value in record.items():
+            safe_record[key] = _normalize_value(value)
+        safe_records.append(safe_record)
+    
+    return safe_records
+
+
+def _normalize_value(value: Any) -> Any:
+    """Convert a single value to JSON-safe format."""
+    # Handle None/NaN/NaT
+    if value is None:
+        return None
+    if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+        return None
+    if pd.isna(value):
+        return None
+    
+    # Handle numpy scalar types
+    if isinstance(value, (np.integer, np.floating)):
+        return value.item()
+    if isinstance(value, np.bool_):
+        return bool(value)
+    if isinstance(value, np.ndarray):
+        return [_normalize_value(v) for v in value.tolist()]
+    
+    # Handle pandas Timestamp/Timedelta
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, pd.Timedelta):
+        return str(value)
+    
+    # Handle datetime types
+    if hasattr(value, 'isoformat'):
+        return value.isoformat()
+    
+    return value
+
+
+class DataFrameMutationResult(BaseModel):
+    """Result for tools that modify a DataFrame (drop_na, dedupe, etc.)."""
+    
+    success: bool = Field(description="Whether the operation succeeded")
+    operation: str = Field(description="Name of the operation performed")
+    rows_before: int = Field(description="Number of rows before the operation")
+    rows_after: int = Field(description="Number of rows after the operation")
+    rows_affected: int = Field(description="Number of rows changed/removed")
+    message: str = Field(description="Human-readable summary of the operation")
+    dataframe_name: str = Field(description="Name of the DataFrame in state")
+    columns_affected: list[str] | None = Field(
+        default=None, 
+        description="Columns that were affected by the operation"
+    )
+
+
+class DataFrameQueryResult(BaseModel):
+    """Result for tools that query/aggregate data without modifying the source."""
+    
+    data: dict[str, Any] = Field(description="Query result data as dict")
+    shape: tuple[int, int] = Field(description="Shape of the result (rows, cols)")
+    columns: list[str] = Field(description="Column names in the result")
+    dataframe_name: str | None = Field(
+        default=None, 
+        description="Name of saved DataFrame if result was stored"
+    )
+    source_dataframe: str = Field(
+        default="active", 
+        description="Name of the source DataFrame"
+    )
+
+
+class DataFrameSchemaResult(BaseModel):
+    """Result for tools that return DataFrame schema/metadata."""
+    
+    dataframe_name: str = Field(description="Name of the DataFrame")
+    shape: tuple[int, int] = Field(description="Shape (rows, cols)")
+    columns: list[dict[str, Any]] = Field(
+        description="Column info: name, dtype, null_count, sample_values"
+    )
+    memory_usage_bytes: int = Field(description="Memory usage in bytes")
+    index_info: dict[str, Any] | None = Field(
+        default=None, 
+        description="Information about the DataFrame index"
+    )
+
+
+class DataFrameSampleResult(BaseModel):
+    """Result for tools that return sample rows."""
+    
+    dataframe_name: str = Field(description="Name of the DataFrame")
+    data: list[dict[str, Any]] = Field(description="Sample rows as list of dicts")
+    total_rows: int = Field(description="Total rows in the DataFrame")
+    sample_size: int = Field(description="Number of rows in this sample")
+    columns: list[str] = Field(description="Column names")
+
+
+class DataFrameLoadResult(BaseModel):
+    """Result for data loading tools."""
+    
+    success: bool = Field(description="Whether the load succeeded")
+    dataframe_name: str = Field(description="Name assigned to the DataFrame")
+    source: str = Field(description="Source path or identifier")
+    shape: tuple[int, int] = Field(description="Shape of loaded data (rows, cols)")
+    columns: list[str] = Field(description="Column names")
+    dtypes: dict[str, str] = Field(description="Column data types")
+    message: str = Field(description="Human-readable summary")
+
+
+class DescribeResult(BaseModel):
+    """Result for descriptive statistics tools."""
+    
+    statistics: dict[str, dict[str, Any]] = Field(
+        description="Statistics per column: count, mean, std, min, max, etc."
+    )
+    dataframe_name: str = Field(description="Name of the analyzed DataFrame")
+    columns_analyzed: list[str] = Field(description="Columns included in analysis")
+    include_types: list[str] | None = Field(
+        default=None, 
+        description="Data types included in analysis"
+    )
+
+
+class CorrelationsResult(BaseModel):
+    """Result for correlation analysis tools."""
+    
+    correlations: dict[str, dict[str, float]] = Field(
+        description="Correlation matrix as nested dict"
+    )
+    method: str = Field(description="Correlation method used (pearson, spearman, etc.)")
+    dataframe_name: str = Field(description="Name of the analyzed DataFrame")
+    columns: list[str] = Field(description="Columns included in correlation")
+    high_correlations: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Pairs with correlation above threshold"
+    )
+
+
+class ChartResult(BaseModel):
+    """Result for visualization tools."""
+    
+    image_base64: str = Field(description="Base64-encoded PNG image")
+    image_format: str = Field(default="png", description="Image format")
+    title: str = Field(description="Chart title")
+    chart_type: str = Field(description="Type of chart (histogram, line, scatter, etc.)")
+    dataframe_name: str = Field(description="Name of the source DataFrame")
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, 
+        description="Additional chart metadata (axes, columns used, etc.)"
+    )
+
+
+class ModelTrainingResult(BaseModel):
+    """Result for ML training tools."""
+    
+    model_id: str = Field(description="Unique identifier for the trained model")
+    model_type: str = Field(
+        description="Type of model (linear_regression, random_forest, etc.)"
+    )
+    target_column: str = Field(description="Target/label column name")
+    feature_columns: list[str] = Field(description="Feature column names")
+    
+    # Training metrics
+    metrics: dict[str, float] = Field(
+        description="Training metrics (r2, mse, accuracy, f1, etc.)"
+    )
+    
+    # Optional detailed info
+    feature_importances: dict[str, float] | None = Field(
+        default=None, 
+        description="Feature importance scores (for tree-based models)"
+    )
+    coefficients: dict[str, float] | None = Field(
+        default=None, 
+        description="Model coefficients (for linear models)"
+    )
+    intercept: float | None = Field(
+        default=None, 
+        description="Model intercept (for linear models)"
+    )
+    
+    # Data info
+    train_size: int = Field(description="Number of training samples")
+    test_size: int | None = Field(
+        default=None, 
+        description="Number of test samples if split was used"
+    )
+    dataframe_name: str = Field(description="Name of the source DataFrame")
+    
+    # Hyperparameters
+    hyperparameters: dict[str, Any] = Field(
+        default_factory=dict, 
+        description="Model hyperparameters used"
+    )
+
+
+class ModelPredictionResult(BaseModel):
+    """Result for model prediction tools."""
+    
+    model_id: str = Field(description="ID of the model used for prediction")
+    predictions: list[Any] = Field(description="Predicted values")
+    prediction_count: int = Field(description="Number of predictions made")
+    dataframe_name: str | None = Field(
+        default=None, 
+        description="Name of DataFrame if predictions were added as column"
+    )
+    prediction_column: str | None = Field(
+        default=None, 
+        description="Name of the prediction column if added"
+    )
+
+
+class HypothesisTestResult(BaseModel):
+    """Result for hypothesis tests (t-test, z-test, etc.)."""
+    
+    test_type: str = Field(description="Type of test performed (t-test, z-test, etc.)")
+    statistic: float = Field(description="Test statistic value")
+    p_value: float = Field(description="P-value for the test")
+    alternative: str = Field(description="Alternative hypothesis (two-sided, less, greater)")
+    n_a: int = Field(description="Sample size for group A")
+    n_b: int = Field(description="Sample size for group B")
+    significant_at_05: bool = Field(description="Whether result is significant at alpha=0.05")
+    significant_at_01: bool = Field(description="Whether result is significant at alpha=0.01")
+    dataframe_name: str = Field(description="Name of the analyzed DataFrame")
+    details: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional test-specific details"
+    )
+
+
+class ClassificationEvaluationResult(BaseModel):
+    """Result for classification model evaluation."""
+    
+    accuracy: float = Field(description="Accuracy score")
+    precision: float = Field(description="Precision score")
+    recall: float = Field(description="Recall score")
+    f1: float = Field(description="F1 score")
+    confusion_matrix: list[list[int]] = Field(description="Confusion matrix as nested list")
+    labels: list[Any] = Field(description="Class labels")
+    n_samples: int = Field(description="Number of samples evaluated")
+    average: str = Field(description="Averaging method used")
+    dataframe_name: str = Field(description="Name of the DataFrame evaluated")
+    target_column: str = Field(description="Name of the target column")
+    prediction_column: str = Field(description="Name of the prediction column")
+
+
+class RegressionEvaluationResult(BaseModel):
+    """Result for regression model evaluation."""
+    
+    rmse: float = Field(description="Root Mean Squared Error")
+    mae: float = Field(description="Mean Absolute Error")
+    r2: float = Field(description="R-squared (coefficient of determination)")
+    n_samples: int = Field(description="Number of samples evaluated")
+    dataframe_name: str = Field(description="Name of the DataFrame evaluated")
+    target_column: str = Field(description="Name of the target column")
+    prediction_column: str = Field(description="Name of the prediction column")
+
+
+class ModelListResult(BaseModel):
+    """Result for listing available models."""
+    
+    models: list[dict[str, Any]] = Field(
+        description="List of available models with metadata"
+    )
+    total_count: int = Field(description="Total number of models")
+
+
+class DataFrameListResult(BaseModel):
+    """Result for listing available DataFrames."""
+    
+    dataframes: list[dict[str, Any]] = Field(
+        description="List of DataFrames with metadata (name, shape, memory)"
+    )
+    active_dataframe: str | None = Field(
+        default=None, 
+        description="Name of the currently active DataFrame"
+    )
+    total_count: int = Field(description="Total number of DataFrames")
+    total_memory_bytes: int = Field(description="Total memory usage")
+
+
+class OperationError(BaseModel):
+    """Result for failed operations."""
+    
+    success: bool = Field(default=False, description="Always False for errors")
+    error_type: str = Field(description="Type of error")
+    error_message: str = Field(description="Human-readable error message")
+    operation: str = Field(description="Operation that failed")
+    details: dict[str, Any] = Field(
+        default_factory=dict, 
+        description="Additional error details"
+    )

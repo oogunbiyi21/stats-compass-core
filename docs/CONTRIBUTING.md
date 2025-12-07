@@ -40,7 +40,7 @@ By participating in this project, you agree to maintain a respectful and inclusi
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.12 or higher
 - Poetry for dependency management
 
 ### Installation
@@ -57,11 +57,22 @@ poetry install --with dev
 poetry shell
 ```
 
+## Architecture Overview
+
+stats-compass-core uses an **MCP-compatible stateful architecture**:
+
+- **DataFrameState**: Server-side state manager that stores DataFrames and trained models
+- **Pydantic Models**: All inputs and outputs are strongly typed
+- **JSON Serialization**: All tool returns are JSON-serializable for protocol transport
+- **Registry Pattern**: Tools are registered by category for discovery
+
+This architecture enables stats-compass-core to work with the Model Context Protocol (MCP) where tools can't receive raw DataFrames or model objects directly.
+
 ## Creating a New Tool
 
 ### Tool Structure
 
-Each tool should follow this structure:
+Each tool must follow this structure:
 
 ```python
 """
@@ -71,12 +82,21 @@ More detailed description if needed.
 """
 import pandas as pd
 from pydantic import BaseModel, Field
+
 from stats_compass_core.registry import registry
+from stats_compass_core.state import DataFrameState
+from stats_compass_core.results import (
+    DataFrameQueryResult,  # or appropriate result type
+)
 
 
 class ToolNameInput(BaseModel):
     """Input schema for tool_name."""
     
+    dataframe_name: str | None = Field(
+        default=None,
+        description="Name of DataFrame. Uses active DataFrame if not specified."
+    )
     param1: str = Field(
         description="Description of what param1 does"
     )
@@ -92,69 +112,126 @@ class ToolNameInput(BaseModel):
     input_schema=ToolNameInput,
     description="Brief description for tool listing"
 )
-def tool_name(df: pd.DataFrame, params: ToolNameInput) -> pd.DataFrame:
+def tool_name(state: DataFrameState, params: ToolNameInput) -> DataFrameQueryResult:
     """
     Detailed description of what the tool does.
     
     Args:
-        df: Input DataFrame
+        state: DataFrameState containing the DataFrames
         params: Tool parameters
     
     Returns:
-        Transformed DataFrame
+        DataFrameQueryResult with operation results
     
     Raises:
-        ValueError: When this error occurs
-        TypeError: When this error occurs
+        ValueError: When parameters are invalid
+        KeyError: When DataFrame not found
     """
+    # Get DataFrame from state
+    df = state.get_dataframe(params.dataframe_name)
+    source_name = params.dataframe_name or state._active_dataframe
+    
     # Validate inputs
-    if some_condition:
-        raise ValueError("Descriptive error message")
+    if params.param1 not in df.columns:
+        raise ValueError(f"Column '{params.param1}' not found in DataFrame")
     
-    # Process data (never modify df in place)
-    result = df.copy()  # or create new DataFrame
-    # ... transformations ...
+    # Process data
+    result = do_something(df, params.param1)
     
-    return result
+    # Return JSON-serializable result
+    return DataFrameQueryResult(
+        data={"result_key": result},
+        row_count=len(df),
+        dataframe_name=source_name,
+    )
 ```
 
 ### Design Principles
 
-1. **Pure Functions**
-   - No side effects
-   - Don't modify input DataFrames
-   - Always return new objects
-   - Deterministic behavior
+1. **Stateful Pattern**
+   - Always accept `state: DataFrameState` as first parameter
+   - Always accept `params: InputSchema` as second parameter
+   - Never modify state unless the tool is meant to (like `load_csv`)
+   - Use `state.get_dataframe()` to access DataFrames
 
-2. **Type Safety**
+2. **JSON-Serializable Returns**
+   - All returns must be Pydantic models
+   - Use existing result types from `results.py` when possible
+   - Charts return base64-encoded PNGs in `ChartResult`
+   - Never return raw DataFrames, numpy arrays, or model objects
+
+3. **Type Safety**
    - Use complete type hints
-   - Define Pydantic schemas for inputs
-   - Use Python 3.11+ type syntax (`list[str]` not `List[str]`)
+   - Define Pydantic schemas for all inputs
+   - Use Python 3.12+ type syntax (`list[str]` not `List[str]`)
 
-3. **Validation**
-   - Validate all inputs with Pydantic
-   - Check DataFrame columns exist
-   - Validate data types
+4. **Validation**
+   - Validate all inputs with Pydantic Field constraints
+   - Check DataFrame columns exist before using them
+   - Validate data types are compatible
    - Raise descriptive exceptions
 
-4. **Documentation**
+5. **Documentation**
    - Comprehensive docstrings
    - Document all parameters
    - Document return values
    - Document all possible exceptions
 
-5. **Error Handling**
+6. **Error Handling**
    - Raise typed exceptions (ValueError, TypeError, KeyError)
    - Provide clear, actionable error messages
    - Never swallow exceptions
 
+### Result Types
+
+Choose the appropriate result type for your tool:
+
+| Result Type | Use Case |
+|-------------|----------|
+| `DataFrameInfo` | When returning info about a stored DataFrame |
+| `DataFrameQueryResult` | For read operations returning data/stats |
+| `DataFrameMutationResult` | For operations that modify a DataFrame |
+| `ChartResult` | For visualization tools |
+| `ModelTrainingResult` | For ML training tools |
+| `HypothesisTestResult` | For statistical tests |
+| `ClassificationEvaluationResult` | For classification model evaluation |
+| `RegressionEvaluationResult` | For regression model evaluation |
+
+If none fit, add a new result type to `stats_compass_core/results.py`.
+
 ### Tool Categories
 
-- **cleaning/**: Data cleaning operations (removing NA, deduplication, etc.)
-- **transforms/**: Data transformations (grouping, pivoting, reshaping)
-- **eda/**: Exploratory data analysis (statistics, correlations, distributions)
+- **data/**: Data loading and inspection (CSV loading, schema inspection)
+- **cleaning/**: Data cleaning operations (removing NA, deduplication, imputation)
+- **transforms/**: Data transformations (grouping, pivoting, filtering)
+- **eda/**: Exploratory data analysis (statistics, correlations, hypothesis tests)
 - **ml/**: Machine learning operations (training, prediction, evaluation)
-- **plots/**: Visualization tools (charts, graphs, plots)
+- **plots/**: Visualization tools (histograms, scatter plots, line charts)
+
+### Adding a Result Model
+
+If you need a new result type:
+
+```python
+# In stats_compass_core/results.py
+
+class NewToolResult(BaseModel):
+    """Result from new_tool operation."""
+    
+    primary_output: float = Field(description="Main result value")
+    secondary_data: dict[str, Any] = Field(description="Additional data")
+    dataframe_name: str = Field(description="Source DataFrame name")
+    
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "primary_output": 0.95,
+                "secondary_data": {"key": "value"},
+                "dataframe_name": "my_data",
+            }
+        }
+    )
+```
 
 ## Testing
 
@@ -165,38 +242,62 @@ Create a test file in `tests/` matching your tool:
 ```python
 import pandas as pd
 import pytest
+
+from stats_compass_core.state import DataFrameState
 from stats_compass_core.category.tool_name import tool_name, ToolNameInput
 
 
 class TestToolName:
     """Test suite for tool_name."""
     
-    def test_basic_functionality(self):
+    @pytest.fixture
+    def state_with_data(self):
+        """Create DataFrameState with test data."""
+        state = DataFrameState()
+        df = pd.DataFrame({
+            'A': [1, 2, 3, 4, 5],
+            'B': [10, 20, 30, 40, 50],
+            'category': ['x', 'y', 'x', 'y', 'x'],
+        })
+        state.set_dataframe("test_data", df)
+        return state
+    
+    def test_basic_functionality(self, state_with_data):
         """Test basic tool operation."""
-        df = pd.DataFrame({'A': [1, 2, 3], 'B': [4, 5, 6]})
-        params = ToolNameInput(param1='value')
+        params = ToolNameInput(param1='A')
         
-        result = tool_name(df, params)
+        result = tool_name(state_with_data, params)
         
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 3
-        # More specific assertions
+        assert result.dataframe_name == "test_data"
+        assert result.row_count == 5
     
-    def test_input_validation(self):
-        """Test that invalid inputs raise errors."""
-        df = pd.DataFrame({'A': [1, 2, 3]})
+    def test_explicit_dataframe_name(self, state_with_data):
+        """Test specifying dataframe_name explicitly."""
+        params = ToolNameInput(
+            dataframe_name="test_data",
+            param1='B'
+        )
         
-        with pytest.raises(ValueError, match="expected error message"):
-            params = ToolNameInput(param1='invalid')
-            tool_name(df, params)
+        result = tool_name(state_with_data, params)
+        
+        assert result.dataframe_name == "test_data"
     
-    def test_edge_cases(self):
-        """Test edge cases."""
-        # Empty DataFrame
-        df = pd.DataFrame()
-        # DataFrame with one row
-        # DataFrame with special values (inf, -inf, etc.)
-        # etc.
+    def test_column_not_found(self, state_with_data):
+        """Test error when column doesn't exist."""
+        params = ToolNameInput(param1='nonexistent')
+        
+        with pytest.raises(ValueError, match="not found"):
+            tool_name(state_with_data, params)
+    
+    def test_result_is_json_serializable(self, state_with_data):
+        """Test that result can be JSON serialized."""
+        params = ToolNameInput(param1='A')
+        
+        result = tool_name(state_with_data, params)
+        
+        # Should not raise
+        json_str = result.model_dump_json()
+        assert isinstance(json_str, str)
 ```
 
 ### Running Tests
@@ -213,6 +314,9 @@ poetry run pytest tests/test_tool_name.py
 
 # Run specific test
 poetry run pytest tests/test_tool_name.py::TestToolName::test_basic_functionality
+
+# Run with verbose output
+poetry run pytest -v
 ```
 
 ## Code Quality
@@ -271,26 +375,30 @@ Before committing:
 We use Google-style docstrings:
 
 ```python
-def function(param1: str, param2: int) -> bool:
+def function(state: DataFrameState, params: FunctionInput) -> FunctionResult:
     """
     Brief description of function.
     
     More detailed description if needed.
     
     Args:
-        param1: Description of param1
-        param2: Description of param2
+        state: DataFrameState containing the DataFrames
+        params: Function parameters
     
     Returns:
-        Description of return value
+        FunctionResult with computed values
     
     Raises:
-        ValueError: When this happens
-        TypeError: When this happens
+        ValueError: When parameters are invalid
+        KeyError: When DataFrame not found
     
     Examples:
-        >>> function("test", 10)
-        True
+        >>> state = DataFrameState()
+        >>> state.set_dataframe("data", pd.DataFrame({'A': [1,2,3]}))
+        >>> params = FunctionInput(column='A')
+        >>> result = function(state, params)
+        >>> result.value
+        2.0
     """
 ```
 
@@ -298,9 +406,9 @@ def function(param1: str, param2: int) -> bool:
 
 When adding a tool:
 
-1. Update README.md with tool description
-2. Add entry to docs/API.md
-3. Include usage examples
+1. Update README.md with tool description in the appropriate category
+2. Add entry to docs/API.md with input schema and result type
+3. Include usage examples in docs/EXAMPLES.md
 4. Update any relevant guides
 
 ## Commit Messages
@@ -310,8 +418,9 @@ Use clear, descriptive commit messages:
 ```
 Add histogram tool for data visualization
 
-- Implement histogram function with matplotlib
+- Implement histogram function with DataFrameState
 - Add HistogramInput schema for validation
+- Return ChartResult with base64 PNG
 - Include tests for basic functionality and edge cases
 - Update API documentation
 ```
@@ -343,15 +452,71 @@ Format:
    - Squash commits if requested
    - Maintainer will merge
 
-## Release Process
+## Common Patterns
 
-(For maintainers)
+### Tool That Creates New DataFrame
 
-1. Update version in `pyproject.toml`
-2. Update CHANGELOG.md
-3. Create git tag
-4. Build package: `poetry build`
-5. Publish to PyPI: `poetry publish`
+```python
+@registry.register(...)
+def transform_tool(state: DataFrameState, params: TransformInput) -> DataFrameQueryResult:
+    df = state.get_dataframe(params.dataframe_name)
+    source_name = params.dataframe_name or state._active_dataframe
+    
+    # Create new DataFrame
+    result_df = df.copy()
+    # ... transformations ...
+    
+    # Save to state with new name (set_dataframe returns the name string)
+    output_name = params.output_name or f"{source_name}_transformed"
+    stored_name = state.set_dataframe(result_df, name=output_name, operation="transform")
+    
+    return DataFrameQueryResult(
+        data={"created": output_name},
+        row_count=len(result_df),
+        dataframe_name=stored_name,
+    )
+```
+
+### Tool That Stores a Model
+
+```python
+@registry.register(...)
+def train_tool(state: DataFrameState, params: TrainInput) -> ModelTrainingResult:
+    df = state.get_dataframe(params.dataframe_name)
+    source_name = params.dataframe_name or state._active_dataframe
+    
+    # Train model
+    model = SomeModel()
+    model.fit(X, y)
+    
+    # Store in state
+    model_id = state.store_model(model, source_name, "model_type")
+    
+    return ModelTrainingResult(
+        model_id=model_id,
+        model_type="SomeModel",
+        # ... other metrics ...
+    )
+```
+
+### Tool That Uses a Stored Model
+
+```python
+@registry.register(...)
+def evaluate_tool(state: DataFrameState, params: EvaluateInput) -> EvaluationResult:
+    # Get model from state
+    model = state.get_model(params.model_id)
+    if model is None:
+        raise ValueError(f"Model '{params.model_id}' not found")
+    
+    # Get data
+    df = state.get_dataframe(params.dataframe_name)
+    
+    # Use model
+    predictions = model.predict(X)
+    
+    return EvaluationResult(...)
+```
 
 ## Questions?
 

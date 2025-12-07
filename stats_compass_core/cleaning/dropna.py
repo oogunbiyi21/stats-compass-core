@@ -2,15 +2,19 @@
 Tool for dropping rows or columns with missing values from a DataFrame.
 """
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
+from stats_compass_core.state import DataFrameState
+from stats_compass_core.results import DataFrameMutationResult
 
 
 class DropNAInput(BaseModel):
     """Input schema for drop_na tool."""
 
+    dataframe_name: str | None = Field(
+        default=None, description="Name of DataFrame to operate on. Uses active if not specified."
+    )
     axis: int = Field(default=0, ge=0, le=1, description="0 for rows, 1 for columns")
     how: str = Field(default="any", pattern="^(any|all)$", description="'any' or 'all'")
     thresh: int | None = Field(
@@ -26,20 +30,25 @@ class DropNAInput(BaseModel):
     input_schema=DropNAInput,
     description="Drop rows or columns with missing values",
 )
-def drop_na(df: pd.DataFrame, params: DropNAInput) -> pd.DataFrame:
+def drop_na(state: DataFrameState, params: DropNAInput) -> DataFrameMutationResult:
     """
     Drop rows or columns with missing values from a DataFrame.
 
     Args:
-        df: Input DataFrame
+        state: DataFrameState containing the DataFrame to operate on
         params: Parameters for dropping NA values
 
     Returns:
-        New DataFrame with NA values removed
+        DataFrameMutationResult with operation summary
 
     Raises:
         ValueError: If subset columns don't exist in DataFrame
     """
+    df = state.get_dataframe(params.dataframe_name)
+    source_name = params.dataframe_name or state._active_dataframe
+    rows_before = len(df)
+    cols_before = len(df.columns)
+    
     if params.subset:
         missing_cols = set(params.subset) - set(df.columns)
         if missing_cols:
@@ -52,4 +61,31 @@ def drop_na(df: pd.DataFrame, params: DropNAInput) -> pd.DataFrame:
     else:
         kwargs["how"] = params.how
 
-    return df.dropna(**kwargs)
+    result_df = df.dropna(**kwargs)
+    
+    # Update the DataFrame in state (in-place modification)
+    stored_name = state.set_dataframe(result_df, name=source_name, operation="drop_na")
+    
+    rows_after = len(result_df)
+    cols_after = len(result_df.columns)
+    
+    # Determine what was affected
+    if params.axis == 0:
+        rows_affected = rows_before - rows_after
+        message = f"Dropped {rows_affected} rows with missing values"
+        columns_affected = params.subset
+    else:
+        rows_affected = cols_before - cols_after
+        message = f"Dropped {rows_affected} columns with missing values"
+        columns_affected = list(set(df.columns) - set(result_df.columns))
+    
+    return DataFrameMutationResult(
+        success=True,
+        operation="drop_na",
+        rows_before=rows_before,
+        rows_after=rows_after,
+        rows_affected=rows_affected,
+        message=message,
+        dataframe_name=stored_name,
+        columns_affected=columns_affected,
+    )

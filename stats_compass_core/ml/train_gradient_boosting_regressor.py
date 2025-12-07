@@ -2,17 +2,20 @@
 Tool for training a gradient boosting regressor.
 """
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
-from stats_compass_core.ml.common import TrainedModelResult
-
+from stats_compass_core.ml.common import prepare_ml_data, create_training_result
+from stats_compass_core.state import DataFrameState
+from stats_compass_core.results import ModelTrainingResult
 from stats_compass_core.registry import registry
 
 
 class TrainGradientBoostingRegressorInput(BaseModel):
     """Input schema for train_gradient_boosting_regressor tool."""
 
+    dataframe_name: str | None = Field(
+        default=None, description="Name of DataFrame to train on. Uses active if not specified."
+    )
     target_column: str = Field(description="Name of the target column to predict")
     feature_columns: list[str] | None = Field(
         default=None,
@@ -27,6 +30,12 @@ class TrainGradientBoostingRegressorInput(BaseModel):
     random_state: int | None = Field(
         default=42, description="Random seed for reproducibility"
     )
+    n_estimators: int = Field(
+        default=100, ge=1, description="Number of boosting stages"
+    )
+    learning_rate: float = Field(
+        default=0.1, gt=0.0, le=1.0, description="Learning rate shrinks contribution of each tree"
+    )
 
 
 @registry.register(
@@ -35,50 +44,28 @@ class TrainGradientBoostingRegressorInput(BaseModel):
     description="Train a gradient boosting regressor",
 )
 def train_gradient_boosting_regressor(
-    df: pd.DataFrame, params: TrainGradientBoostingRegressorInput
-) -> TrainedModelResult:
+    state: DataFrameState, params: TrainGradientBoostingRegressorInput
+) -> ModelTrainingResult:
     """
     Train a gradient boosting regressor on DataFrame data.
 
     Note: Requires scikit-learn to be installed (install with 'ml' extra).
 
     Args:
-        df: Input DataFrame with features and target
+        state: DataFrameState containing the DataFrame to train on
         params: Parameters for model training
 
     Returns:
-        TrainedModelResult containing trained model and metadata
+        ModelTrainingResult with model stored in state and metrics
 
     Raises:
         ImportError: If scikit-learn is not installed
         ValueError: If target or feature columns don't exist or data is insufficient
     """
-    # Validate target column
-    if params.target_column not in df.columns:
-        raise ValueError(
-            f"Target column '{params.target_column}' not found in DataFrame"
-        )
-
-    # Determine feature columns
-    if params.feature_columns:
-        feature_cols = params.feature_columns
-        missing_cols = set(feature_cols) - set(df.columns)
-        if missing_cols:
-            raise ValueError(f"Feature columns not found: {missing_cols}")
-    else:
-        # Use all numeric columns except target
-        numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-        feature_cols = [col for col in numeric_cols if col != params.target_column]
-        if not feature_cols:
-            raise ValueError("No numeric feature columns available")
-
     # Prepare data
-    X = df[feature_cols]
-    y = df[params.target_column]
-
-    # Check for sufficient data
-    if len(df) < 2:
-        raise ValueError("Insufficient data: need at least 2 samples")
+    X, y, feature_cols, source_name = prepare_ml_data(
+        state, params.target_column, params.feature_columns, params.dataframe_name
+    )
 
     # Train model
     try:
@@ -89,20 +76,36 @@ def train_gradient_boosting_regressor(
             X, y, test_size=params.test_size, random_state=params.random_state
         )
 
-        model = GradientBoostingRegressor(random_state=params.random_state)
+        model = GradientBoostingRegressor(
+            n_estimators=params.n_estimators,
+            learning_rate=params.learning_rate,
+            random_state=params.random_state
+        )
         model.fit(X_train, y_train)
         train_score = model.score(X_train, y_train)
-        n_samples = len(X_train)
+        test_score = model.score(X_test, y_test) if len(X_test) > 0 else None
+        
     except ImportError as e:
         raise ImportError(
             "scikit-learn is required for ML tools. "
             "Install with: pip install stats-compass-core[ml]"
         ) from e
 
-    return TrainedModelResult(
+    return create_training_result(
+        state=state,
         model=model,
-        feature_columns=feature_cols,
+        model_type="gradient_boosting_regressor",
         target_column=params.target_column,
+        feature_cols=feature_cols,
         train_score=train_score,
-        n_samples=n_samples,
+        test_score=test_score,
+        train_size=len(X_train),
+        test_size=len(X_test) if params.test_size > 0 else None,
+        source_name=source_name,
+        hyperparameters={
+            "test_size": params.test_size, 
+            "random_state": params.random_state,
+            "n_estimators": params.n_estimators,
+            "learning_rate": params.learning_rate,
+        },
     )

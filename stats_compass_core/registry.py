@@ -27,7 +27,7 @@ class ToolRegistry:
 
     def __init__(self) -> None:
         self._tools: dict[str, ToolMetadata] = {}
-        self._categories = ["cleaning", "transforms", "eda", "ml", "plots"]
+        self._categories = ["data", "cleaning", "transforms", "eda", "ml", "plots"]
 
     def register(
         self,
@@ -40,7 +40,7 @@ class ToolRegistry:
         Decorator to register a tool function.
 
         Args:
-            category: Tool category (cleaning, transforms, eda, ml, plots)
+            category: Tool category (data, cleaning, transforms, eda, ml, plots)
             name: Optional tool name (defaults to function name)
             input_schema: Optional Pydantic schema for input validation
             description: Optional tool description
@@ -70,6 +70,61 @@ class ToolRegistry:
         key = f"{category}.{name}"
         metadata = self._tools.get(key)
         return metadata.function if metadata else None
+    
+    def get_tool_metadata(self, category: str, name: str) -> ToolMetadata | None:
+        """Get metadata for a specific tool by category and name."""
+        key = f"{category}.{name}"
+        return self._tools.get(key)
+
+    def invoke(
+        self, 
+        category: str, 
+        name: str, 
+        state: Any, 
+        params: dict[str, Any] | BaseModel
+    ) -> Any:
+        """
+        Invoke a tool with the given state and parameters.
+        
+        This is the primary way to call tools from an MCP server or other
+        integrations. It handles:
+        - Looking up the tool by category/name
+        - Validating parameters against the input schema
+        - Injecting the state as the first argument
+        
+        Args:
+            category: Tool category
+            name: Tool name
+            state: DataFrameState instance to inject
+            params: Tool parameters (dict or Pydantic model)
+        
+        Returns:
+            Tool result (JSON-serializable Pydantic model)
+        
+        Raises:
+            ValueError: If tool not found
+            ValidationError: If params don't match schema
+        """
+        metadata = self.get_tool_metadata(category, name)
+        if metadata is None:
+            raise ValueError(f"Tool not found: {category}.{name}")
+        
+        # Validate and convert params if needed
+        if metadata.input_schema:
+            if isinstance(params, dict):
+                validated_params = metadata.input_schema(**params)
+            elif isinstance(params, metadata.input_schema):
+                validated_params = params
+            else:
+                raise TypeError(
+                    f"Expected dict or {metadata.input_schema.__name__}, "
+                    f"got {type(params).__name__}"
+                )
+        else:
+            validated_params = params
+        
+        # Call the tool with state injected
+        return metadata.function(state, validated_params)
 
     def list_tools(self, category: str | None = None) -> list[ToolMetadata]:
         """
@@ -86,6 +141,25 @@ class ToolRegistry:
                 meta for key, meta in self._tools.items() if meta.category == category
             ]
         return list(self._tools.values())
+    
+    def get_tool_schemas(self) -> dict[str, dict[str, Any]]:
+        """
+        Get JSON schemas for all tools (useful for MCP tool definitions).
+        
+        Returns:
+            Dict mapping tool names to their schemas
+        """
+        schemas: dict[str, dict[str, Any]] = {}
+        for key, metadata in self._tools.items():
+            tool_schema: dict[str, Any] = {
+                "name": metadata.name,
+                "category": metadata.category,
+                "description": metadata.description,
+            }
+            if metadata.input_schema:
+                tool_schema["input_schema"] = metadata.input_schema.model_json_schema()
+            schemas[key] = tool_schema
+        return schemas
 
     def get_categories(self) -> list[str]:
         """Get list of available categories."""

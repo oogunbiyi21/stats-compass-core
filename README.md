@@ -1,19 +1,65 @@
 # stats-compass-core
 
-A clean, production-ready toolkit of deterministic pandas-based data tools.
+A stateful, MCP-compatible toolkit of pandas-based data tools for AI-powered data analysis.
 
 ## Overview
 
-**stats-compass-core** is a lightweight Python package that provides a curated collection of atomic, side-effect-free tools for working with tabular data. Each tool is a pure function that operates on pandas DataFrames and returns typed results.
+**stats-compass-core** is a Python package that provides a curated collection of data tools designed for use with LLM agents via the Model Context Protocol (MCP). Unlike traditional pandas libraries, this package manages server-side state, allowing AI agents to work with DataFrames across multiple tool invocations without passing raw data over the wire.
 
 ### Key Features
 
-- 🧹 **Clean Architecture**: Organized into logical categories (cleaning, transforms, eda, ml, plots)
+- 🔄 **Stateful Design**: Server-side `DataFrameState` manages multiple DataFrames and trained models
+- 📦 **MCP-Compatible**: All tools return JSON-serializable Pydantic models
+- 🧹 **Clean Architecture**: Organized into logical categories (data, cleaning, transforms, eda, ml, plots)
 - 🔒 **Type-Safe**: Complete type hints with Pydantic schemas for input validation
-- 🎯 **Deterministic**: Pure functions with no side effects
-- 📦 **Lightweight**: Minimal dependencies (pandas, pydantic, numpy)
-- 🔌 **Extensible**: Auto-discovering registry for easy tool addition
-- 📝 **Well-Documented**: Comprehensive docstrings and usage examples
+- 🎯 **Memory-Managed**: Configurable memory limits prevent runaway state growth
+- 📊 **Base64 Charts**: Visualization tools return PNG images as base64 strings
+- 🤖 **Model Storage**: Trained ML models stored by ID for later use
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     stats-compass-core                          │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                   DataFrameState                         │   │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐      │   │
+│  │  │ DataFrames  │  │   Models    │  │   History   │      │   │
+│  │  │ (by name)   │  │  (by ID)    │  │  (lineage)  │      │   │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                              │                                  │
+│              ┌───────────────┼───────────────┐                  │
+│              ▼               ▼               ▼                  │
+│  ┌─────────────────┐ ┌─────────────┐ ┌─────────────────┐       │
+│  │   Tool (state,  │ │   Tool...   │ │   Tool...       │       │
+│  │     params)     │ │             │ │                 │       │
+│  └────────┬────────┘ └─────────────┘ └─────────────────┘       │
+│           │                                                     │
+│           ▼                                                     │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Pydantic Result Model                       │   │
+│  │              (JSON-serializable)                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Three-Layer Stack
+
+1. **stats-compass-core** (this package) - Stateful Python tools
+   - Manages DataFrames and models server-side
+   - Returns JSON-serializable Pydantic results
+   - Pure data operations, no UI or orchestration
+
+2. **stats-compass-mcp** (separate package) - MCP Server
+   - Exposes tools via Model Context Protocol
+   - Handles JSON transport to/from LLM agents
+   - **Not part of this repository**
+
+3. **stats-compass-app** (separate package) - SaaS Application
+   - Web UI for human interaction
+   - Multi-tool pipelines and workflows
+   - **Not part of this repository**
 
 ## Installation
 
@@ -23,385 +69,392 @@ A clean, production-ready toolkit of deterministic pandas-based data tools.
 pip install stats-compass-core
 ```
 
-### With Optional Dependencies
-
-For machine learning tools:
-```bash
-pip install stats-compass-core[ml]
-```
-
-For plotting tools:
-```bash
-pip install stats-compass-core[plots]
-```
-
-For all optional features:
-```bash
-pip install stats-compass-core[all]
-```
+All dependencies (pandas, numpy, scipy, scikit-learn, matplotlib, seaborn, pydantic) are installed automatically. There are no optional extras—the full feature set is always available.
 
 ### For Development
 
 ```bash
 git clone https://github.com/oogunbiyi21/stats-compass-core.git
 cd stats-compass-core
-poetry install
+poetry install --with dev
 ```
 
 ## Quick Start
 
+### Basic Usage Pattern
+
+All tools follow the same pattern:
+1. Create a `DataFrameState` instance (once per session)
+2. Load data into state
+3. Call tools with `(state, params)` signature
+4. Tools return JSON-serializable result objects
+
 ```python
 import pandas as pd
-from stats_compass_core import registry
-from stats_compass_core.cleaning.dropna import drop_na, DropNAInput
-from stats_compass_core.eda.describe import describe, DescribeInput
+from stats_compass_core import DataFrameState, registry
 
-# Create sample data
-df = pd.DataFrame({
-    'A': [1, 2, None, 4],
-    'B': [5, None, 7, 8],
-    'C': [9, 10, 11, 12]
+# 1. Create state manager (one per session)
+state = DataFrameState(memory_limit_mb=500)
+
+# 2. Load data into state
+df = pd.read_csv("sales_data.csv")
+state.set_dataframe(df, name="sales", operation="load_csv")
+
+# 3. Call tools via registry
+result = registry.invoke("eda", "describe", state, {})
+print(result.model_dump_json())  # JSON-serializable output
+
+# 4. Chain operations
+result = registry.invoke("transforms", "groupby_aggregate", state, {
+    "by": ["region"],
+    "agg_func": {"revenue": "sum", "quantity": "mean"}
 })
-
-# Use cleaning tool
-params = DropNAInput(axis=0, how='any')
-clean_df = drop_na(df, params)
-
-# Use EDA tool
-desc_params = DescribeInput(percentiles=[0.25, 0.5, 0.75])
-stats = describe(clean_df, desc_params)
-print(stats)
+# Result DataFrame saved to state automatically
+print(f"New DataFrame: {result.dataframe_name}")
 ```
 
-## Available Tools
+### Direct Tool Usage
 
-### Cleaning Tools (`stats_compass_core.cleaning`)
-
-- **drop_na**: Remove rows or columns with missing values
-- **dedupe**: Remove duplicate rows
-
-### Transform Tools (`stats_compass_core.transforms`)
-
-- **groupby_aggregate**: Group data and apply aggregation functions
-- **pivot**: Reshape data from long to wide format
-
-### EDA Tools (`stats_compass_core.eda`)
-
-- **describe**: Generate descriptive statistics
-- **correlations**: Compute pairwise correlations
-
-### ML Tools (`stats_compass_core.ml`) *[requires ml extra]*
-
-- **train_classifier**: Train classification models (logistic regression, random forest, gradient boosting)
-- **train_regressor**: Train regression models (linear regression, random forest, gradient boosting)
-
-### Plotting Tools (`stats_compass_core.plots`) *[requires plots extra]*
-
-- **histogram**: Create histogram visualizations
-- **lineplot**: Create line plot visualizations
-
-## Usage Examples
-
-### Data Cleaning
+You can also import and call tools directly:
 
 ```python
-from stats_compass_core.cleaning.dedupe import dedupe, DedupeInput
+from stats_compass_core import DataFrameState
+from stats_compass_core.eda.describe import describe, DescribeInput
+from stats_compass_core.cleaning.dropna import drop_na, DropNAInput
 
-# Remove duplicates
-params = DedupeInput(
-    subset=['column1', 'column2'],
-    keep='first',
-    ignore_index=True
-)
-deduplicated_df = dedupe(df, params)
+# Create state and load data
+state = DataFrameState()
+state.set_dataframe(my_dataframe, name="data", operation="manual")
+
+# Call tool with typed params
+params = DescribeInput(percentiles=[0.25, 0.5, 0.75])
+result = describe(state, params)
+
+# Result is a Pydantic model
+print(result.statistics)  # dict of column stats
+print(result.dataframe_name)  # "data"
 ```
 
-### Data Transformation
+## Core Concepts
+
+### DataFrameState
+
+The `DataFrameState` class manages all server-side data:
 
 ```python
-from stats_compass_core.transforms.groupby_aggregate import (
-    groupby_aggregate,
-    GroupByAggregateInput
+from stats_compass_core import DataFrameState
+
+state = DataFrameState(memory_limit_mb=500)
+
+# Store DataFrames (multiple allowed)
+state.set_dataframe(df1, name="raw_data", operation="load_csv")
+state.set_dataframe(df2, name="cleaned", operation="drop_na")
+
+# Retrieve DataFrames
+df = state.get_dataframe("raw_data")
+df = state.get_dataframe()  # Gets active DataFrame
+
+# Check what's stored
+print(state._dataframes.keys())  # ['raw_data', 'cleaned']
+print(state._active_dataframe)   # 'cleaned' (most recent)
+
+# Store trained models
+model_id = state.store_model(
+    model=trained_model,
+    model_type="random_forest_classifier", 
+    target_column="churn",
+    feature_columns=["age", "tenure", "balance"],
+    source_dataframe="training_data"
 )
 
-# Group and aggregate
-params = GroupByAggregateInput(
-    by=['category'],
-    agg_func={'sales': 'sum', 'quantity': 'mean'},
-    as_index=False
-)
-aggregated_df = groupby_aggregate(df, params)
+# Retrieve models
+model = state.get_model(model_id)
+info = state.get_model_info(model_id)
 ```
 
-### Exploratory Data Analysis
+### Result Types
 
-```python
-from stats_compass_core.eda.correlations import correlations, CorrelationsInput
+All tools return Pydantic models that serialize to JSON:
 
-# Compute correlations
-params = CorrelationsInput(
-    method='pearson',
-    numeric_only=True
-)
-corr_matrix = correlations(df, params)
-```
+| Result Type | Used By | Key Fields |
+|-------------|---------|------------|
+| `DataFrameLoadResult` | data loading tools | `dataframe_name`, `shape`, `columns` |
+| `DataFrameMutationResult` | cleaning tools | `rows_before`, `rows_after`, `rows_affected` |
+| `DataFrameQueryResult` | transform tools | `data`, `shape`, `dataframe_name` |
+| `DescribeResult` | describe | `statistics`, `columns_analyzed` |
+| `CorrelationsResult` | correlations | `correlations`, `method` |
+| `ChartResult` | all plot tools | `image_base64`, `chart_type` |
+| `ModelTrainingResult` | ML training | `model_id`, `metrics`, `feature_columns` |
+| `HypothesisTestResult` | statistical tests | `statistic`, `p_value`, `significant_at_05` |
 
-### Machine Learning
+### Registry
 
-```python
-from stats_compass_core.ml.train_classifier import (
-    train_classifier,
-    TrainClassifierInput
-)
-
-# Train a classifier
-params = TrainClassifierInput(
-    target_column='label',
-    feature_columns=['feature1', 'feature2', 'feature3'],
-    model_type='random_forest',
-    test_size=0.2,
-    random_state=42
-)
-result = train_classifier(df, params)
-print(f"Training score: {result.train_score:.3f}")
-```
-
-### Plotting
-
-```python
-from stats_compass_core.plots.histogram import histogram, HistogramInput
-
-# Create histogram
-params = HistogramInput(
-    column='sales',
-    bins=20,
-    title='Sales Distribution',
-    figsize=(12, 6)
-)
-result = histogram(df, params)
-result.figure.savefig('histogram.png')
-```
-
-## Tool Registry
-
-The package includes a registry that automatically discovers and manages all tools:
+The registry provides tool discovery and invocation:
 
 ```python
 from stats_compass_core import registry
 
 # List all tools
-all_tools = registry.list_tools()
-for tool in all_tools:
-    print(f"{tool.category}.{tool.name}: {tool.description}")
+for key, metadata in registry._tools.items():
+    print(f"{key}: {metadata.description}")
 
-# List tools by category
-cleaning_tools = registry.list_tools(category='cleaning')
+# Invoke a tool (handles param validation)
+result = registry.invoke(
+    category="cleaning",
+    tool_name="drop_na",
+    state=state,
+    params={"how": "any", "axis": 0}
+)
+```
 
-# Get a specific tool
-tool_func = registry.get_tool('cleaning', 'drop_na')
+## Available Tools
+
+### Data Tools (`stats_compass_core.data`)
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `load_csv` | Load CSV file into state | `DataFrameLoadResult` |
+| `get_schema` | Get DataFrame column types and stats | `SchemaResult` |
+| `get_sample` | Get sample rows from DataFrame | `SampleResult` |
+| `list_dataframes` | List all DataFrames in state | `DataFrameListResult` |
+
+### Cleaning Tools (`stats_compass_core.cleaning`)
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `drop_na` | Remove rows/columns with missing values | `DataFrameMutationResult` |
+| `dedupe` | Remove duplicate rows | `DataFrameMutationResult` |
+| `apply_imputation` | Fill missing values (mean/median/mode/constant) | `DataFrameMutationResult` |
+
+### Transform Tools (`stats_compass_core.transforms`)
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `groupby_aggregate` | Group and aggregate data | `DataFrameQueryResult` |
+| `pivot` | Reshape long to wide format | `DataFrameQueryResult` |
+| `filter_dataframe` | Filter with pandas query syntax | `DataFrameQueryResult` |
+
+### EDA Tools (`stats_compass_core.eda`)
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `describe` | Descriptive statistics | `DescribeResult` |
+| `correlations` | Correlation matrix | `CorrelationsResult` |
+| `t_test` | Two-sample t-test | `HypothesisTestResult` |
+| `z_test` | Two-sample z-test | `HypothesisTestResult` |
+
+### ML Tools (`stats_compass_core.ml`) *[requires ml extra]*
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `train_linear_regression` | Train linear regression | `ModelTrainingResult` |
+| `train_logistic_regression` | Train logistic regression | `ModelTrainingResult` |
+| `train_random_forest_classifier` | Train RF classifier | `ModelTrainingResult` |
+| `train_random_forest_regressor` | Train RF regressor | `ModelTrainingResult` |
+| `train_gradient_boosting_classifier` | Train GB classifier | `ModelTrainingResult` |
+| `train_gradient_boosting_regressor` | Train GB regressor | `ModelTrainingResult` |
+| `evaluate_classification_model` | Evaluate classifier | `ClassificationEvaluationResult` |
+| `evaluate_regression_model` | Evaluate regressor | `RegressionEvaluationResult` |
+
+### Plotting Tools (`stats_compass_core.plots`) *[requires plots extra]*
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `histogram` | Histogram of numeric column | `ChartResult` |
+| `lineplot` | Line plot of time series | `ChartResult` |
+| `bar_chart` | Bar chart of category counts | `ChartResult` |
+| `scatter_plot` | Scatter plot of two columns | `ChartResult` |
+| `feature_importance` | Feature importance from model | `ChartResult` |
+
+## Usage Examples
+
+### Complete Workflow Example
+
+```python
+import pandas as pd
+from stats_compass_core import DataFrameState, registry
+
+# Initialize state
+state = DataFrameState()
+
+# Load data
+df = pd.DataFrame({
+    "region": ["North", "South", "North", "South", "East"],
+    "product": ["A", "A", "B", "B", "A"],
+    "revenue": [100, 150, 200, None, 120],
+    "quantity": [10, 15, 20, 12, 11]
+})
+state.set_dataframe(df, name="sales", operation="manual_load")
+
+# Step 1: Check schema
+result = registry.invoke("data", "get_schema", state, {})
+print(f"Columns: {[c['name'] for c in result.columns]}")
+
+# Step 2: Handle missing values
+result = registry.invoke("cleaning", "apply_imputation", state, {
+    "strategy": "mean",
+    "columns": ["revenue"]
+})
+print(f"Filled {result.rows_affected} values")
+
+# Step 3: Aggregate by region
+result = registry.invoke("transforms", "groupby_aggregate", state, {
+    "by": ["region"],
+    "agg_func": {"revenue": "sum", "quantity": "mean"},
+    "save_as": "regional_summary"
+})
+print(f"Created: {result.dataframe_name}")
+
+# Step 4: Describe the summary
+result = registry.invoke("eda", "describe", state, {
+    "dataframe_name": "regional_summary"
+})
+print(result.model_dump_json(indent=2))
+
+# Step 5: Create visualization
+result = registry.invoke("plots", "bar_chart", state, {
+    "dataframe_name": "regional_summary",
+    "column": "region"
+})
+# result.image_base64 contains PNG image
+```
+
+### Working with Charts
+
+```python
+import base64
+from stats_compass_core import DataFrameState, registry
+
+state = DataFrameState()
+state.set_dataframe(my_df, name="data", operation="load")
+
+# Create histogram
+result = registry.invoke("plots", "histogram", state, {
+    "column": "price",
+    "bins": 20,
+    "title": "Price Distribution"
+})
+
+# Decode and save the image
+image_bytes = base64.b64decode(result.image_base64)
+with open("histogram.png", "wb") as f:
+    f.write(image_bytes)
+
+# Or use in web response
+# return Response(content=image_bytes, media_type="image/png")
+```
+
+### Training and Using Models
+
+```python
+from stats_compass_core import DataFrameState, registry
+
+state = DataFrameState()
+state.set_dataframe(training_df, name="training", operation="load")
+
+# Train model
+result = registry.invoke("ml", "train_random_forest_classifier", state, {
+    "target_column": "churn",
+    "feature_columns": ["age", "tenure", "balance", "num_products"],
+    "test_size": 0.2
+})
+
+print(f"Model ID: {result.model_id}")
+print(f"Accuracy: {result.metrics['accuracy']:.3f}")
+print(f"Features: {result.feature_columns}")
+
+# Model is stored in state for later use
+model = state.get_model(result.model_id)
+
+# Visualize feature importance
+chart_result = registry.invoke("plots", "feature_importance", state, {
+    "model_id": result.model_id,
+    "top_n": 10
+})
+```
+
+## Design Principles
+
+### 1. Stateful, Not Pure
+
+Unlike traditional pandas libraries, tools mutate shared state:
+
+```python
+# Tools operate on state, not raw DataFrames
+result = drop_na(state, params)  # ✓ Correct
+result = drop_na(df, params)     # ✗ Old pattern
+```
+
+### 2. JSON-Serializable Returns
+
+All returns must be Pydantic models:
+
+```python
+# Returns JSON-serializable result
+result = describe(state, params)
+json_str = result.model_dump_json()  # Always works
+
+# NOT raw DataFrames or matplotlib figures
+```
+
+### 3. Transform Tools Save to State
+
+Transform operations create new named DataFrames:
+
+```python
+result = registry.invoke("transforms", "groupby_aggregate", state, {
+    "by": ["region"],
+    "agg_func": {"sales": "sum"},
+    "save_as": "regional_totals"  # Optional custom name
+})
+# New DataFrame now available as state.get_dataframe("regional_totals")
+```
+
+### 4. Models Stored by ID
+
+Trained models aren't returned directly - they're stored:
+
+```python
+result = train_random_forest_classifier(state, params)
+# result.model_id = "random_forest_classifier_churn_20241207_143022"
+# Use state.get_model(result.model_id) to retrieve
 ```
 
 ## Contributing
 
-We welcome contributions! Here's how to create a new tool:
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) for detailed contribution guidelines.
 
-### 1. Choose a Category
+### Quick Start for Contributors
 
-Place your tool in the appropriate folder:
-- `cleaning/` - Data cleaning operations
-- `transforms/` - Data transformations
-- `eda/` - Exploratory data analysis
-- `ml/` - Machine learning operations
-- `plots/` - Visualization tools
+1. Fork and clone the repository
+2. Install dependencies: `poetry install`
+3. Create a new tool following the pattern in existing tools
+4. Write tests in `tests/`
+5. Submit a pull request
 
-### 2. Create a New Tool File
+### Tool Signature Pattern
 
-Each tool should be in its own file (e.g., `my_tool.py`):
+All tools must follow this signature:
 
 ```python
-"""
-Tool description goes here.
-"""
-import pandas as pd
-from pydantic import BaseModel, Field
+from stats_compass_core.state import DataFrameState
+from stats_compass_core.results import SomeResult
 from stats_compass_core.registry import registry
 
-
 class MyToolInput(BaseModel):
-    """Input schema for my_tool."""
+    dataframe_name: str | None = Field(default=None)
+    # ... other params
+
+@registry.register(category="category", input_schema=MyToolInput, description="...")
+def my_tool(state: DataFrameState, params: MyToolInput) -> SomeResult:
+    df = state.get_dataframe(params.dataframe_name)
+    source_name = params.dataframe_name or state._active_dataframe
     
-    param1: str = Field(description="Description of param1")
-    param2: int = Field(default=10, ge=0, description="Description of param2")
-
-
-@registry.register(
-    category="category_name",
-    input_schema=MyToolInput,
-    description="Short description of what the tool does"
-)
-def my_tool(df: pd.DataFrame, params: MyToolInput) -> pd.DataFrame:
-    """
-    Detailed description of the tool.
+    # ... do work ...
     
-    Args:
-        df: Input DataFrame
-        params: Tool parameters
-    
-    Returns:
-        Transformed DataFrame
-    
-    Raises:
-        ValueError: Description of when this error occurs
-    """
-    # Your implementation here
-    return result_df
-```
-
-### 3. Design Principles
-
-- **Pure Functions**: No side effects, no global state mutation
-- **Type Hints**: Use complete type annotations everywhere
-- **Pydantic Schemas**: Define input validation schemas
-- **Return New Objects**: Never modify input DataFrames in place
-- **Descriptive Errors**: Raise typed exceptions with clear messages
-- **Comprehensive Docstrings**: Document args, returns, and raises
-
-### 4. Write Tests
-
-Create a test file in `tests/` (e.g., `test_my_tool.py`):
-
-```python
-import pandas as pd
-import pytest
-from stats_compass_core.category.my_tool import my_tool, MyToolInput
-
-
-def test_my_tool_basic():
-    df = pd.DataFrame({'A': [1, 2, 3]})
-    params = MyToolInput(param1='value')
-    result = my_tool(df, params)
-    assert isinstance(result, pd.DataFrame)
-    # Add more assertions
-
-
-def test_my_tool_validation():
-    df = pd.DataFrame({'A': [1, 2, 3]})
-    with pytest.raises(ValueError):
-        params = MyToolInput(param1='invalid')
-        my_tool(df, params)
-```
-
-### 5. Run Tests and Linting
-
-```bash
-# Run tests
-poetry run pytest
-
-# Run with coverage
-poetry run pytest --cov=stats_compass_core
-
-# Format code
-poetry run black .
-
-# Lint code
-poetry run ruff check .
-
-# Type check
-poetry run mypy stats_compass_core
-```
-
-### 6. Submit a Pull Request
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/my-tool`)
-3. Commit your changes (`git commit -m 'Add my_tool'`)
-4. Push to the branch (`git push origin feature/my-tool`)
-5. Open a Pull Request
-
-## Development
-
-### Project Structure
-
-```
-stats-compass-core/
-├── stats_compass_core/
-│   ├── __init__.py
-│   ├── registry.py
-│   ├── cleaning/
-│   │   ├── __init__.py
-│   │   ├── dropna.py
-│   │   └── dedupe.py
-│   ├── transforms/
-│   │   ├── __init__.py
-│   │   ├── groupby_aggregate.py
-│   │   └── pivot.py
-│   ├── eda/
-│   │   ├── __init__.py
-│   │   ├── describe.py
-│   │   └── correlations.py
-│   ├── ml/
-│   │   ├── __init__.py
-│   │   ├── train_classifier.py
-│   │   └── train_regressor.py
-│   └── plots/
-│       ├── __init__.py
-│       ├── histogram.py
-│       └── lineplot.py
-├── tests/
-├── docs/
-├── pyproject.toml
-├── README.md
-└── LICENSE
-```
-
-### Running Tests
-
-```bash
-poetry run pytest
-```
-
-### Code Quality
-
-```bash
-# Format
-poetry run black stats_compass_core tests
-
-# Lint
-poetry run ruff check stats_compass_core tests
-
-# Type check
-poetry run mypy stats_compass_core
+    return SomeResult(...)
 ```
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Links
-
-- **Repository**: https://github.com/oogunbiyi21/stats-compass-core
-- **Issues**: https://github.com/oogunbiyi21/stats-compass-core/issues
-- **Documentation**: Coming soon
-
-## Roadmap
-
-- [ ] Additional cleaning tools (outlier detection, type conversion)
-- [ ] More transformation tools (melting, merging, joining)
-- [ ] Advanced EDA tools (distribution testing, feature importance)
-- [ ] Time series analysis tools
-- [ ] More visualization options
-- [ ] Performance optimization tools
-- [ ] Data validation tools
-- [ ] Export/import utilities
-
-## Support
-
-For questions, issues, or contributions, please:
-
-1. Check existing [issues](https://github.com/oogunbiyi21/stats-compass-core/issues)
-2. Create a new issue with detailed information
-3. Join our discussions
-
----
-
-Made with ❤️ for the data science community
+MIT License - see [LICENSE](LICENSE) for details.

@@ -1,284 +1,788 @@
 # API Reference
 
-## Architecture Overview
+## Core Classes
 
-**stats-compass-core** follows a clean three-layer architecture:
+### DataFrameState
 
-1. **stats-compass-core** (this package) - Pure Python tools
-   - Deterministic pandas-based data operations
-   - No UI, no LLM adapters, no orchestration code
-   - Pure functions with Pydantic validation
-   - Core library that other layers depend on
+The central state manager for MCP sessions. Stores DataFrames, trained models, and operation history.
 
-2. **stats-compass-mcp** (separate package) - JSON/LLM adaptor layer
-   - MCP (Model Context Protocol) server implementation
-   - Converts tool I/O to/from JSON for LLM consumption
-   - Handles DataFrame serialization
-   - **Not part of this repository**
+```python
+from stats_compass_core import DataFrameState
 
-3. **stats-compass-app** (separate package) - SaaS orchestrator
-   - Streamlit or web UI
-   - User workflows and orchestration
-   - Multi-tool pipelines
-   - **Not part of this repository**
+state = DataFrameState(memory_limit_mb=500)
+```
 
-**Important:** This repository (`stats-compass-core`) must never import Streamlit, LangChain, MCP, or any UI/orchestration code. It is a pure data tools library.
+#### Constructor
+
+```python
+DataFrameState(memory_limit_mb: float = 500.0)
+```
+
+**Parameters:**
+- `memory_limit_mb`: Maximum total memory for all DataFrames (default 500MB)
+
+#### DataFrame Methods
+
+##### `set_dataframe(df, name, operation, set_active=True)`
+
+Store a DataFrame in state.
+
+```python
+stored_name = state.set_dataframe(df, name="sales", operation="load_csv")
+```
+
+**Parameters:**
+- `df` (pd.DataFrame): DataFrame to store
+- `name` (str): Unique name for the DataFrame
+- `operation` (str): Description of operation that created it (for lineage)
+- `set_active` (bool): Whether to make this the active DataFrame (default: True)
+
+**Returns:** `str` - The name of the stored DataFrame
+
+##### `get_dataframe(name=None)`
+
+Retrieve a DataFrame from state.
+
+```python
+df = state.get_dataframe("sales")  # By name
+df = state.get_dataframe()          # Get active DataFrame
+```
+
+**Parameters:**
+- `name` (str, optional): Name of DataFrame. If None, returns active DataFrame.
+
+**Returns:** `pd.DataFrame`
+
+**Raises:** `KeyError` if DataFrame not found
+
+##### `list_dataframes()`
+
+List all stored DataFrames with metadata.
+
+```python
+info_list = state.list_dataframes()
+for info in info_list:
+    print(f"{info.name}: {info.shape}, {info.memory_mb:.1f}MB")
+```
+
+**Returns:** `list[DataFrameInfo]`
+
+##### `delete_dataframe(name)`
+
+Remove a DataFrame from state.
+
+```python
+state.delete_dataframe("temp_data")
+```
+
+**Parameters:**
+- `name` (str): Name of DataFrame to delete
+
+**Raises:** `KeyError` if DataFrame not found
+
+#### Model Methods
+
+##### `store_model(model, model_type, target_column, feature_columns, source_dataframe)`
+
+Store a trained model in state.
+
+```python
+model_id = state.store_model(
+    model=trained_rf,
+    model_type="random_forest_classifier",
+    target_column="churn",
+    feature_columns=["age", "balance"],
+    source_dataframe="training_data"
+)
+```
+
+**Parameters:**
+- `model` (object): Trained sklearn model
+- `model_type` (str): Type identifier (e.g., "random_forest_classifier")
+- `target_column` (str): Name of target column used for training
+- `feature_columns` (list[str]): Feature column names
+- `source_dataframe` (str): Name of DataFrame used for training
+
+**Returns:** `str` - Unique model ID (format: `{model_type}_{target}_{timestamp}`)
+
+##### `get_model(model_id)`
+
+Retrieve a trained model.
+
+```python
+model = state.get_model("random_forest_classifier_churn_20241207_143022")
+predictions = model.predict(X_new)
+```
+
+**Parameters:**
+- `model_id` (str): Model identifier
+
+**Returns:** Trained model object
+
+**Raises:** `KeyError` if model not found
+
+##### `get_model_info(model_id)`
+
+Get metadata about a stored model.
+
+```python
+info = state.get_model_info(model_id)
+print(f"Type: {info.model_type}")
+print(f"Features: {info.feature_columns}")
+```
+
+**Returns:** `ModelInfo`
+
+#### Properties
+
+- `_active_dataframe` (str | None): Name of currently active DataFrame
+- `_dataframes` (dict[str, pd.DataFrame]): All stored DataFrames
+- `_models` (dict[str, object]): All stored models
+- `_history` (list[HistoryEntry]): Operation history
+
+---
+
+## Result Models
+
+All tools return Pydantic models. Import from `stats_compass_core.results`.
+
+### DataFrameLoadResult
+
+Returned by data loading tools.
+
+```python
+class DataFrameLoadResult(BaseModel):
+    dataframe_name: str      # Name assigned to loaded DataFrame
+    shape: tuple[int, int]   # (rows, columns)
+    columns: list[str]       # Column names
+    dtypes: dict[str, str]   # Column data types
+    message: str             # Human-readable summary
+```
+
+### DataFrameMutationResult
+
+Returned by cleaning tools that modify DataFrames in-place.
+
+```python
+class DataFrameMutationResult(BaseModel):
+    rows_before: int         # Row count before operation
+    rows_after: int          # Row count after operation
+    rows_affected: int       # Rows changed/removed
+    dataframe_name: str      # Name of mutated DataFrame
+    operation: str           # Description of operation
+    details: dict[str, Any]  # Operation-specific details
+```
+
+### DataFrameQueryResult
+
+Returned by transform tools that create new DataFrames.
+
+```python
+class DataFrameQueryResult(BaseModel):
+    data: dict[str, Any]      # {"records": [...], "truncated": bool}
+    shape: tuple[int, int]    # Shape of result
+    columns: list[str]        # Column names
+    dataframe_name: str       # Name of NEW DataFrame in state
+    source_dataframe: str     # Name of source DataFrame
+```
+
+### DescribeResult
+
+Returned by `describe` tool.
+
+```python
+class DescribeResult(BaseModel):
+    statistics: dict[str, dict[str, Any]]  # Stats per column
+    dataframe_name: str                     # Source DataFrame
+    columns_analyzed: list[str]             # Columns included
+    include_types: list[str] | None         # Data types included
+```
+
+### CorrelationsResult
+
+Returned by `correlations` tool.
+
+```python
+class CorrelationsResult(BaseModel):
+    correlations: dict[str, dict[str, float]]  # Correlation matrix
+    method: str                                 # pearson/spearman/kendall
+    dataframe_name: str                         # Source DataFrame
+    columns: list[str]                          # Columns included
+    high_correlations: list[dict] | None        # Pairs above threshold
+```
+
+### ChartResult
+
+Returned by all plotting tools.
+
+```python
+class ChartResult(BaseModel):
+    image_base64: str         # Base64-encoded PNG image
+    image_format: str         # Always "png"
+    title: str                # Chart title
+    chart_type: str           # histogram/lineplot/bar_chart/etc.
+    dataframe_name: str       # Source DataFrame
+    parameters: dict[str, Any]  # Parameters used
+```
+
+### ModelTrainingResult
+
+Returned by ML training tools.
+
+```python
+class ModelTrainingResult(BaseModel):
+    model_id: str                  # ID for retrieving model from state
+    model_type: str                # Type of model trained
+    target_column: str             # Target variable
+    feature_columns: list[str]     # Features used
+    metrics: dict[str, float]      # Training metrics (accuracy, r2, etc.)
+    n_train_samples: int           # Training set size
+    n_test_samples: int            # Test set size
+    source_dataframe: str          # Training data source
+```
+
+### HypothesisTestResult
+
+Returned by statistical test tools.
+
+```python
+class HypothesisTestResult(BaseModel):
+    test_type: str           # "t-test (Student)", "z-test", etc.
+    statistic: float         # Test statistic
+    p_value: float           # P-value
+    alternative: str         # two-sided/less/greater
+    n_a: int                 # Sample size group A
+    n_b: int                 # Sample size group B
+    significant_at_05: bool  # p < 0.05
+    significant_at_01: bool  # p < 0.01
+    dataframe_name: str      # Source DataFrame
+    details: dict[str, Any]  # Additional details
+```
+
+### ClassificationEvaluationResult
+
+Returned by `evaluate_classification_model`.
+
+```python
+class ClassificationEvaluationResult(BaseModel):
+    accuracy: float                    # Accuracy score
+    precision: float                   # Precision
+    recall: float                      # Recall
+    f1: float                          # F1 score
+    confusion_matrix: list[list[int]]  # Confusion matrix
+    labels: list[Any]                  # Class labels
+    n_samples: int                     # Samples evaluated
+    average: str                       # Averaging method
+    dataframe_name: str                # Source DataFrame
+    target_column: str                 # True labels column
+    prediction_column: str             # Predictions column
+```
+
+### RegressionEvaluationResult
+
+Returned by `evaluate_regression_model`.
+
+```python
+class RegressionEvaluationResult(BaseModel):
+    rmse: float              # Root Mean Squared Error
+    mae: float               # Mean Absolute Error
+    r2: float                # R-squared
+    n_samples: int           # Samples evaluated
+    dataframe_name: str      # Source DataFrame
+    target_column: str       # True values column
+    prediction_column: str   # Predictions column
+```
+
+---
 
 ## Registry
 
-### `ToolRegistry`
+The tool registry provides discovery and invocation.
 
-The central registry for managing all tools in stats-compass-core.
+```python
+from stats_compass_core import registry
+```
 
-#### Methods
+### Methods
 
-##### `register(category, name=None, input_schema=None, description="")`
+#### `invoke(category, tool_name, state, params)`
 
-Decorator for registering a tool function.
+Invoke a tool with automatic parameter validation.
 
-**Parameters:**
-- `category` (str): Tool category ('cleaning', 'transforms', 'eda', 'ml', 'plots')
-- `name` (str, optional): Tool name (defaults to function name)
-- `input_schema` (type[BaseModel], optional): Pydantic schema for input validation
-- `description` (str, optional): Tool description
-
-**Returns:** Decorated function
-
-##### `get_tool(category, name)`
-
-Get a specific tool function by category and name.
+```python
+result = registry.invoke(
+    category="eda",
+    tool_name="describe",
+    state=state,
+    params={"percentiles": [0.25, 0.5, 0.75]}
+)
+```
 
 **Parameters:**
 - `category` (str): Tool category
-- `name` (str): Tool name
+- `tool_name` (str): Tool name
+- `state` (DataFrameState): State instance
+- `params` (dict): Tool parameters (will be validated)
+
+**Returns:** Tool result (Pydantic model)
+
+**Raises:** `KeyError` if tool not found, `ValidationError` if params invalid
+
+#### `get_tool(category, name)`
+
+Get a tool function directly.
+
+```python
+describe_func = registry.get_tool("eda", "describe")
+```
 
 **Returns:** Callable or None
 
-##### `list_tools(category=None)`
+#### `list_tools(category=None)`
 
-List all registered tools, optionally filtered by category.
+List registered tools.
 
-**Parameters:**
-- `category` (str, optional): Category to filter by
+```python
+# All tools
+all_tools = registry.list_tools()
 
-**Returns:** List of ToolMetadata objects
+# By category
+eda_tools = registry.list_tools(category="eda")
+```
 
-##### `get_categories()`
+**Returns:** List of `ToolMetadata`
 
-Get list of available tool categories.
+#### `get_categories()`
 
-**Returns:** List of category names
+Get available categories.
 
-##### `auto_discover()`
+```python
+categories = registry.get_categories()
+# ['data', 'cleaning', 'transforms', 'eda', 'ml', 'plots']
+```
 
-Automatically discover and import all tool modules.
+---
 
-## Cleaning Tools
+## Tools by Category
 
-### `drop_na(df, params)`
+### Data Tools
 
-Drop rows or columns with missing values from a DataFrame.
+#### `load_csv`
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (DropNAInput): Parameters for dropping NA values
-  - `axis` (int): 0 for rows, 1 for columns (default: 0)
-  - `how` (str): 'any' or 'all' (default: 'any')
-  - `thresh` (int, optional): Minimum number of non-NA values
-  - `subset` (list[str], optional): Column labels to consider
+Load a CSV file into state.
 
-**Returns:** pd.DataFrame - New DataFrame with NA values removed
-
-**Raises:**
-- `ValueError`: If subset columns don't exist in DataFrame
-
-### `dedupe(df, params)`
-
-Remove duplicate rows from a DataFrame.
+```python
+result = registry.invoke("data", "load_csv", state, {
+    "file_path": "/path/to/data.csv",
+    "name": "my_data"  # Optional, defaults to filename
+})
+```
 
 **Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (DedupeInput): Parameters for deduplication
-  - `subset` (list[str], optional): Column labels for identifying duplicates
-  - `keep` (str): 'first', 'last', or 'False' (default: 'first')
-  - `ignore_index` (bool): Reset index in result (default: False)
+- `file_path` (str): Path to CSV file
+- `name` (str, optional): Name for DataFrame in state
 
-**Returns:** pd.DataFrame - New DataFrame with duplicates removed
+**Returns:** `DataFrameLoadResult`
 
-**Raises:**
-- `ValueError`: If subset columns don't exist in DataFrame
+#### `get_schema`
 
-## Transform Tools
+Get schema information for a DataFrame.
 
-### `groupby_aggregate(df, params)`
+```python
+result = registry.invoke("data", "get_schema", state, {
+    "dataframe_name": "sales"  # Optional, uses active
+})
+```
 
-Group DataFrame by specified columns and apply aggregation functions.
+**Returns:** `SchemaResult` with column types, null counts, unique counts
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (GroupByAggregateInput): Parameters for groupby and aggregation
-  - `by` (list[str]): Column labels to group by
-  - `agg_func` (dict[str, str | list[str]]): Mapping of columns to aggregation functions
-  - `as_index` (bool): Use group keys as index (default: True)
+#### `get_sample`
 
-**Returns:** pd.DataFrame - New aggregated DataFrame
+Get sample rows from a DataFrame.
 
-**Raises:**
-- `ValueError`: If group-by or aggregation columns don't exist
-- `TypeError`: If aggregation function is not supported
+```python
+result = registry.invoke("data", "get_sample", state, {
+    "n": 10,
+    "dataframe_name": "sales"
+})
+```
 
-### `pivot(df, params)`
+**Returns:** `SampleResult` with sample data as records
 
-Pivot a DataFrame from long to wide format.
+#### `list_dataframes`
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (PivotInput): Parameters for pivoting
-  - `index` (str | list[str]): Column(s) to use as row index
-  - `columns` (str | list[str]): Column(s) to use as column headers
-  - `values` (str | list[str], optional): Column(s) for values
-  - `aggfunc` (str): Aggregation function (default: 'mean')
-  - `fill_value` (float, optional): Value to replace missing values
+List all DataFrames in state.
 
-**Returns:** pd.DataFrame - New pivoted DataFrame
+```python
+result = registry.invoke("data", "list_dataframes", state, {})
+```
 
-**Raises:**
-- `ValueError`: If specified columns don't exist
-- `KeyError`: If pivot creates duplicate entries without aggregation
+**Returns:** `DataFrameListResult`
 
-## EDA Tools
+---
 
-### `describe(df, params)`
+### Cleaning Tools
 
-Generate descriptive statistics that summarize the central tendency, dispersion and shape of a dataset's distribution.
+#### `drop_na`
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (DescribeInput): Parameters for describe operation
-  - `percentiles` (list[float], optional): Percentiles to include (0-1)
-  - `include` (str | list[str], optional): Data types to include
-  - `exclude` (str | list[str], optional): Data types to exclude
+Remove rows or columns with missing values.
 
-**Returns:** pd.DataFrame - DataFrame containing descriptive statistics
+```python
+result = registry.invoke("cleaning", "drop_na", state, {
+    "axis": 0,           # 0=rows, 1=columns
+    "how": "any",        # "any" or "all"
+    "subset": ["col1"],  # Optional: only consider these columns
+    "thresh": 2          # Optional: keep rows with >= 2 non-NA
+})
+```
 
-**Raises:**
-- `ValueError`: If percentiles are out of range or incompatible types specified
+**Returns:** `DataFrameMutationResult`
 
-### `correlations(df, params)`
+#### `dedupe`
 
-Compute pairwise correlation of columns, excluding NA/null values.
+Remove duplicate rows.
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (CorrelationsInput): Parameters for correlation computation
-  - `method` (str): 'pearson', 'kendall', or 'spearman' (default: 'pearson')
-  - `min_periods` (int, optional): Minimum observations per pair
-  - `numeric_only` (bool): Include only numeric columns (default: True)
+```python
+result = registry.invoke("cleaning", "dedupe", state, {
+    "subset": ["id", "date"],  # Optional: columns to consider
+    "keep": "first"            # "first", "last", or "False"
+})
+```
 
-**Returns:** pd.DataFrame - DataFrame containing correlation matrix
+**Returns:** `DataFrameMutationResult`
 
-**Raises:**
-- `ValueError`: If no numeric columns available or computation fails
+#### `apply_imputation`
 
-## ML Tools
+Fill missing values with imputation strategy.
 
-*Requires installation with `[ml]` extra*
+```python
+result = registry.invoke("cleaning", "apply_imputation", state, {
+    "strategy": "mean",       # mean/median/most_frequent/constant
+    "columns": ["revenue"],   # Optional: specific columns
+    "fill_value": 0           # Required if strategy="constant"
+})
+```
 
-### `train_classifier(df, params)`
+**Returns:** `DataFrameMutationResult`
 
-Train a classification model on DataFrame data.
+---
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame with features and target
-- `params` (TrainClassifierInput): Parameters for model training
-  - `target_column` (str): Name of the target column
-  - `feature_columns` (list[str], optional): List of feature columns
-  - `model_type` (str): 'logistic_regression', 'random_forest', or 'gradient_boosting' (default: 'random_forest')
-  - `test_size` (float): Fraction for testing (default: 0.2)
-  - `random_state` (int, optional): Random seed (default: 42)
+### Transform Tools
 
-**Returns:** TrainedClassifierResult
-- `model` (object): Trained scikit-learn model
-- `feature_columns` (list[str]): List of feature columns used
-- `target_column` (str): Target column name
-- `train_score` (float): Training accuracy score
-- `n_samples` (int): Number of training samples
+#### `groupby_aggregate`
 
-**Raises:**
-- `ImportError`: If scikit-learn is not installed
-- `ValueError`: If columns don't exist or data is insufficient
+Group by columns and aggregate.
 
-### `train_regressor(df, params)`
+```python
+result = registry.invoke("transforms", "groupby_aggregate", state, {
+    "by": ["region", "product"],
+    "agg_func": {
+        "revenue": "sum",
+        "quantity": ["mean", "count"]
+    },
+    "as_index": False,
+    "save_as": "aggregated"  # Optional: custom name for result
+})
+```
 
-Train a regression model on DataFrame data.
+**Returns:** `DataFrameQueryResult` (new DataFrame saved to state)
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame with features and target
-- `params` (TrainRegressorInput): Parameters for model training
-  - `target_column` (str): Name of the target column
-  - `feature_columns` (list[str], optional): List of feature columns
-  - `model_type` (str): 'linear_regression', 'random_forest', or 'gradient_boosting' (default: 'random_forest')
-  - `test_size` (float): Fraction for testing (default: 0.2)
-  - `random_state` (int, optional): Random seed (default: 42)
+#### `pivot`
 
-**Returns:** TrainedRegressorResult
-- `model` (object): Trained scikit-learn model
-- `feature_columns` (list[str]): List of feature columns used
-- `target_column` (str): Target column name
-- `train_score` (float): Training R² score
-- `n_samples` (int): Number of training samples
+Reshape from long to wide format.
 
-**Raises:**
-- `ImportError`: If scikit-learn is not installed
-- `ValueError`: If columns don't exist or data is insufficient
+```python
+result = registry.invoke("transforms", "pivot", state, {
+    "index": "date",
+    "columns": "product",
+    "values": "sales",
+    "aggfunc": "sum",
+    "fill_value": 0,
+    "save_as": "pivoted"
+})
+```
 
-## Plotting Tools
+**Returns:** `DataFrameQueryResult` (new DataFrame saved to state)
 
-*Requires installation with `[plots]` extra*
+#### `filter_dataframe`
 
-### `histogram(df, params)`
+Filter rows using pandas query syntax.
 
-Create a histogram plot from a DataFrame column.
+```python
+result = registry.invoke("transforms", "filter_dataframe", state, {
+    "query": "revenue > 1000 and region == 'North'",
+    "limit": 100,      # Optional: max rows
+    "save_as": "filtered"
+})
+```
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (HistogramInput): Parameters for histogram creation
-  - `column` (str): Name of the column to plot
-  - `bins` (int): Number of bins (default: 30)
-  - `title` (str, optional): Plot title
-  - `xlabel` (str, optional): X-axis label
-  - `ylabel` (str): Y-axis label (default: 'Frequency')
-  - `figsize` (tuple[float, float]): Figure size (default: (10, 6))
+**Returns:** `DataFrameQueryResult` (new DataFrame saved to state)
 
-**Returns:** HistogramResult
-- `figure` (object): Matplotlib figure object
-- `column` (str): Column name plotted
-- `bins` (int): Number of bins used
+---
 
-**Raises:**
-- `ImportError`: If matplotlib is not installed
-- `ValueError`: If column doesn't exist or is not numeric
+### EDA Tools
 
-### `lineplot(df, params)`
+#### `describe`
 
-Create a line plot from DataFrame columns.
+Generate descriptive statistics.
 
-**Parameters:**
-- `df` (pd.DataFrame): Input DataFrame
-- `params` (LineplotInput): Parameters for line plot creation
-  - `x_column` (str, optional): Name of column for x-axis (uses index if None)
-  - `y_column` (str): Name of column for y-axis
-  - `title` (str, optional): Plot title
-  - `xlabel` (str, optional): X-axis label
-  - `ylabel` (str, optional): Y-axis label
-  - `figsize` (tuple[float, float]): Figure size (default: (10, 6))
-  - `marker` (str, optional): Marker style (e.g., 'o', 's', '^')
+```python
+result = registry.invoke("eda", "describe", state, {
+    "percentiles": [0.1, 0.25, 0.5, 0.75, 0.9],
+    "include": "all"  # Optional: include non-numeric
+})
+```
 
-**Returns:** LineplotResult
-- `figure` (object): Matplotlib figure object
-- `x_column` (str | None): X-axis column name
-- `y_column` (str): Y-axis column name
+**Returns:** `DescribeResult`
 
-**Raises:**
-- `ImportError`: If matplotlib is not installed
-- `ValueError`: If specified columns don't exist
+#### `correlations`
+
+Compute correlation matrix.
+
+```python
+result = registry.invoke("eda", "correlations", state, {
+    "method": "pearson",    # pearson/spearman/kendall
+    "min_periods": 10,      # Optional: min observations
+    "numeric_only": True
+})
+```
+
+**Returns:** `CorrelationsResult`
+
+#### `t_test`
+
+Two-sample t-test.
+
+```python
+result = registry.invoke("eda", "t_test", state, {
+    "column_a": "group1_scores",
+    "column_b": "group2_scores",
+    "alternative": "two-sided",  # two-sided/less/greater
+    "equal_var": True            # True=Student, False=Welch
+})
+```
+
+**Returns:** `HypothesisTestResult`
+
+#### `z_test`
+
+Two-sample z-test.
+
+```python
+result = registry.invoke("eda", "z_test", state, {
+    "column_a": "sample1",
+    "column_b": "sample2",
+    "population_std_a": 10.0,  # Optional: known pop std
+    "population_std_b": 12.0,
+    "alternative": "two-sided"
+})
+```
+
+**Returns:** `HypothesisTestResult`
+
+---
+
+### ML Tools
+
+*Requires `[ml]` extra*
+
+#### `train_linear_regression`
+
+```python
+result = registry.invoke("ml", "train_linear_regression", state, {
+    "target_column": "price",
+    "feature_columns": ["sqft", "bedrooms", "bathrooms"],
+    "test_size": 0.2
+})
+```
+
+**Returns:** `ModelTrainingResult`
+
+#### `train_logistic_regression`
+
+```python
+result = registry.invoke("ml", "train_logistic_regression", state, {
+    "target_column": "churn",
+    "feature_columns": ["age", "tenure", "balance"],
+    "test_size": 0.2
+})
+```
+
+**Returns:** `ModelTrainingResult`
+
+#### `train_random_forest_classifier`
+
+```python
+result = registry.invoke("ml", "train_random_forest_classifier", state, {
+    "target_column": "category",
+    "feature_columns": ["f1", "f2", "f3"],
+    "n_estimators": 100,
+    "max_depth": 10,
+    "test_size": 0.2
+})
+```
+
+**Returns:** `ModelTrainingResult`
+
+#### `train_random_forest_regressor`
+
+```python
+result = registry.invoke("ml", "train_random_forest_regressor", state, {
+    "target_column": "price",
+    "feature_columns": ["f1", "f2"],
+    "n_estimators": 100,
+    "test_size": 0.2
+})
+```
+
+**Returns:** `ModelTrainingResult`
+
+#### `train_gradient_boosting_classifier`
+
+```python
+result = registry.invoke("ml", "train_gradient_boosting_classifier", state, {
+    "target_column": "label",
+    "n_estimators": 100,
+    "learning_rate": 0.1,
+    "max_depth": 3
+})
+```
+
+**Returns:** `ModelTrainingResult`
+
+#### `train_gradient_boosting_regressor`
+
+```python
+result = registry.invoke("ml", "train_gradient_boosting_regressor", state, {
+    "target_column": "value",
+    "n_estimators": 100,
+    "learning_rate": 0.1
+})
+```
+
+**Returns:** `ModelTrainingResult`
+
+#### `evaluate_classification_model`
+
+Evaluate classifier predictions.
+
+```python
+result = registry.invoke("ml", "evaluate_classification_model", state, {
+    "target_column": "actual",
+    "prediction_column": "predicted",
+    "average": "weighted"  # micro/macro/weighted/binary
+})
+```
+
+**Returns:** `ClassificationEvaluationResult`
+
+#### `evaluate_regression_model`
+
+Evaluate regressor predictions.
+
+```python
+result = registry.invoke("ml", "evaluate_regression_model", state, {
+    "target_column": "actual",
+    "prediction_column": "predicted"
+})
+```
+
+**Returns:** `RegressionEvaluationResult`
+
+---
+
+### Plotting Tools
+
+*Requires `[plots]` extra*
+
+All plotting tools return `ChartResult` with base64-encoded PNG.
+
+#### `histogram`
+
+```python
+result = registry.invoke("plots", "histogram", state, {
+    "column": "price",
+    "bins": 30,
+    "title": "Price Distribution",
+    "figsize": [10, 6]
+})
+# result.image_base64 contains PNG
+```
+
+#### `lineplot`
+
+```python
+result = registry.invoke("plots", "lineplot", state, {
+    "x_column": "date",
+    "y_column": "revenue",
+    "title": "Revenue Over Time",
+    "marker": "o"
+})
+```
+
+#### `bar_chart`
+
+```python
+result = registry.invoke("plots", "bar_chart", state, {
+    "column": "category",
+    "top_n": 10,
+    "orientation": "horizontal",  # vertical/horizontal
+    "title": "Top Categories"
+})
+```
+
+#### `scatter_plot`
+
+```python
+result = registry.invoke("plots", "scatter_plot", state, {
+    "x": "age",
+    "y": "income",
+    "hue": "segment",  # Optional: color by category
+    "alpha": 0.7
+})
+```
+
+#### `feature_importance`
+
+```python
+result = registry.invoke("plots", "feature_importance", state, {
+    "model_id": "random_forest_classifier_churn_20241207",
+    "top_n": 15,
+    "orientation": "horizontal"
+})
+```
+
+---
+
+## Error Handling
+
+All tools raise typed exceptions:
+
+```python
+from stats_compass_core import DataFrameState, registry
+
+state = DataFrameState()
+
+# KeyError: DataFrame not found
+try:
+    df = state.get_dataframe("nonexistent")
+except KeyError as e:
+    print(f"DataFrame not found: {e}")
+
+# ValueError: Invalid parameters
+try:
+    result = registry.invoke("cleaning", "drop_na", state, {
+        "axis": 5  # Invalid
+    })
+except ValueError as e:
+    print(f"Invalid params: {e}")
+
+# ValidationError: Pydantic validation failed
+from pydantic import ValidationError
+try:
+    result = registry.invoke("eda", "describe", state, {
+        "percentiles": "invalid"  # Should be list
+    })
+except ValidationError as e:
+    print(f"Validation failed: {e}")
+```
