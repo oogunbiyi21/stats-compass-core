@@ -290,7 +290,7 @@ def analyze_missing_data(
     
     # Calculate missing data statistics
     missing_counts = df.isnull().sum()
-    missing_pcts = (missing_counts / total_rows * 100).round(2)
+    missing_pcts = (missing_counts / total_rows * 100).round(2) if total_rows > 0 else missing_counts * 0
     
     # Categorize columns by missing percentage
     columns_with_missing = missing_counts[missing_counts > 0].to_dict()

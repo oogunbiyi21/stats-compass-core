@@ -240,11 +240,9 @@ def _prepare_series(
     """Prepare time series data for ARIMA modeling."""
     # Get DataFrame
     try:
-        if dataframe_name:
-            df = state.get_dataframe(dataframe_name)
-        else:
-            df = state.get_active_dataframe()
-            dataframe_name = state._active_df_name
+        df = state.get_dataframe(dataframe_name)
+        if not dataframe_name:
+            dataframe_name = state.get_active_dataframe_name()
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg:
@@ -933,10 +931,7 @@ def infer_frequency(
     """
     # Get DataFrame
     try:
-        if params.dataframe_name:
-            df = state.get_dataframe(params.dataframe_name)
-        else:
-            df = state.get_active_dataframe()
+        df = state.get_dataframe(params.dataframe_name)
     except ValueError as e:
         return OperationError(
             error_type="DataFrameNotFound",
