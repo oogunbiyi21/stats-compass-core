@@ -63,20 +63,33 @@ A stateful, MCP-compatible toolkit of pandas-based data tools for AI-powered dat
 
 ## Installation
 
-### Basic Installation
+### Basic Installation (Core Only)
 
 ```bash
 pip install stats-compass-core
 ```
 
-All dependencies (pandas, numpy, scipy, scikit-learn, matplotlib, seaborn, pydantic) are installed automatically. There are no optional extras—the full feature set is always available.
+This installs the core functionality: data loading, cleaning, transforms, and EDA tools. Dependencies: pandas, numpy, scipy, pydantic.
+
+### With Optional Features
+
+```bash
+# For machine learning tools (scikit-learn)
+pip install stats-compass-core[ml]
+
+# For plotting tools (matplotlib, seaborn)
+pip install stats-compass-core[plots]
+
+# For everything
+pip install stats-compass-core[all]
+```
 
 ### For Development
 
 ```bash
 git clone https://github.com/oogunbiyi21/stats-compass-core.git
 cd stats-compass-core
-poetry install --with dev
+poetry install --with dev  # Installs all deps including optional ones
 ```
 
 ## Quick Start
