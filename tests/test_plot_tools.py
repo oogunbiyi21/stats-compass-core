@@ -147,3 +147,124 @@ class TestScatterPlot:
         json_str = result.model_dump_json()
 
         assert isinstance(json_str, str)
+
+
+# Import numpy for classification curve tests
+import numpy as np
+
+
+def make_state_with_df(df: pd.DataFrame, name: str = "test") -> DataFrameState:
+    """Helper to create state with a DataFrame."""
+    state = DataFrameState()
+    state.set_dataframe(df, name=name, operation="test_setup")
+    return state
+
+
+class TestClassificationCurves:
+    """Tests for ROC and PR curve tools."""
+
+    def test_roc_curve_basic(self):
+        """Test ROC curve generation."""
+        from stats_compass_core.plots.classification_curves import (
+            roc_curve_plot,
+            ROCCurveInput,
+        )
+
+        np.random.seed(42)
+        n = 100
+        df = pd.DataFrame({
+            "y_true": np.random.randint(0, 2, n),
+            "y_prob": np.random.random(n),
+        })
+
+        state = make_state_with_df(df)
+
+        params = ROCCurveInput(
+            dataframe_name="test",
+            true_column="y_true",
+            prob_column="y_prob",
+            model_id="test_model",
+        )
+
+        result = roc_curve_plot(state, params)
+
+        assert result.curve_type == "roc"
+        assert len(result.x_values) > 0
+        assert len(result.y_values) > 0
+        assert 0 <= result.auc_score <= 1
+        assert result.image_base64  # Should have base64 image
+        assert result.model_id == "test_model"
+
+    def test_roc_curve_perfect_classifier(self):
+        """Test ROC curve with perfect classifier."""
+        from stats_compass_core.plots.classification_curves import (
+            roc_curve_plot,
+            ROCCurveInput,
+        )
+
+        df = pd.DataFrame({
+            "y_true": [0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+            "y_prob": [0.1, 0.2, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0],
+        })
+
+        state = make_state_with_df(df)
+
+        params = ROCCurveInput(
+            dataframe_name="test",
+            true_column="y_true",
+            prob_column="y_prob",
+        )
+
+        result = roc_curve_plot(state, params)
+
+        # Perfect classifier should have AUC = 1.0
+        assert result.auc_score == 1.0
+
+    def test_precision_recall_curve_basic(self):
+        """Test PR curve generation."""
+        from stats_compass_core.plots.classification_curves import (
+            precision_recall_curve_plot,
+            PrecisionRecallCurveInput,
+        )
+
+        np.random.seed(42)
+        n = 100
+        df = pd.DataFrame({
+            "y_true": np.random.randint(0, 2, n),
+            "y_prob": np.random.random(n),
+        })
+
+        state = make_state_with_df(df)
+
+        params = PrecisionRecallCurveInput(
+            dataframe_name="test",
+            true_column="y_true",
+            prob_column="y_prob",
+        )
+
+        result = precision_recall_curve_plot(state, params)
+
+        assert result.curve_type == "precision_recall"
+        assert len(result.x_values) > 0
+        assert len(result.y_values) > 0
+        assert 0 <= result.auc_score <= 1
+        assert result.image_base64
+
+    def test_curve_missing_column(self):
+        """Test curve tools raise error for missing columns."""
+        from stats_compass_core.plots.classification_curves import (
+            roc_curve_plot,
+            ROCCurveInput,
+        )
+
+        df = pd.DataFrame({"y_true": [0, 1, 0, 1]})
+        state = make_state_with_df(df)
+
+        params = ROCCurveInput(
+            dataframe_name="test",
+            true_column="y_true",
+            prob_column="nonexistent",
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            roc_curve_plot(state, params)

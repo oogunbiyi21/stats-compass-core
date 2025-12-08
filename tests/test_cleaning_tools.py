@@ -197,3 +197,177 @@ class TestApplyImputation:
         json_str = result.model_dump_json()
 
         assert isinstance(json_str, str)
+
+
+def make_state_with_df(df: pd.DataFrame, name: str = "test") -> DataFrameState:
+    """Helper to create state with a DataFrame."""
+    state = DataFrameState()
+    state.set_dataframe(df, name=name, operation="test_setup")
+    return state
+
+
+class TestOutlierHandling:
+    """Tests for outlier handling tool."""
+
+    def test_handle_outliers_cap(self):
+        """Test capping outliers at percentile."""
+        from stats_compass_core.cleaning.handle_outliers import (
+            handle_outliers,
+            HandleOutliersInput,
+        )
+
+        # Create data with outliers
+        df = pd.DataFrame({
+            "value": [1, 2, 3, 4, 5, 6, 7, 8, 9, 100],  # 100 is an outlier
+        })
+
+        state = make_state_with_df(df)
+
+        params = HandleOutliersInput(
+            dataframe_name="test",
+            column="value",
+            method="cap",
+            percentile=90,
+        )
+
+        result = handle_outliers(state, params)
+
+        assert result.success is True
+        assert result.method == "cap"
+        assert result.values_affected > 0
+        
+        # Check the data was capped
+        df_after = state.get_dataframe("test")
+        assert df_after["value"].max() < 100
+
+    def test_handle_outliers_clip_iqr(self):
+        """Test clipping outliers using IQR method."""
+        from stats_compass_core.cleaning.handle_outliers import (
+            handle_outliers,
+            HandleOutliersInput,
+        )
+
+        df = pd.DataFrame({
+            "value": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 100, -50],
+        })
+
+        state = make_state_with_df(df)
+
+        params = HandleOutliersInput(
+            dataframe_name="test",
+            column="value",
+            method="clip_iqr",
+        )
+
+        result = handle_outliers(state, params)
+
+        assert result.success is True
+        assert result.method == "clip_iqr"
+        assert result.lower_threshold is not None
+        assert result.upper_threshold is not None
+
+    def test_handle_outliers_remove(self):
+        """Test removing outlier rows."""
+        from stats_compass_core.cleaning.handle_outliers import (
+            handle_outliers,
+            HandleOutliersInput,
+        )
+
+        df = pd.DataFrame({
+            "value": [1, 2, 3, 4, 5, 6, 7, 8, 9, 100],
+        })
+
+        state = make_state_with_df(df)
+
+        params = HandleOutliersInput(
+            dataframe_name="test",
+            column="value",
+            method="remove",
+            percentile=90,
+        )
+
+        result = handle_outliers(state, params)
+
+        assert result.success is True
+        assert result.rows_after < result.rows_before
+
+    def test_handle_outliers_log_transform(self):
+        """Test log transformation."""
+        from stats_compass_core.cleaning.handle_outliers import (
+            handle_outliers,
+            HandleOutliersInput,
+        )
+
+        df = pd.DataFrame({
+            "value": [1, 10, 100, 1000, 10000],
+        })
+
+        state = make_state_with_df(df)
+
+        params = HandleOutliersInput(
+            dataframe_name="test",
+            column="value",
+            method="log_transform",
+        )
+
+        result = handle_outliers(state, params)
+
+        assert result.success is True
+        assert result.method == "log_transform"
+        
+        # Check values were transformed
+        df_after = state.get_dataframe("test")
+        assert df_after["value"].max() < 100  # log1p(10000) ≈ 9.2
+
+    def test_handle_outliers_log_transform_negative_fails(self):
+        """Test log transformation fails with negative values."""
+        from stats_compass_core.cleaning.handle_outliers import (
+            handle_outliers,
+            HandleOutliersInput,
+        )
+
+        df = pd.DataFrame({
+            "value": [-1, 0, 1, 2, 3],
+        })
+
+        state = make_state_with_df(df)
+
+        params = HandleOutliersInput(
+            dataframe_name="test",
+            column="value",
+            method="log_transform",
+        )
+
+        with pytest.raises(ValueError, match="negative values"):
+            handle_outliers(state, params)
+
+    def test_handle_outliers_create_new_column(self):
+        """Test creating new column instead of modifying original."""
+        from stats_compass_core.cleaning.handle_outliers import (
+            handle_outliers,
+            HandleOutliersInput,
+        )
+
+        df = pd.DataFrame({
+            "value": [1, 2, 3, 4, 5, 6, 7, 8, 9, 100],
+        })
+
+        state = make_state_with_df(df)
+
+        params = HandleOutliersInput(
+            dataframe_name="test",
+            column="value",
+            method="cap",
+            percentile=90,
+            create_new_column=True,
+        )
+
+        result = handle_outliers(state, params)
+
+        assert result.result_column == "value_cleaned"
+        
+        df_after = state.get_dataframe("test")
+        assert "value" in df_after.columns
+        assert "value_cleaned" in df_after.columns
+        assert df_after["value"].max() == 100  # Original unchanged
+        assert df_after["value_cleaned"].max() < 100

@@ -13,10 +13,36 @@ Available tools (one per algorithm):
 - train_random_forest_regressor: Train random forest regressor
 - train_gradient_boosting_regressor: Train gradient boosting regressor
 
+Time Series tools:
+- fit_arima: Fit ARIMA model to time series data
+- forecast_arima: Generate forecasts using fitted ARIMA model
+- find_optimal_arima: Automatically find optimal ARIMA parameters
+- test_stationarity: Test if a time series is stationary
+
 Legacy files (deprecated, kept for backward compatibility):
 - _deprecated_train_classifier.py: Old multi-algorithm classifier
 - _deprecated_train_regressor.py: Old multi-algorithm regressor
 
 Note: These tools are automatically discovered by the registry.
 Import scikit-learn separately with: pip install stats-compass-core[ml]
+Import statsmodels separately with: pip install stats-compass-core[timeseries]
 """
+
+# ARIMA tools - available when statsmodels is installed
+try:
+    from stats_compass_core.ml.arima import (
+        fit_arima,
+        forecast_arima,
+        find_optimal_arima,
+        check_stationarity,
+    )
+
+    __all__ = [
+        "fit_arima",
+        "forecast_arima",
+        "find_optimal_arima",
+        "check_stationarity",
+    ]
+except ImportError:
+    # statsmodels not available
+    __all__ = []

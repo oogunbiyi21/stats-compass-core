@@ -315,6 +315,254 @@ class DataFrameListResult(BaseModel):
     total_memory_bytes: int = Field(description="Total memory usage")
 
 
+class ChiSquareResult(BaseModel):
+    """Result for chi-square tests (independence and goodness-of-fit)."""
+    
+    test_type: str = Field(description="Type of chi-square test (independence or goodness_of_fit)")
+    chi2_statistic: float = Field(description="Chi-square statistic")
+    p_value: float = Field(description="P-value for the test")
+    degrees_of_freedom: int = Field(description="Degrees of freedom")
+    n_samples: int = Field(description="Total sample size")
+    
+    # Effect size (Cramér's V for independence test)
+    effect_size: float | None = Field(
+        default=None,
+        description="Effect size (Cramér's V for independence test)"
+    )
+    effect_interpretation: str | None = Field(
+        default=None,
+        description="Interpretation of effect size (negligible, small, medium, large)"
+    )
+    
+    # Significance
+    significant_at_05: bool = Field(description="Whether result is significant at alpha=0.05")
+    significant_at_01: bool = Field(description="Whether result is significant at alpha=0.01")
+    
+    # Tables
+    observed_frequencies: dict[str, Any] = Field(
+        description="Observed frequency table as nested dict"
+    )
+    expected_frequencies: dict[str, Any] = Field(
+        description="Expected frequency table as nested dict"
+    )
+    
+    # Metadata
+    dataframe_name: str = Field(description="Name of the analyzed DataFrame")
+    column1: str = Field(description="First column (row variable for independence)")
+    column2: str | None = Field(
+        default=None,
+        description="Second column (column variable for independence test)"
+    )
+    
+    # Warnings
+    low_expected_count: int = Field(
+        default=0,
+        description="Number of cells with expected frequency < 5"
+    )
+    low_expected_warning: str | None = Field(
+        default=None,
+        description="Warning about cells with low expected frequency"
+    )
+
+
+class OutlierHandlingResult(BaseModel):
+    """Result for outlier handling operations."""
+    
+    success: bool = Field(description="Whether the operation succeeded")
+    method: str = Field(description="Outlier handling method used")
+    column: str = Field(description="Column that was processed")
+    
+    # Statistics
+    rows_before: int = Field(description="Number of rows before operation")
+    rows_after: int = Field(description="Number of rows after operation")
+    values_affected: int = Field(description="Number of values affected/capped/removed")
+    percentage_affected: float = Field(description="Percentage of values affected")
+    
+    # Thresholds used
+    lower_threshold: float | None = Field(default=None, description="Lower threshold used")
+    upper_threshold: float | None = Field(default=None, description="Upper threshold used")
+    
+    # Result column
+    result_column: str = Field(description="Column containing the result (same or new column)")
+    dataframe_name: str = Field(description="Name of the DataFrame in state")
+    
+    # Statistics before/after
+    stats_before: dict[str, float] = Field(
+        default_factory=dict,
+        description="Statistics before operation (min, max, mean, std)"
+    )
+    stats_after: dict[str, float] = Field(
+        default_factory=dict,
+        description="Statistics after operation (min, max, mean, std)"
+    )
+    
+    message: str = Field(description="Human-readable summary of the operation")
+
+
+class DataQualityResult(BaseModel):
+    """Result for data quality analysis tools."""
+    
+    dataframe_name: str = Field(description="Name of the analyzed DataFrame")
+    total_rows: int = Field(description="Total number of rows")
+    total_columns: int = Field(description="Total number of columns")
+    
+    # Missing data summary
+    missing_summary: dict[str, Any] = Field(
+        description="Missing data analysis: columns_with_missing, percentages, patterns"
+    )
+    
+    # Outlier summary (if analyzed)
+    outlier_summary: dict[str, Any] | None = Field(
+        default=None,
+        description="Outlier analysis by column: counts, percentages, bounds"
+    )
+    
+    # Recommendations
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="List of data quality improvement recommendations"
+    )
+    
+    # Quality score
+    quality_score: float | None = Field(
+        default=None,
+        description="Overall data quality score (0-100)"
+    )
+
+
+class ClassificationCurveResult(BaseModel):
+    """Result for ROC and PR curve tools."""
+    
+    curve_type: str = Field(description="Type of curve (roc or precision_recall)")
+    
+    # Curve data
+    x_values: list[float] = Field(description="X-axis values (FPR for ROC, Recall for PR)")
+    y_values: list[float] = Field(description="Y-axis values (TPR for ROC, Precision for PR)")
+    thresholds: list[float] | None = Field(
+        default=None,
+        description="Classification thresholds at each point"
+    )
+    
+    # Summary metrics
+    auc_score: float = Field(description="Area under the curve")
+    
+    # Chart
+    image_base64: str = Field(description="Base64-encoded PNG image of the curve")
+    
+    # Metadata
+    model_id: str = Field(description="ID of the model being evaluated")
+    dataframe_name: str = Field(description="Name of the source DataFrame")
+    target_column: str = Field(description="Name of the target column")
+    
+    # Interpretation
+    interpretation: str = Field(description="Human-readable interpretation of the curve")
+
+
+class ARIMAResult(BaseModel):
+    """Result for ARIMA model fitting."""
+    
+    success: bool = Field(description="Whether model fitting succeeded")
+    operation: str = Field(default="arima_fit", description="Operation performed")
+    
+    # Model parameters
+    order: tuple[int, int, int] = Field(description="ARIMA order (p, d, q)")
+    seasonal_order: tuple[int, int, int, int] | None = Field(
+        default=None,
+        description="Seasonal ARIMA order (P, D, Q, m) if seasonal"
+    )
+    
+    # Model diagnostics
+    aic: float | None = Field(default=None, description="Akaike Information Criterion")
+    bic: float | None = Field(default=None, description="Bayesian Information Criterion")
+    
+    # Fitted values summary
+    n_observations: int = Field(description="Number of observations used")
+    
+    # Model storage
+    model_id: str = Field(description="ID of the stored model in state")
+    dataframe_name: str = Field(description="Name of the source DataFrame")
+    target_column: str = Field(description="Name of the time series column")
+    
+    # Summary statistics
+    residual_std: float | None = Field(
+        default=None,
+        description="Standard deviation of residuals"
+    )
+    
+    # Interpretation
+    message: str = Field(description="Human-readable model summary")
+
+
+class ARIMAForecastResult(BaseModel):
+    """Result for ARIMA forecasting."""
+    
+    success: bool = Field(description="Whether forecasting succeeded")
+    operation: str = Field(default="arima_forecast", description="Operation performed")
+    
+    # Forecast data
+    forecast_values: list[float] = Field(description="Point forecasts")
+    forecast_index: list[str] = Field(description="Index/dates for forecast periods")
+    
+    # Confidence intervals (optional)
+    lower_ci: list[float] | None = Field(
+        default=None,
+        description="Lower confidence interval bounds"
+    )
+    upper_ci: list[float] | None = Field(
+        default=None,
+        description="Upper confidence interval bounds"
+    )
+    confidence_level: float = Field(
+        default=0.95,
+        description="Confidence level for intervals"
+    )
+    
+    # Metadata
+    n_periods: int = Field(description="Number of periods forecasted")
+    model_id: str = Field(description="ID of the ARIMA model used")
+    
+    # Chart (optional)
+    image_base64: str | None = Field(
+        default=None,
+        description="Base64-encoded PNG image of the forecast plot"
+    )
+    
+    # Interpretation
+    message: str = Field(description="Human-readable forecast summary")
+
+
+class ARIMAParameterSearchResult(BaseModel):
+    """Result for automatic ARIMA parameter search."""
+    
+    success: bool = Field(description="Whether parameter search succeeded")
+    operation: str = Field(default="arima_parameter_search", description="Operation performed")
+    
+    # Best parameters
+    best_order: tuple[int, int, int] = Field(description="Best ARIMA order (p, d, q)")
+    best_seasonal_order: tuple[int, int, int, int] | None = Field(
+        default=None,
+        description="Best seasonal order (P, D, Q, m) if seasonal"
+    )
+    best_aic: float = Field(description="AIC of the best model")
+    
+    # Search summary
+    models_evaluated: int = Field(description="Number of models evaluated")
+    search_time_seconds: float = Field(description="Time taken for search in seconds")
+    
+    # Top models comparison
+    top_models: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Top N models with their parameters and AIC scores"
+    )
+    
+    # Metadata
+    dataframe_name: str = Field(description="Name of the source DataFrame")
+    target_column: str = Field(description="Name of the time series column")
+    
+    # Interpretation
+    message: str = Field(description="Human-readable search summary")
+
+
 class OperationError(BaseModel):
     """Result for failed operations."""
     
