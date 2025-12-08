@@ -80,6 +80,9 @@ pip install stats-compass-core[ml]
 # For plotting tools (matplotlib, seaborn)
 pip install stats-compass-core[plots]
 
+# For time series / ARIMA tools (statsmodels)
+pip install stats-compass-core[timeseries]
+
 # For everything
 pip install stats-compass-core[all]
 ```
@@ -238,6 +241,7 @@ result = registry.invoke(
 | `drop_na` | Remove rows/columns with missing values | `DataFrameMutationResult` |
 | `dedupe` | Remove duplicate rows | `DataFrameMutationResult` |
 | `apply_imputation` | Fill missing values (mean/median/mode/constant) | `DataFrameMutationResult` |
+| `handle_outliers` | Handle outliers (cap/remove/winsorize/log/IQR) | `OutlierHandlingResult` |
 
 ### Transform Tools (`stats_compass_core.transforms`)
 
@@ -255,6 +259,11 @@ result = registry.invoke(
 | `correlations` | Correlation matrix | `CorrelationsResult` |
 | `t_test` | Two-sample t-test | `HypothesisTestResult` |
 | `z_test` | Two-sample z-test | `HypothesisTestResult` |
+| `chi_square_independence` | Chi-square test for independence | `HypothesisTestResult` |
+| `chi_square_goodness_of_fit` | Chi-square goodness-of-fit test | `HypothesisTestResult` |
+| `analyze_missing_data` | Analyze missing data patterns | `MissingDataAnalysisResult` |
+| `detect_outliers` | Detect outliers using IQR/Z-score | `OutlierDetectionResult` |
+| `data_quality_report` | Comprehensive data quality report | `DataQualityReportResult` |
 
 ### ML Tools (`stats_compass_core.ml`) *[requires ml extra]*
 
@@ -278,6 +287,17 @@ result = registry.invoke(
 | `bar_chart` | Bar chart of category counts | `ChartResult` |
 | `scatter_plot` | Scatter plot of two columns | `ChartResult` |
 | `feature_importance` | Feature importance from model | `ChartResult` |
+| `roc_curve_plot` | ROC curve for classification model | `ChartResult` |
+| `precision_recall_curve_plot` | Precision-recall curve | `ChartResult` |
+
+### Time Series Tools (`stats_compass_core.ml`) *[requires timeseries extra]*
+
+| Tool | Description | Returns |
+|------|-------------|---------|
+| `fit_arima` | Fit ARIMA(p,d,q) model | `ARIMAResult` |
+| `forecast_arima` | Generate forecasts with confidence intervals | `ARIMAForecastResult` |
+| `find_optimal_arima` | Grid search for best ARIMA parameters | `ARIMAParameterSearchResult` |
+| `check_stationarity` | ADF/KPSS stationarity tests | `StationarityTestResult` |
 
 ## Usage Examples
 
