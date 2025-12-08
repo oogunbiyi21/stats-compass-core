@@ -53,7 +53,7 @@ def pivot(state: DataFrameState, params: PivotInput) -> DataFrameQueryResult:
         KeyError: If pivot operation creates duplicate entries without aggregation
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     # Collect all column names that should exist
     cols_to_check = []

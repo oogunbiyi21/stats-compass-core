@@ -67,7 +67,7 @@ def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
         ) from exc
 
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     if params.column not in df.columns:
         raise ValueError(f"Column '{params.column}' not found in DataFrame")

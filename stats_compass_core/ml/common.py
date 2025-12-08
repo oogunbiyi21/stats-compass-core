@@ -26,7 +26,7 @@ def prepare_ml_data(
         Tuple of (X, y, feature_cols, source_name)
     """
     df = state.get_dataframe(dataframe_name)
-    source_name = dataframe_name or state._active_dataframe
+    source_name = dataframe_name or state.get_active_dataframe_name()
     
     # Validate target column
     if target_column not in df.columns:

@@ -42,7 +42,7 @@ def list_dataframes(state: DataFrameState, params: ListDataFramesInput) -> DataF
     
     return DataFrameListResult(
         dataframes=dataframes_dicts,
-        active_dataframe=state._active_dataframe,
+        active_dataframe=state.get_active_dataframe_name(),
         total_count=len(dataframes_info),
         total_memory_bytes=total_memory_bytes,
     )

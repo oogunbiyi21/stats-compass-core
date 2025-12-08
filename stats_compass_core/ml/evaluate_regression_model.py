@@ -49,7 +49,7 @@ def evaluate_regression_model(
         ValueError: If columns are missing or insufficient data
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     for col in (params.target_column, params.prediction_column):
         if col not in df.columns:

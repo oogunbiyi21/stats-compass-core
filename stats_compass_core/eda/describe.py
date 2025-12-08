@@ -53,7 +53,7 @@ def describe(state: DataFrameState, params: DescribeInput) -> DescribeResult:
         ValueError: If percentiles are out of range or incompatible types specified
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     # Validate percentiles
     if params.percentiles:

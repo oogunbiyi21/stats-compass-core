@@ -283,7 +283,7 @@ def analyze_missing_data(
         DataQualityResult with missing data summary and recommendations
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     total_rows = len(df)
     total_cols = len(df.columns)
@@ -355,7 +355,7 @@ def detect_outliers(
         DataQualityResult with outlier analysis summary
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     total_rows = len(df)
     total_cols = len(df.columns)
@@ -469,7 +469,7 @@ def data_quality_report(
         DataQualityResult with complete quality analysis
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     total_rows = len(df)
     total_cols = len(df.columns)

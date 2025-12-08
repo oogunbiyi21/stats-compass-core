@@ -56,7 +56,7 @@ def apply_imputation(
         ValueError: If required columns are missing or strategy parameters are invalid
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     rows_before = len(df)
 
     if params.columns:

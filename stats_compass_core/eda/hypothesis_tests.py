@@ -76,7 +76,7 @@ def t_test(state: DataFrameState, params: TTestInput) -> HypothesisTestResult:
         ValueError: If columns are missing or contain insufficient data
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     for col in (params.column_a, params.column_b):
         if col not in df.columns:
@@ -134,7 +134,7 @@ def z_test(state: DataFrameState, params: ZTestInput) -> HypothesisTestResult:
         ValueError: If columns are missing or contain insufficient data
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     for col in (params.column_a, params.column_b):
         if col not in df.columns:

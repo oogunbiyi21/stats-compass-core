@@ -47,7 +47,7 @@ def get_schema(state: DataFrameState, params: GetSchemaInput) -> DataFrameSchema
         ValueError: If no DataFrame is available
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     # Build column info
     columns: list[dict[str, Any]] = []

@@ -56,7 +56,7 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
         ValueError: If no numeric columns available or computation fails
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     if params.numeric_only:
         numeric_df = df.select_dtypes(include=["number"])

@@ -130,7 +130,7 @@ def mean_target_encoding(
         )
 
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     # Validate target column exists
     if params.target_column not in df.columns:

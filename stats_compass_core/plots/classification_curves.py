@@ -144,7 +144,7 @@ def roc_curve_plot(
         ) from e
 
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     # Validate columns
     for col in (params.true_column, params.prob_column):
@@ -268,7 +268,7 @@ def precision_recall_curve_plot(
         ) from e
 
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     # Validate columns
     for col in (params.true_column, params.prob_column):

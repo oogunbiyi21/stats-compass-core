@@ -65,7 +65,7 @@ def evaluate_classification_model(
         ) from exc
 
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     for col in (params.target_column, params.prediction_column):
         if col not in df.columns:
@@ -81,18 +81,45 @@ def evaluate_classification_model(
     y_true = data[params.target_column]
     y_pred = data[params.prediction_column]
 
-    labels = sorted(y_true.unique().tolist())
+    # Use union of y_true and y_pred labels to handle cases where:
+    # - Model predicts a class not in test set
+    # - Test set has a class model never predicts
+    labels = sorted(set(y_true.unique().tolist()) | set(y_pred.unique().tolist()))
     average = params.average
-    # For binary targets with non-string labels, sklearn expects 'binary' only when 2 classes
-    if average == "binary" and len(labels) != 2:
-        raise ValueError("binary average requires exactly 2 unique classes")
+    
+    # For binary average, validate exactly 2 classes and set pos_label
+    if average == "binary":
+        if len(labels) != 2:
+            raise ValueError("binary average requires exactly 2 unique classes")
+        # Use the second label (typically 1, or the "positive" class alphabetically)
+        pos_label = labels[1]
+    else:
+        pos_label = 1  # Not used for non-binary averaging
 
     accuracy = float(metrics.accuracy_score(y_true, y_pred))
-    precision = float(metrics.precision_score(
-        y_true, y_pred, average=average, zero_division=0
-    ))
-    recall = float(metrics.recall_score(y_true, y_pred, average=average, zero_division=0))
-    f1 = float(metrics.f1_score(y_true, y_pred, average=average, zero_division=0))
+    
+    # Pass pos_label for binary classification to handle non-0/1 labels
+    if average == "binary":
+        precision = float(metrics.precision_score(
+            y_true, y_pred, average=average, pos_label=pos_label, zero_division=0
+        ))
+        recall = float(metrics.recall_score(
+            y_true, y_pred, average=average, pos_label=pos_label, zero_division=0
+        ))
+        f1 = float(metrics.f1_score(
+            y_true, y_pred, average=average, pos_label=pos_label, zero_division=0
+        ))
+    else:
+        precision = float(metrics.precision_score(
+            y_true, y_pred, average=average, labels=labels, zero_division=0
+        ))
+        recall = float(metrics.recall_score(
+            y_true, y_pred, average=average, labels=labels, zero_division=0
+        ))
+        f1 = float(metrics.f1_score(
+            y_true, y_pred, average=average, labels=labels, zero_division=0
+        ))
+    
     cm = metrics.confusion_matrix(y_true, y_pred, labels=labels)
 
     return ClassificationEvaluationResult(

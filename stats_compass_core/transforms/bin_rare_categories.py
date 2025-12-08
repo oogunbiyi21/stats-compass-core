@@ -164,7 +164,7 @@ def bin_rare_categories(
         ValueError: If columns don't exist or aren't categorical
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     # Validate columns exist
     missing_cols = [col for col in params.categorical_columns if col not in df.columns]

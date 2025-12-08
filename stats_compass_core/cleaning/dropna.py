@@ -45,7 +45,7 @@ def drop_na(state: DataFrameState, params: DropNAInput) -> DataFrameMutationResu
         ValueError: If subset columns don't exist in DataFrame
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     rows_before = len(df)
     cols_before = len(df.columns)
     

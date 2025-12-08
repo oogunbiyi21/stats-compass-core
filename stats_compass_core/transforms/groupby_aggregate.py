@@ -63,7 +63,7 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
         TypeError: If aggregation function is not supported
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     # Validate group-by columns
     missing_cols = set(params.by) - set(df.columns)

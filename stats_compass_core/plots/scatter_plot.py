@@ -66,7 +66,7 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
         ) from exc
 
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     for col in (params.x, params.y):
         if col not in df.columns:

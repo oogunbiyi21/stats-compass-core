@@ -4,6 +4,8 @@ Tool for filtering a DataFrame using a pandas query expression.
 
 from __future__ import annotations
 
+import hashlib
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
@@ -52,7 +54,7 @@ def filter_dataframe(
         ValueError: If the query fails to evaluate
     """
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     try:
         filtered = df.query(params.query)
@@ -67,8 +69,9 @@ def filter_dataframe(
     # Generate name for result
     result_name = params.save_as
     if result_name is None:
-        # Create a short hash of the query for uniqueness
-        query_hash = abs(hash(params.query)) % 10000
+        # Create a deterministic hash of the query for uniqueness
+        # Using SHA256 instead of hash() which is non-deterministic across processes
+        query_hash = hashlib.sha256(params.query.encode()).hexdigest()[:8]
         result_name = f"{source_name}_filtered_{query_hash}"
 
     # Save to state
