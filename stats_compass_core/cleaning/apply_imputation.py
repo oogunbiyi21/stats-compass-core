@@ -32,6 +32,10 @@ class ApplyImputationInput(BaseModel):
         default=None,
         description="Constant value used when strategy='constant'",
     )
+    save_as: str | None = Field(
+        default=None,
+        description="Save result as new DataFrame with this name. If not provided, modifies in place.",
+    )
 
 
 @registry.register(
@@ -105,8 +109,11 @@ def apply_imputation(
             filled_counts[col] = missing_count
             total_filled += missing_count
 
-    # Update DataFrame in state (in-place mutation)
-    state.set_dataframe(imputed_df, name=source_name, operation=f"apply_imputation_{strategy}")
+    # Determine result name - use save_as if provided, otherwise modify in place
+    result_name = params.save_as if params.save_as else source_name
+
+    # Save DataFrame to state
+    state.set_dataframe(imputed_df, name=result_name, operation=f"apply_imputation_{strategy}")
 
     columns_imputed = list(filled_counts.keys())
     message = (
@@ -119,7 +126,7 @@ def apply_imputation(
         rows_before=rows_before,
         rows_after=len(imputed_df),
         rows_affected=total_filled,
-        dataframe_name=source_name,
+        dataframe_name=result_name,
         operation=f"apply_imputation ({strategy})",
         message=message,
         columns_affected=columns_imputed,

@@ -57,6 +57,10 @@ class HandleOutliersInput(BaseModel):
         default=False,
         description="If True, creates new column '{column}_cleaned' instead of modifying original",
     )
+    save_as: str | None = Field(
+        default=None,
+        description="Save result as new DataFrame with this name. If not provided, modifies in place.",
+    )
 
 
 def _get_column_stats(series: pd.Series) -> dict[str, float]:
@@ -270,8 +274,11 @@ def handle_outliers(
     values_affected = method_stats.get("total_affected", 0)
     pct_affected = (values_affected / rows_before * 100) if rows_before > 0 else 0
 
+    # Determine result name (save_as or original)
+    result_name = params.save_as if params.save_as else source_name
+
     # Save to state
-    stored_name = state.set_dataframe(df_result, name=source_name, operation="handle_outliers")
+    stored_name = state.set_dataframe(df_result, name=result_name, operation="handle_outliers")
 
     # Generate message
     method_names = {

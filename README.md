@@ -61,6 +61,38 @@ A stateful, MCP-compatible toolkit of pandas-based data tools for AI-powered dat
    - Multi-tool pipelines and workflows
    - **Not part of this repository**
 
+### Registry & Tool Discovery Flow
+
+The `registry` module is the central nervous system for tool management. Here's how it works:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        STARTUP / INITIALIZATION                         │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. App calls registry.auto_discover()                                  │
+│  2. Registry walks category folders (data/, cleaning/, transforms/...)  │
+│  3. Each module is imported via importlib.import_module()               │
+│  4. @registry.register decorators fire, populating _tools dict          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         TOOL INVOCATION                                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│  1. MCP server receives request: {"tool": "cleaning.drop_na", ...}      │
+│  2. Calls registry.invoke("cleaning", "drop_na", state, params)         │
+│  3. Registry validates params against Pydantic input_schema             │
+│  4. Registry calls tool function with (state, validated_params)         │
+│  5. Tool returns Pydantic result model (JSON-serializable)              │
+│  6. MCP server sends result.model_dump_json() back to LLM               │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key files:**
+- `registry.py` - Tool registration and invocation
+- `state.py` - DataFrameState for server-side data management  
+- `results.py` - Pydantic result types for JSON serialization
+
 ## Installation
 
 ### Basic Installation (Core Only)
@@ -171,8 +203,8 @@ df = state.get_dataframe("raw_data")
 df = state.get_dataframe()  # Gets active DataFrame
 
 # Check what's stored
-print(state._dataframes.keys())  # ['raw_data', 'cleaned']
-print(state._active_dataframe)   # 'cleaned' (most recent)
+print(state.list_dataframes())          # [DataFrameInfo(...), ...]
+print(state.get_active_dataframe_name())  # 'cleaned' (most recent)
 
 # Store trained models
 model_id = state.store_model(
@@ -484,7 +516,7 @@ class MyToolInput(BaseModel):
 @registry.register(category="category", input_schema=MyToolInput, description="...")
 def my_tool(state: DataFrameState, params: MyToolInput) -> SomeResult:
     df = state.get_dataframe(params.dataframe_name)
-    source_name = params.dataframe_name or state._active_dataframe
+    source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     # ... do work ...
     

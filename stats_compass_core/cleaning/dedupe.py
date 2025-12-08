@@ -26,6 +26,10 @@ class DedupeInput(BaseModel):
     ignore_index: bool = Field(
         default=False, description="If True, reset index in result"
     )
+    save_as: str | None = Field(
+        default=None,
+        description="Save result as new DataFrame with this name. If not provided, modifies in place.",
+    )
 
 
 @registry.register(
@@ -64,8 +68,9 @@ def dedupe(state: DataFrameState, params: DedupeInput) -> DataFrameMutationResul
         ignore_index=params.ignore_index,
     )
     
-    # Update the DataFrame in state (in-place modification)
-    stored_name = state.set_dataframe(result_df, name=source_name, operation="dedupe")
+    # Determine where to store the result
+    result_name = params.save_as if params.save_as else source_name
+    stored_name = state.set_dataframe(result_df, name=result_name, operation="dedupe")
     
     rows_after = len(result_df)
     rows_affected = rows_before - rows_after

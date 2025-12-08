@@ -23,6 +23,10 @@ class DropNAInput(BaseModel):
     subset: list[str] | None = Field(
         default=None, description="Column labels to consider"
     )
+    save_as: str | None = Field(
+        default=None,
+        description="Save result as new DataFrame with this name. If not provided, modifies in place.",
+    )
 
 
 @registry.register(
@@ -63,8 +67,11 @@ def drop_na(state: DataFrameState, params: DropNAInput) -> DataFrameMutationResu
 
     result_df = df.dropna(**kwargs)
     
-    # Update the DataFrame in state (in-place modification)
-    stored_name = state.set_dataframe(result_df, name=source_name, operation="drop_na")
+    # Determine result name - use save_as if provided, otherwise modify in place
+    result_name = params.save_as if params.save_as else source_name
+    
+    # Save DataFrame to state
+    stored_name = state.set_dataframe(result_df, name=result_name, operation="drop_na")
     
     rows_after = len(result_df)
     cols_after = len(result_df.columns)

@@ -22,7 +22,6 @@ def dataframe_to_json_safe_records(df: pd.DataFrame, max_rows: int | None = None
     
     Args:
         df: DataFrame to convert
-        max_rows: Optional limit on number of rows to include
         
     Returns:
         List of dicts suitable for JSON serialization
