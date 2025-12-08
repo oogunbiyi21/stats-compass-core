@@ -250,6 +250,8 @@ result = registry.invoke(
 | `groupby_aggregate` | Group and aggregate data | `DataFrameQueryResult` |
 | `pivot` | Reshape long to wide format | `DataFrameQueryResult` |
 | `filter_dataframe` | Filter with pandas query syntax | `DataFrameQueryResult` |
+| `bin_rare_categories` | Bin rare categories into 'Other' | `BinRareCategoriesResult` |
+| `mean_target_encoding` | Target encoding for categoricals *[requires ml]* | `MeanTargetEncodingResult` |
 
 ### EDA Tools (`stats_compass_core.eda`)
 
@@ -295,9 +297,10 @@ result = registry.invoke(
 | Tool | Description | Returns |
 |------|-------------|---------|
 | `fit_arima` | Fit ARIMA(p,d,q) model | `ARIMAResult` |
-| `forecast_arima` | Generate forecasts with confidence intervals | `ARIMAForecastResult` |
+| `forecast_arima` | Generate forecasts (supports natural language periods) | `ARIMAForecastResult` |
 | `find_optimal_arima` | Grid search for best ARIMA parameters | `ARIMAParameterSearchResult` |
 | `check_stationarity` | ADF/KPSS stationarity tests | `StationarityTestResult` |
+| `infer_frequency` | Infer time series frequency | `InferFrequencyResult` |
 
 ## Usage Examples
 

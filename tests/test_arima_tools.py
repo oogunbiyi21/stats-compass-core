@@ -517,3 +517,172 @@ class TestARIMAIntegration:
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
         assert fit_result.order == search_result.best_order
+
+
+# =============================================================================
+# Test Frequency Inference
+# =============================================================================
+
+
+class TestInferFrequency:
+    """Tests for infer_frequency function."""
+
+    def test_infer_daily_frequency(self) -> None:
+        """Test inferring daily frequency from data."""
+        from stats_compass_core.ml.arima import infer_frequency, InferFrequencyInput, InferFrequencyResult
+        
+        state = create_state_with_timeseries(n=100)
+        
+        params = InferFrequencyInput(
+            dataframe_name="timeseries",
+            date_column="date",
+        )
+        
+        result = infer_frequency(state, params)
+        
+        assert isinstance(result, InferFrequencyResult)
+        assert result.success is True
+        assert result.frequency_description == "daily"
+        assert result.frequency_days == pytest.approx(1.0, rel=0.1)
+        assert result.n_observations == 100
+        assert "30 days" in result.conversion_examples
+        assert result.conversion_examples["30 days"] == 30
+
+    def test_infer_weekly_frequency(self) -> None:
+        """Test inferring weekly frequency from data."""
+        from stats_compass_core.ml.arima import infer_frequency, InferFrequencyInput, InferFrequencyResult
+        
+        # Create weekly data
+        state = DataFrameState()
+        dates = pd.date_range(start="2023-01-01", periods=52, freq="W")
+        df = pd.DataFrame({
+            "date": dates,
+            "value": np.random.randn(52).cumsum(),
+        })
+        state.set_dataframe(df, name="weekly", operation="test")
+        
+        params = InferFrequencyInput(
+            dataframe_name="weekly",
+            date_column="date",
+        )
+        
+        result = infer_frequency(state, params)
+        
+        assert isinstance(result, InferFrequencyResult)
+        assert result.success is True
+        assert result.frequency_description == "weekly"
+        assert result.frequency_days == pytest.approx(7.0, rel=0.1)
+        # 30 days with weekly data should be ~4 steps
+        assert result.conversion_examples["30 days"] in [4, 5]
+
+    def test_infer_frequency_invalid_column(self) -> None:
+        """Test error handling for invalid date column."""
+        from stats_compass_core.ml.arima import infer_frequency, InferFrequencyInput
+        from stats_compass_core.results import OperationError
+        
+        state = create_state_with_timeseries()
+        
+        params = InferFrequencyInput(
+            dataframe_name="timeseries",
+            date_column="nonexistent",
+        )
+        
+        result = infer_frequency(state, params)
+        
+        assert isinstance(result, OperationError)
+        assert result.error_type == "ColumnNotFound"
+
+
+class TestForecastWithNaturalLanguage:
+    """Tests for forecast_arima with natural language period specification."""
+
+    def test_forecast_30_days_daily_data(self) -> None:
+        """Test forecasting 30 days on daily data."""
+        state = create_state_with_timeseries(n=100)
+        
+        # Fit model
+        fit_params = FitARIMAInput(
+            dataframe_name="timeseries",
+            target_column="value",
+            date_column="date",
+            p=1,
+            d=0,
+            q=0,
+        )
+        fit_result = fit_arima(state, fit_params)
+        assert isinstance(fit_result, ARIMAResult)
+        
+        # Forecast 30 days using natural language
+        forecast_params = ForecastARIMAInput(
+            model_id=fit_result.model_id,
+            forecast_number=30,
+            forecast_unit="days",
+            include_plot=False,
+        )
+        
+        result = forecast_arima(state, forecast_params)
+        
+        assert isinstance(result, ARIMAForecastResult)
+        assert result.success is True
+        # 30 days on daily data = 30 periods
+        assert result.n_periods == 30
+        assert "30 days" in result.message
+
+    def test_forecast_3_months_daily_data(self) -> None:
+        """Test forecasting 3 months on daily data."""
+        state = create_state_with_timeseries(n=100)
+        
+        # Fit model with date column for proper frequency inference
+        fit_params = FitARIMAInput(
+            dataframe_name="timeseries",
+            target_column="value",
+            date_column="date",
+            p=1,
+            d=0,
+            q=0,
+        )
+        fit_result = fit_arima(state, fit_params)
+        assert isinstance(fit_result, ARIMAResult)
+        
+        # Forecast 3 months
+        forecast_params = ForecastARIMAInput(
+            model_id=fit_result.model_id,
+            forecast_number=3,
+            forecast_unit="months",
+            include_plot=False,
+        )
+        
+        result = forecast_arima(state, forecast_params)
+        
+        assert isinstance(result, ARIMAForecastResult)
+        assert result.success is True
+        # 3 months ≈ 90 days on daily data
+        assert result.n_periods == pytest.approx(90, abs=5)
+        assert "3 months" in result.message
+
+    def test_forecast_defaults_to_10_when_no_period_specified(self) -> None:
+        """Test that forecast defaults to 10 periods when neither n_periods nor natural language specified."""
+        state = create_state_with_timeseries(n=100)
+        
+        # Fit model
+        fit_params = FitARIMAInput(
+            dataframe_name="timeseries",
+            target_column="value",
+            p=1,
+            d=0,
+            q=0,
+        )
+        fit_result = fit_arima(state, fit_params)
+        assert isinstance(fit_result, ARIMAResult)
+        
+        # Forecast without specifying any period
+        forecast_params = ForecastARIMAInput(
+            model_id=fit_result.model_id,
+            include_plot=False,
+        )
+        
+        result = forecast_arima(state, forecast_params)
+        
+        assert isinstance(result, ARIMAForecastResult)
+        assert result.success is True
+        assert result.n_periods == 10

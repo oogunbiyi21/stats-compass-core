@@ -563,6 +563,96 @@ class ARIMAParameterSearchResult(BaseModel):
     message: str = Field(description="Human-readable search summary")
 
 
+class MeanTargetEncodingResult(BaseModel):
+    """Result for mean target encoding of categorical columns."""
+    
+    success: bool = Field(description="Whether encoding succeeded")
+    operation: str = Field(default="mean_target_encoding", description="Operation performed")
+    
+    # DataFrame info
+    dataframe_name: str = Field(description="Name of the modified DataFrame")
+    source_dataframe: str = Field(description="Name of the source DataFrame")
+    rows_affected: int = Field(description="Number of rows in the DataFrame")
+    
+    # Encoding details
+    encoded_columns: list[str] = Field(
+        description="Names of newly created encoded columns"
+    )
+    original_columns: list[str] = Field(
+        description="Original categorical column names that were encoded"
+    )
+    target_column: str = Field(description="Target column used for encoding")
+    
+    # Column mapping (original -> encoded)
+    column_mapping: dict[str, str | list[str]] = Field(
+        description="Mapping from original column names to encoded column names"
+    )
+    
+    # Encoding statistics per column
+    encoding_stats: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Statistics for each encoded column (unique categories, range of encoded values)"
+    )
+    
+    # Encoder storage
+    encoder_id: str = Field(
+        description="ID of the stored encoder for applying to new data"
+    )
+    
+    # Parameters used
+    parameters: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Parameters used for encoding (cv, smooth, target_type)"
+    )
+    
+    # Interpretation
+    message: str = Field(description="Human-readable encoding summary")
+
+
+class BinRareCategoriesResult(BaseModel):
+    """Result for binning rare categories."""
+    
+    success: bool = Field(description="Whether binning succeeded")
+    operation: str = Field(default="bin_rare_categories", description="Operation performed")
+    
+    # DataFrame info
+    dataframe_name: str = Field(description="Name of the modified DataFrame")
+    source_dataframe: str = Field(description="Name of the source DataFrame")
+    rows_affected: int = Field(description="Number of rows in the DataFrame")
+    
+    # Binning details
+    columns_processed: list[str] = Field(
+        description="Columns that were processed"
+    )
+    columns_modified: list[str] = Field(
+        description="Columns that actually had categories binned"
+    )
+    
+    # Per-column binning info
+    binning_details: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Details per column: categories_before, categories_after, binned_categories, rows_affected"
+    )
+    
+    # Mapping for applying to new data
+    category_mapping: dict[str, dict[str, str]] = Field(
+        default_factory=dict,
+        description="Mapping from original categories to binned categories per column"
+    )
+    
+    # Parameters used
+    threshold: float = Field(
+        description="Frequency threshold used for determining rare categories"
+    )
+    bin_label: str = Field(
+        default="Other",
+        description="Label used for binned categories"
+    )
+    
+    # Interpretation
+    message: str = Field(description="Human-readable binning summary")
+
+
 class OperationError(BaseModel):
     """Result for failed operations."""
     

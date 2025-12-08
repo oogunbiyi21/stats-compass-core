@@ -17,7 +17,8 @@ Time Series tools:
 - fit_arima: Fit ARIMA model to time series data
 - forecast_arima: Generate forecasts using fitted ARIMA model
 - find_optimal_arima: Automatically find optimal ARIMA parameters
-- test_stationarity: Test if a time series is stationary
+- check_stationarity: Test if a time series is stationary
+- infer_frequency: Infer the frequency of a time series
 
 Legacy files (deprecated, kept for backward compatibility):
 - _deprecated_train_classifier.py: Old multi-algorithm classifier
@@ -35,6 +36,7 @@ try:
         forecast_arima,
         find_optimal_arima,
         check_stationarity,
+        infer_frequency,
     )
 
     __all__ = [
@@ -42,6 +44,7 @@ try:
         "forecast_arima",
         "find_optimal_arima",
         "check_stationarity",
+        "infer_frequency",
     ]
 except ImportError:
     # statsmodels not available

@@ -78,8 +78,20 @@ class ForecastARIMAInput(BaseModel):
     """Input parameters for ARIMA forecasting."""
 
     model_id: str = Field(description="ID of the fitted ARIMA model to use")
-    n_periods: int = Field(
-        default=10, ge=1, le=365, description="Number of periods to forecast"
+    n_periods: int | None = Field(
+        default=None,
+        ge=1,
+        le=365,
+        description="Number of periods to forecast. Use this OR (forecast_number + forecast_unit).",
+    )
+    forecast_number: int | None = Field(
+        default=None,
+        ge=1,
+        description="Number of time units to forecast (e.g., 30 for '30 days'). Use with forecast_unit.",
+    )
+    forecast_unit: Literal["days", "weeks", "months", "quarters", "years"] | None = Field(
+        default=None,
+        description="Time unit for forecast. Use with forecast_number.",
     )
     confidence_level: float = Field(
         default=0.95, ge=0.5, le=0.99, description="Confidence level for intervals"
@@ -128,6 +140,48 @@ class StationarityTestInput(BaseModel):
         default="both",
         description="Type of stationarity test: 'adf' (Augmented Dickey-Fuller), 'kpss', or 'both'",
     )
+
+
+class InferFrequencyInput(BaseModel):
+    """Input parameters for time series frequency inference."""
+    
+    dataframe_name: str | None = Field(
+        default=None,
+        description="Name of the DataFrame to use. If not provided, uses the active DataFrame.",
+    )
+    date_column: str = Field(
+        description="Name of the date/time column to analyze"
+    )
+
+
+class InferFrequencyResult(BaseModel):
+    """Result for time series frequency inference."""
+    
+    success: bool = Field(description="Whether the inference succeeded")
+    operation: str = Field(default="infer_frequency", description="Operation performed")
+    
+    # Frequency info
+    frequency_description: str = Field(
+        description="Human-readable description of the frequency (e.g., 'daily', 'weekly')"
+    )
+    frequency_timedelta: str = Field(
+        description="Timedelta string representation (e.g., '1 days', '7 days')"
+    )
+    frequency_days: float = Field(
+        description="Frequency in days (e.g., 1.0 for daily, 7.0 for weekly)"
+    )
+    
+    # Data info
+    n_observations: int = Field(description="Number of observations in the time series")
+    date_range: str = Field(description="Date range of the time series")
+    
+    # Conversion examples
+    conversion_examples: dict[str, int] = Field(
+        description="Examples of period conversions (e.g., {'30 days': 30, '3 months': 90})"
+    )
+    
+    # Message
+    message: str = Field(description="Human-readable summary")
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +349,118 @@ def _create_forecast_plot(
     return image_base64
 
 
+def _infer_time_frequency(time_index: pd.DatetimeIndex | pd.Index) -> pd.Timedelta:
+    """
+    Infer the frequency of a time series as a Timedelta.
+    
+    Uses the MEDIAN time difference between consecutive observations,
+    which is robust to:
+    - Missing data points
+    - Occasional gaps (weekends, holidays)
+    - Irregular but mostly-consistent spacing
+    
+    Args:
+        time_index: DatetimeIndex or Index of the time series
+        
+    Returns:
+        pd.Timedelta representing the typical time between observations
+    """
+    if len(time_index) < 2:
+        return pd.Timedelta(days=1)  # Default fallback
+    
+    # Convert to DatetimeIndex if not already
+    if not isinstance(time_index, pd.DatetimeIndex):
+        try:
+            time_index = pd.DatetimeIndex(time_index)
+        except (TypeError, ValueError):
+            return pd.Timedelta(days=1)  # Can't infer, use default
+    
+    # Calculate all time differences
+    time_diffs = time_index.to_series().diff().dropna()
+    
+    if len(time_diffs) == 0:
+        return pd.Timedelta(days=1)
+    
+    # Use median - more robust than mean or mode
+    return time_diffs.median()
+
+
+def _convert_forecast_period_to_steps(
+    time_index: pd.DatetimeIndex | pd.Index,
+    forecast_number: int,
+    forecast_unit: str,
+) -> int:
+    """
+    Convert a human-readable forecast period (e.g., "30 days", "6 months")
+    into the number of data points to forecast.
+    
+    Args:
+        time_index: DatetimeIndex of the time series
+        forecast_number: Number of time units (e.g., 30 for "30 days")
+        forecast_unit: Unit of time ('days', 'weeks', 'months', 'quarters', 'years')
+        
+    Returns:
+        Number of forecast steps to generate
+    """
+    # Get the actual data frequency
+    data_freq = _infer_time_frequency(time_index)
+    
+    # Convert user's request to timedelta
+    unit_mapping = {
+        "days": pd.Timedelta(days=forecast_number),
+        "weeks": pd.Timedelta(weeks=forecast_number),
+        "months": pd.Timedelta(days=forecast_number * 30),  # Approximate
+        "quarters": pd.Timedelta(days=forecast_number * 91),  # Approximate
+        "years": pd.Timedelta(days=forecast_number * 365),  # Approximate
+    }
+    
+    requested_period = unit_mapping.get(forecast_unit.lower())
+    if requested_period is None:
+        # Invalid unit, just return the number as-is
+        return forecast_number
+    
+    # Calculate steps: how many data_freq periods fit in requested_period?
+    steps = int(round(requested_period / data_freq))
+    
+    return max(1, min(steps, 365))  # Bound between 1 and 365
+
+
+def _describe_frequency(freq: pd.Timedelta) -> str:
+    """
+    Describe a frequency timedelta in human-readable terms.
+    
+    Args:
+        freq: Timedelta representing the data frequency
+        
+    Returns:
+        Human-readable description (e.g., "daily", "weekly", "monthly")
+    """
+    days = freq.days
+    
+    if days == 0:
+        hours = freq.seconds // 3600
+        if hours <= 1:
+            return "hourly"
+        elif hours <= 12:
+            return f"every {hours} hours"
+        else:
+            return "sub-daily"
+    elif days == 1:
+        return "daily"
+    elif 5 <= days <= 8:
+        return "weekly"
+    elif 13 <= days <= 16:
+        return "bi-weekly"
+    elif 28 <= days <= 32:
+        return "monthly"
+    elif 85 <= days <= 95:
+        return "quarterly"
+    elif 360 <= days <= 370:
+        return "yearly"
+    else:
+        return f"every {days} days"
+
+
 # ---------------------------------------------------------------------------
 # Tool Functions
 # ---------------------------------------------------------------------------
@@ -404,6 +570,11 @@ def forecast_arima(
     """
     Generate forecasts using a fitted ARIMA model.
 
+    Supports two ways to specify forecast horizon:
+    1. n_periods: Direct number of periods to forecast
+    2. forecast_number + forecast_unit: Natural language (e.g., "30 days", "6 months")
+       - Automatically calculates steps based on data frequency
+
     Args:
         state: DataFrameState containing the fitted model
         params: ForecastARIMAInput with forecast configuration
@@ -427,8 +598,27 @@ def forecast_arima(
         )
 
     try:
+        # Determine number of periods to forecast
+        n_periods: int
+        freq_description = ""
+        
+        if params.forecast_number is not None and params.forecast_unit is not None:
+            # Use natural language period specification
+            time_index = model.model._index
+            n_periods = _convert_forecast_period_to_steps(
+                time_index, params.forecast_number, params.forecast_unit
+            )
+            inferred_freq = _infer_time_frequency(time_index)
+            freq_description = f" (data frequency: {_describe_frequency(inferred_freq)})"
+        elif params.n_periods is not None:
+            # Use direct n_periods
+            n_periods = params.n_periods
+        else:
+            # Default to 10 periods
+            n_periods = 10
+
         # Generate forecast
-        forecast_result = model.get_forecast(steps=params.n_periods)
+        forecast_result = model.get_forecast(steps=n_periods)
         forecast_mean = forecast_result.predicted_mean
 
         # Get confidence intervals
@@ -456,14 +646,20 @@ def forecast_arima(
                 forecast=forecast_mean,
                 lower_ci=conf_int.iloc[:, 0],
                 upper_ci=conf_int.iloc[:, 1],
-                title=f"ARIMA Forecast ({params.n_periods} periods)",
+                title=f"ARIMA Forecast ({n_periods} periods)",
             )
 
         # Create summary message
-        msg = (
-            f"Generated {params.n_periods}-period forecast. "
-            f"Forecast range: {forecast_values[0]:.2f} to {forecast_values[-1]:.2f}"
-        )
+        if params.forecast_number is not None and params.forecast_unit is not None:
+            msg = (
+                f"Generated {n_periods}-period forecast for {params.forecast_number} {params.forecast_unit}{freq_description}. "
+                f"Forecast range: {forecast_values[0]:.2f} to {forecast_values[-1]:.2f}"
+            )
+        else:
+            msg = (
+                f"Generated {n_periods}-period forecast. "
+                f"Forecast range: {forecast_values[0]:.2f} to {forecast_values[-1]:.2f}"
+            )
 
         return ARIMAForecastResult(
             success=True,
@@ -472,7 +668,7 @@ def forecast_arima(
             lower_ci=lower_ci,
             upper_ci=upper_ci,
             confidence_level=params.confidence_level,
-            n_periods=params.n_periods,
+            n_periods=n_periods,
             model_id=params.model_id,
             image_base64=image_base64,
             message=msg,
@@ -713,3 +909,101 @@ def check_stationarity(
     if len(results) == 1:
         return results[0]
     return results
+
+
+def infer_frequency(
+    state: DataFrameState, params: InferFrequencyInput
+) -> InferFrequencyResult | OperationError:
+    """
+    Infer the frequency of a time series.
+
+    This function analyzes the date column to determine the typical
+    interval between observations (daily, weekly, monthly, etc.).
+    It's useful for:
+    - Understanding your time series data structure
+    - Determining how many forecast steps correspond to a time period
+    - Verifying data is properly ordered and spaced
+
+    Args:
+        state: DataFrameState containing the data
+        params: InferFrequencyInput with column specification
+
+    Returns:
+        InferFrequencyResult with frequency details and conversion examples
+    """
+    # Get DataFrame
+    try:
+        if params.dataframe_name:
+            df = state.get_dataframe(params.dataframe_name)
+        else:
+            df = state.get_active_dataframe()
+    except ValueError as e:
+        return OperationError(
+            error_type="DataFrameNotFound",
+            error_message=str(e),
+            operation="infer_frequency",
+            details={"dataframe_name": params.dataframe_name},
+        )
+
+    # Validate date column
+    if params.date_column not in df.columns:
+        return OperationError(
+            error_type="ColumnNotFound",
+            error_message=f"Date column '{params.date_column}' not found",
+            operation="infer_frequency",
+            details={"column": params.date_column, "available": list(df.columns)},
+        )
+
+    # Convert to datetime index
+    try:
+        time_index = pd.DatetimeIndex(pd.to_datetime(df[params.date_column]))
+    except Exception as e:
+        return OperationError(
+            error_type="DateConversionError",
+            error_message=f"Could not convert '{params.date_column}' to datetime: {str(e)}",
+            operation="infer_frequency",
+            details={"column": params.date_column, "error": str(e)},
+        )
+
+    if len(time_index) < 2:
+        return OperationError(
+            error_type="InsufficientData",
+            error_message="Need at least 2 observations to infer frequency",
+            operation="infer_frequency",
+            details={"n_observations": len(time_index)},
+        )
+
+    # Infer frequency
+    freq = _infer_time_frequency(time_index)
+    freq_description = _describe_frequency(freq)
+    freq_days = freq.total_seconds() / (24 * 3600)
+
+    # Calculate conversion examples
+    conversion_examples = {
+        "7 days": _convert_forecast_period_to_steps(time_index, 7, "days"),
+        "30 days": _convert_forecast_period_to_steps(time_index, 30, "days"),
+        "3 months": _convert_forecast_period_to_steps(time_index, 3, "months"),
+        "6 months": _convert_forecast_period_to_steps(time_index, 6, "months"),
+        "1 year": _convert_forecast_period_to_steps(time_index, 1, "years"),
+    }
+
+    # Date range
+    date_range = f"{time_index.min().strftime('%Y-%m-%d')} to {time_index.max().strftime('%Y-%m-%d')}"
+
+    # Build message
+    msg = (
+        f"Time series frequency: {freq_description}. "
+        f"Date range: {date_range} ({len(time_index)} observations). "
+        f"To forecast 30 days, use {conversion_examples['30 days']} periods."
+    )
+
+    return InferFrequencyResult(
+        success=True,
+        frequency_description=freq_description,
+        frequency_timedelta=str(freq),
+        frequency_days=freq_days,
+        n_observations=len(time_index),
+        date_range=date_range,
+        conversion_examples=conversion_examples,
+        message=msg,
+    )
