@@ -14,7 +14,7 @@ from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ChartResult
 
 
-class LineplotInput(BaseModel):
+class LinePlotInput(BaseModel):
     """Input schema for lineplot tool."""
 
     dataframe_name: str | None = Field(
@@ -38,10 +38,10 @@ class LineplotInput(BaseModel):
 
 @registry.register(
     category="plots",
-    input_schema=LineplotInput,
+    input_schema=LinePlotInput,
     description="Create a line plot from DataFrame columns",
 )
-def lineplot(state: DataFrameState, params: LineplotInput) -> ChartResult:
+def lineplot(state: DataFrameState, params: LinePlotInput) -> ChartResult:
     """
     Create a line plot from DataFrame columns.
 

@@ -281,7 +281,13 @@ def _prepare_series(
                 operation="arima",
                 details={"column": date_column},
             )
-        series.index = pd.to_datetime(df[date_column])
+        datetime_index = pd.to_datetime(df[date_column])
+        # Infer and set frequency to avoid statsmodels warnings
+        inferred_freq = pd.infer_freq(datetime_index)
+        if inferred_freq:
+            series.index = pd.DatetimeIndex(datetime_index, freq=inferred_freq)
+        else:
+            series.index = pd.DatetimeIndex(datetime_index)
 
     # Drop NaN values
     series = series.dropna()
@@ -505,13 +511,17 @@ def fit_arima(
         seasonal_order = params.seasonal_order
 
     try:
-        # Fit ARIMA model
-        if seasonal_order:
-            model = ARIMA(series, order=order, seasonal_order=seasonal_order)
-        else:
-            model = ARIMA(series, order=order)
+        # Fit ARIMA model (suppress convergence warnings)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=UserWarning, module='statsmodels')
+            
+            if seasonal_order:
+                model = ARIMA(series, order=order, seasonal_order=seasonal_order)
+            else:
+                model = ARIMA(series, order=order)
 
-        fitted_model = model.fit()
+            fitted_model = model.fit()
 
         # Store model in state
         model_name = params.model_name or f"arima_{params.p}_{params.d}_{params.q}"
@@ -723,24 +733,29 @@ def find_optimal_arima(
     combinations = list(itertools.product(p_range, d_range, q_range))
     results_list: list[dict[str, Any]] = []
 
-    for p, d, q in combinations:
-        try:
-            model = ARIMA(series, order=(p, d, q))
-            fitted = model.fit()
+    # Suppress warnings during grid search
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning, module='statsmodels')
+        
+        for p, d, q in combinations:
+            try:
+                model = ARIMA(series, order=(p, d, q))
+                fitted = model.fit()
 
-            score = fitted.aic if params.criterion == "aic" else fitted.bic
+                score = fitted.aic if params.criterion == "aic" else fitted.bic
 
-            results_list.append(
-                {
-                    "order": (p, d, q),
-                    "aic": float(fitted.aic),
-                    "bic": float(fitted.bic),
-                    "score": float(score),
-                }
-            )
-        except Exception:
-            # Skip models that fail to converge
-            continue
+                results_list.append(
+                    {
+                        "order": (p, d, q),
+                        "aic": float(fitted.aic),
+                        "bic": float(fitted.bic),
+                        "score": float(score),
+                    }
+                )
+            except Exception:
+                # Skip models that fail to converge
+                continue
 
     search_time = time.time() - start_time
 
