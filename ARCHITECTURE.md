@@ -53,13 +53,13 @@ The `DataFrameState` class manages:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     MCP Protocol Layer                       │
+│                     MCP Protocol Layer                      │
 │  (JSON messages, tool schemas, LLM interaction)             │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                      Tool Functions                          │
+│                      Tool Functions                         │
 │  load_csv, drop_na, describe, train_linear_regression...    │
 │  - Receive (state, params) tuple                            │
 │  - Return Pydantic result models (JSON-serializable)        │
@@ -67,8 +67,8 @@ The `DataFrameState` class manages:
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                     DataFrameState                           │
-│  - Named DataFrame storage                                   │
+│                     DataFrameState                          │
+│  - Named DataFrame storage                                  │
 │  - Model storage                                            │
 │  - Memory management                                        │
 └─────────────────────────────────────────────────────────────┘
