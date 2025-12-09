@@ -1,4 +1,4 @@
-"""Tests for data tools (load_csv, get_schema, get_sample, list_dataframes)."""
+"""Tests for data tools (load_csv, get_schema, get_sample, list_dataframes, merge, concat)."""
 
 import pandas as pd
 import pytest
@@ -10,6 +10,8 @@ from stats_compass_core.data.load_csv import load_csv, LoadCSVInput
 from stats_compass_core.data.get_schema import get_schema, GetSchemaInput
 from stats_compass_core.data.get_sample import get_sample, GetSampleInput
 from stats_compass_core.data.list_dataframes import list_dataframes, ListDataFramesInput
+from stats_compass_core.data.merge_dataframes import merge_dataframes, MergeDataFramesInput
+from stats_compass_core.data.concat_dataframes import concat_dataframes, ConcatDataFramesInput
 
 
 class TestLoadCSV:
@@ -200,6 +202,339 @@ class TestListDataFrames:
         params = ListDataFramesInput()
 
         result = list_dataframes(state, params)
+        json_str = result.model_dump_json()
+
+        assert isinstance(json_str, str)
+
+
+class TestMergeDataFrames:
+    """Tests for merge_dataframes tool."""
+
+    @pytest.fixture
+    def state_with_two_dfs(self):
+        """Create state with two DataFrames for merge testing."""
+        state = DataFrameState()
+        
+        # Left DataFrame: customers
+        left_df = pd.DataFrame({
+            "customer_id": [1, 2, 3, 4],
+            "name": ["Alice", "Bob", "Charlie", "Diana"],
+        })
+        state.set_dataframe(left_df, name="customers", operation="test")
+        
+        # Right DataFrame: orders
+        right_df = pd.DataFrame({
+            "customer_id": [1, 2, 2, 5],
+            "order_id": [101, 102, 103, 104],
+            "amount": [100.0, 200.0, 150.0, 300.0],
+        })
+        state.set_dataframe(right_df, name="orders", operation="test")
+        
+        return state
+
+    def test_merge_inner_join(self, state_with_two_dfs):
+        """Test inner join - only matching rows."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="inner",
+            on="customer_id",
+            save_as="inner_result",
+        )
+
+        result = merge_dataframes(state_with_two_dfs, params)
+
+        assert result.success is True
+        assert result.dataframe_name == "inner_result"
+        # Customer 1 has 1 order, customer 2 has 2 orders = 3 rows
+        assert result.rows_after == 3
+        
+        df = state_with_two_dfs.get_dataframe("inner_result")
+        assert "name" in df.columns
+        assert "amount" in df.columns
+
+    def test_merge_left_join(self, state_with_two_dfs):
+        """Test left join - keep all left rows."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="left",
+            on="customer_id",
+            save_as="left_result",
+        )
+
+        result = merge_dataframes(state_with_two_dfs, params)
+
+        assert result.success is True
+        # All 4 customers, customer 2 has 2 orders = 5 rows
+        # Customer 3, 4 have NaN for order columns
+        df = state_with_two_dfs.get_dataframe("left_result")
+        assert len(df) == 5
+        assert df[df["customer_id"] == 3]["amount"].isna().all()
+
+    def test_merge_right_join(self, state_with_two_dfs):
+        """Test right join - keep all right rows."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="right",
+            on="customer_id",
+            save_as="right_result",
+        )
+
+        result = merge_dataframes(state_with_two_dfs, params)
+
+        assert result.success is True
+        # All 4 orders, customer 5 has no name
+        df = state_with_two_dfs.get_dataframe("right_result")
+        assert len(df) == 4
+        assert df[df["customer_id"] == 5]["name"].isna().all()
+
+    def test_merge_outer_join(self, state_with_two_dfs):
+        """Test outer join - keep all rows from both."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="outer",
+            on="customer_id",
+            save_as="outer_result",
+        )
+
+        result = merge_dataframes(state_with_two_dfs, params)
+
+        assert result.success is True
+        # All customers + all orders with unmatched rows
+        df = state_with_two_dfs.get_dataframe("outer_result")
+        # 1 (1 order) + 2 (2 orders) + 3 (0 orders) + 4 (0 orders) + 5 (1 order, no customer) = 6
+        assert len(df) == 6
+
+    def test_merge_different_column_names(self):
+        """Test merge with different column names in each DataFrame."""
+        state = DataFrameState()
+        
+        left_df = pd.DataFrame({
+            "id": [1, 2, 3],
+            "value_a": ["a", "b", "c"],
+        })
+        state.set_dataframe(left_df, name="left", operation="test")
+        
+        right_df = pd.DataFrame({
+            "key": [1, 2, 4],
+            "value_b": ["x", "y", "z"],
+        })
+        state.set_dataframe(right_df, name="right", operation="test")
+        
+        params = MergeDataFramesInput(
+            left_dataframe="left",
+            right_dataframe="right",
+            how="inner",
+            left_on="id",
+            right_on="key",
+        )
+
+        result = merge_dataframes(state, params)
+
+        assert result.success is True
+        assert result.rows_after == 2  # id 1 and 2 match
+
+    def test_merge_auto_name(self, state_with_two_dfs):
+        """Test auto-generated name when save_as not provided."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="inner",
+            on="customer_id",
+        )
+
+        result = merge_dataframes(state_with_two_dfs, params)
+
+        assert result.dataframe_name == "customers_orders_merged"
+
+    def test_merge_invalid_column(self, state_with_two_dfs):
+        """Test error when join column doesn't exist."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="inner",
+            on="nonexistent_column",
+        )
+
+        with pytest.raises(ValueError, match="not found"):
+            merge_dataframes(state_with_two_dfs, params)
+
+    def test_merge_json_serializable(self, state_with_two_dfs):
+        """Test that result is JSON serializable."""
+        params = MergeDataFramesInput(
+            left_dataframe="customers",
+            right_dataframe="orders",
+            how="inner",
+            on="customer_id",
+        )
+
+        result = merge_dataframes(state_with_two_dfs, params)
+        json_str = result.model_dump_json()
+
+        assert isinstance(json_str, str)
+
+
+class TestConcatDataFrames:
+    """Tests for concat_dataframes tool."""
+
+    @pytest.fixture
+    def state_with_stackable_dfs(self):
+        """Create state with DataFrames that can be stacked."""
+        state = DataFrameState()
+        
+        df1 = pd.DataFrame({
+            "A": [1, 2, 3],
+            "B": [4, 5, 6],
+        })
+        state.set_dataframe(df1, name="df1", operation="test")
+        
+        df2 = pd.DataFrame({
+            "A": [7, 8],
+            "B": [9, 10],
+        })
+        state.set_dataframe(df2, name="df2", operation="test")
+        
+        df3 = pd.DataFrame({
+            "A": [11],
+            "B": [12],
+        })
+        state.set_dataframe(df3, name="df3", operation="test")
+        
+        return state
+
+    def test_concat_vertical_basic(self, state_with_stackable_dfs):
+        """Test basic vertical concatenation."""
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2"],
+            axis=0,
+            save_as="stacked",
+        )
+
+        result = concat_dataframes(state_with_stackable_dfs, params)
+
+        assert result.success is True
+        assert result.rows_after == 5  # 3 + 2
+        
+        df = state_with_stackable_dfs.get_dataframe("stacked")
+        assert list(df["A"]) == [1, 2, 3, 7, 8]
+
+    def test_concat_multiple_dfs(self, state_with_stackable_dfs):
+        """Test concatenating more than two DataFrames."""
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2", "df3"],
+            axis=0,
+            save_as="all_stacked",
+        )
+
+        result = concat_dataframes(state_with_stackable_dfs, params)
+
+        assert result.success is True
+        assert result.rows_after == 6  # 3 + 2 + 1
+
+    def test_concat_horizontal(self):
+        """Test horizontal concatenation (adding columns)."""
+        state = DataFrameState()
+        
+        df1 = pd.DataFrame({"A": [1, 2, 3]})
+        state.set_dataframe(df1, name="features1", operation="test")
+        
+        df2 = pd.DataFrame({"B": [4, 5, 6]})
+        state.set_dataframe(df2, name="features2", operation="test")
+        
+        params = ConcatDataFramesInput(
+            dataframes=["features1", "features2"],
+            axis=1,
+            save_as="combined_features",
+        )
+
+        result = concat_dataframes(state, params)
+
+        assert result.success is True
+        df = state.get_dataframe("combined_features")
+        assert list(df.columns) == ["A", "B"]
+        assert len(df) == 3
+
+    def test_concat_outer_join(self):
+        """Test outer join - keeps all columns, fills NaN."""
+        state = DataFrameState()
+        
+        df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        state.set_dataframe(df1, name="df1", operation="test")
+        
+        df2 = pd.DataFrame({"A": [5, 6], "C": [7, 8]})  # Has C instead of B
+        state.set_dataframe(df2, name="df2", operation="test")
+        
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2"],
+            axis=0,
+            join="outer",
+            save_as="outer_result",
+        )
+
+        result = concat_dataframes(state, params)
+
+        df = state.get_dataframe("outer_result")
+        assert "A" in df.columns
+        assert "B" in df.columns
+        assert "C" in df.columns
+        assert len(df) == 4
+
+    def test_concat_inner_join(self):
+        """Test inner join - keeps only common columns."""
+        state = DataFrameState()
+        
+        df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        state.set_dataframe(df1, name="df1", operation="test")
+        
+        df2 = pd.DataFrame({"A": [5, 6], "C": [7, 8]})  # Has C instead of B
+        state.set_dataframe(df2, name="df2", operation="test")
+        
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2"],
+            axis=0,
+            join="inner",
+            save_as="inner_result",
+        )
+
+        result = concat_dataframes(state, params)
+
+        df = state.get_dataframe("inner_result")
+        assert list(df.columns) == ["A"]  # Only common column
+        assert len(df) == 4
+
+    def test_concat_auto_name_two(self, state_with_stackable_dfs):
+        """Test auto-generated name for two DataFrames."""
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2"],
+            axis=0,
+        )
+
+        result = concat_dataframes(state_with_stackable_dfs, params)
+
+        assert result.dataframe_name == "df1_df2_concat"
+
+    def test_concat_auto_name_many(self, state_with_stackable_dfs):
+        """Test auto-generated name for many DataFrames."""
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2", "df3"],
+            axis=0,
+        )
+
+        result = concat_dataframes(state_with_stackable_dfs, params)
+
+        assert result.dataframe_name == "df1_and_2_others_concat"
+
+    def test_concat_json_serializable(self, state_with_stackable_dfs):
+        """Test that result is JSON serializable."""
+        params = ConcatDataFramesInput(
+            dataframes=["df1", "df2"],
+            axis=0,
+        )
+
+        result = concat_dataframes(state_with_stackable_dfs, params)
         json_str = result.model_dump_json()
 
         assert isinstance(json_str, str)
