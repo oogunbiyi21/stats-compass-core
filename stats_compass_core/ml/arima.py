@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 
+from stats_compass_core.registry import registry
 from stats_compass_core.results import (
     ARIMAForecastResult,
     ARIMAParameterSearchResult,
@@ -470,6 +471,11 @@ def _describe_frequency(freq: pd.Timedelta) -> str:
 # ---------------------------------------------------------------------------
 
 
+@registry.register(
+    category="ml",
+    input_schema=FitARIMAInput,
+    description="Fit an ARIMA model to time series data for forecasting",
+)
 def fit_arima(
     state: DataFrameState, params: FitARIMAInput
 ) -> ARIMAResult | OperationError:
@@ -572,6 +578,11 @@ def fit_arima(
         )
 
 
+@registry.register(
+    category="ml",
+    input_schema=ForecastARIMAInput,
+    description="Generate forecasts using a fitted ARIMA model",
+)
 def forecast_arima(
     state: DataFrameState, params: ForecastARIMAInput
 ) -> ARIMAForecastResult | OperationError:
@@ -691,6 +702,11 @@ def forecast_arima(
         )
 
 
+@registry.register(
+    category="ml",
+    input_schema=FindOptimalARIMAInput,
+    description="Automatically find optimal ARIMA parameters using grid search",
+)
 def find_optimal_arima(
     state: DataFrameState, params: FindOptimalARIMAInput
 ) -> ARIMAParameterSearchResult | OperationError:
@@ -797,6 +813,11 @@ def find_optimal_arima(
     )
 
 
+@registry.register(
+    category="ml",
+    input_schema=StationarityTestInput,
+    description="Test if a time series is stationary using ADF and/or KPSS tests",
+)
 def check_stationarity(
     state: DataFrameState, params: StationarityTestInput
 ) -> StationarityTestResult | list[StationarityTestResult] | OperationError:
@@ -924,6 +945,11 @@ def check_stationarity(
     return results
 
 
+@registry.register(
+    category="ml",
+    input_schema=InferFrequencyInput,
+    description="Infer the frequency of a time series (daily, weekly, monthly, etc.)",
+)
 def infer_frequency(
     state: DataFrameState, params: InferFrequencyInput
 ) -> InferFrequencyResult | OperationError:

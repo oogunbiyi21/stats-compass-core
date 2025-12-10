@@ -1,4 +1,4 @@
-"""Tests for data tools (load_csv, get_schema, get_sample, list_dataframes, merge, concat)."""
+"""Tests for data tools (load_csv, get_schema, get_sample, list_dataframes, merge, concat, column operations)."""
 
 import pandas as pd
 import pytest
@@ -12,6 +12,9 @@ from stats_compass_core.data.get_sample import get_sample, GetSampleInput
 from stats_compass_core.data.list_dataframes import list_dataframes, ListDataFramesInput
 from stats_compass_core.data.merge_dataframes import merge_dataframes, MergeDataFramesInput
 from stats_compass_core.data.concat_dataframes import concat_dataframes, ConcatDataFramesInput
+from stats_compass_core.data.drop_columns import drop_columns, DropColumnsInput
+from stats_compass_core.data.rename_columns import rename_columns, RenameColumnsInput
+from stats_compass_core.data.add_column import add_column, AddColumnInput
 
 
 class TestLoadCSV:
@@ -535,6 +538,366 @@ class TestConcatDataFrames:
         )
 
         result = concat_dataframes(state_with_stackable_dfs, params)
+        json_str = result.model_dump_json()
+
+        assert isinstance(json_str, str)
+
+
+class TestDropColumns:
+    """Tests for drop_columns tool."""
+
+    @pytest.fixture
+    def state_with_df(self):
+        """Create state with a test DataFrame."""
+        state = DataFrameState()
+        df = pd.DataFrame({
+            "A": [1, 2, 3],
+            "B": [4, 5, 6],
+            "C": [7, 8, 9],
+            "D": [10, 11, 12],
+        })
+        state.set_dataframe(df, name="test_df", operation="test")
+        return state
+
+    def test_drop_single_column(self, state_with_df):
+        """Test dropping a single column."""
+        params = DropColumnsInput(
+            dataframe_name="test_df",
+            columns=["B"],
+        )
+
+        result = drop_columns(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert "B" not in df.columns
+        assert list(df.columns) == ["A", "C", "D"]
+
+    def test_drop_multiple_columns(self, state_with_df):
+        """Test dropping multiple columns."""
+        params = DropColumnsInput(
+            dataframe_name="test_df",
+            columns=["A", "C"],
+        )
+
+        result = drop_columns(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert list(df.columns) == ["B", "D"]
+        assert result.columns_affected == ["A", "C"]
+
+    def test_drop_column_not_found_raise(self, state_with_df):
+        """Test error when column not found and errors='raise'."""
+        params = DropColumnsInput(
+            dataframe_name="test_df",
+            columns=["nonexistent"],
+            errors="raise",
+        )
+
+        with pytest.raises(KeyError) as exc_info:
+            drop_columns(state_with_df, params)
+        
+        assert "nonexistent" in str(exc_info.value)
+
+    def test_drop_column_not_found_ignore(self, state_with_df):
+        """Test ignoring missing columns when errors='ignore'."""
+        params = DropColumnsInput(
+            dataframe_name="test_df",
+            columns=["nonexistent", "A"],
+            errors="ignore",
+        )
+
+        result = drop_columns(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert "A" not in df.columns
+        assert len(df.columns) == 3
+
+    def test_drop_columns_save_as(self, state_with_df):
+        """Test saving result as new DataFrame."""
+        params = DropColumnsInput(
+            dataframe_name="test_df",
+            columns=["B"],
+            save_as="dropped_result",
+        )
+
+        result = drop_columns(state_with_df, params)
+
+        assert result.dataframe_name == "dropped_result"
+        # Original unchanged
+        assert "B" in state_with_df.get_dataframe("test_df").columns
+        # New one has dropped column
+        assert "B" not in state_with_df.get_dataframe("dropped_result").columns
+
+    def test_drop_columns_json_serializable(self, state_with_df):
+        """Test that result is JSON serializable."""
+        params = DropColumnsInput(
+            dataframe_name="test_df",
+            columns=["A"],
+        )
+
+        result = drop_columns(state_with_df, params)
+        json_str = result.model_dump_json()
+
+        assert isinstance(json_str, str)
+
+
+class TestRenameColumns:
+    """Tests for rename_columns tool."""
+
+    @pytest.fixture
+    def state_with_df(self):
+        """Create state with a test DataFrame."""
+        state = DataFrameState()
+        df = pd.DataFrame({
+            "old_a": [1, 2, 3],
+            "old_b": [4, 5, 6],
+            "old_c": [7, 8, 9],
+        })
+        state.set_dataframe(df, name="test_df", operation="test")
+        return state
+
+    def test_rename_single_column(self, state_with_df):
+        """Test renaming a single column."""
+        params = RenameColumnsInput(
+            dataframe_name="test_df",
+            mapping={"old_a": "new_a"},
+        )
+
+        result = rename_columns(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert "new_a" in df.columns
+        assert "old_a" not in df.columns
+
+    def test_rename_multiple_columns(self, state_with_df):
+        """Test renaming multiple columns."""
+        params = RenameColumnsInput(
+            dataframe_name="test_df",
+            mapping={"old_a": "A", "old_b": "B"},
+        )
+
+        result = rename_columns(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert list(df.columns) == ["A", "B", "old_c"]
+        assert result.columns_affected == ["A", "B"]
+
+    def test_rename_column_not_found_raise(self, state_with_df):
+        """Test error when column to rename not found."""
+        params = RenameColumnsInput(
+            dataframe_name="test_df",
+            mapping={"nonexistent": "something"},
+            errors="raise",
+        )
+
+        with pytest.raises(KeyError) as exc_info:
+            rename_columns(state_with_df, params)
+        
+        assert "nonexistent" in str(exc_info.value)
+
+    def test_rename_column_not_found_ignore(self, state_with_df):
+        """Test ignoring missing columns when errors='ignore'."""
+        params = RenameColumnsInput(
+            dataframe_name="test_df",
+            mapping={"nonexistent": "something", "old_a": "A"},
+            errors="ignore",
+        )
+
+        result = rename_columns(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert "A" in df.columns
+
+    def test_rename_save_as(self, state_with_df):
+        """Test saving result as new DataFrame."""
+        params = RenameColumnsInput(
+            dataframe_name="test_df",
+            mapping={"old_a": "A"},
+            save_as="renamed_df",
+        )
+
+        result = rename_columns(state_with_df, params)
+
+        assert result.dataframe_name == "renamed_df"
+        # Original unchanged
+        assert "old_a" in state_with_df.get_dataframe("test_df").columns
+        # New one has renamed column
+        assert "A" in state_with_df.get_dataframe("renamed_df").columns
+
+    def test_rename_json_serializable(self, state_with_df):
+        """Test that result is JSON serializable."""
+        params = RenameColumnsInput(
+            dataframe_name="test_df",
+            mapping={"old_a": "A"},
+        )
+
+        result = rename_columns(state_with_df, params)
+        json_str = result.model_dump_json()
+
+        assert isinstance(json_str, str)
+
+
+class TestAddColumn:
+    """Tests for add_column tool."""
+
+    @pytest.fixture
+    def state_with_df(self):
+        """Create state with a test DataFrame."""
+        state = DataFrameState()
+        df = pd.DataFrame({
+            "price": [10.0, 20.0, 30.0],
+            "quantity": [2, 3, 4],
+            "tax_rate": [0.1, 0.1, 0.2],
+        })
+        state.set_dataframe(df, name="test_df", operation="test")
+        return state
+
+    def test_add_column_with_expression(self, state_with_df):
+        """Test adding a column with an expression."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="total",
+            expression="price * quantity",
+        )
+
+        result = add_column(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert "total" in df.columns
+        assert list(df["total"]) == [20.0, 60.0, 120.0]
+
+    def test_add_column_complex_expression(self, state_with_df):
+        """Test adding a column with a complex expression."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="total_with_tax",
+            expression="price * quantity * (1 + tax_rate)",
+        )
+
+        result = add_column(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert "total_with_tax" in df.columns
+        # 10*2*1.1=22, 20*3*1.1=66, 30*4*1.2=144
+        expected = [22.0, 66.0, 144.0]
+        assert list(df["total_with_tax"]) == expected
+
+    def test_add_column_constant_value(self, state_with_df):
+        """Test adding a column with a constant value."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="status",
+            value="active",
+        )
+
+        result = add_column(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert all(df["status"] == "active")
+
+    def test_add_column_constant_numeric(self, state_with_df):
+        """Test adding a column with a constant numeric value."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="discount",
+            value=0,
+        )
+
+        result = add_column(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert all(df["discount"] == 0)
+
+    def test_add_column_overwrite_existing(self, state_with_df):
+        """Test overwriting an existing column."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="price",  # Already exists
+            expression="price * 2",
+        )
+
+        result = add_column(state_with_df, params)
+
+        assert result.success is True
+        df = state_with_df.get_dataframe("test_df")
+        assert list(df["price"]) == [20.0, 40.0, 60.0]
+        assert "Updated existing" in result.message
+
+    def test_add_column_save_as(self, state_with_df):
+        """Test saving result as new DataFrame."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="total",
+            expression="price * quantity",
+            save_as="with_total",
+        )
+
+        result = add_column(state_with_df, params)
+
+        assert result.dataframe_name == "with_total"
+        # Original unchanged
+        assert "total" not in state_with_df.get_dataframe("test_df").columns
+        # New one has the column
+        assert "total" in state_with_df.get_dataframe("with_total").columns
+
+    def test_add_column_invalid_expression(self, state_with_df):
+        """Test error for invalid expression."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="result",
+            expression="nonexistent_column * 2",
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            add_column(state_with_df, params)
+        
+        assert "Invalid expression" in str(exc_info.value)
+
+    def test_add_column_missing_both_params(self, state_with_df):
+        """Test error when neither expression nor value provided."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="result",
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            add_column(state_with_df, params)
+        
+        assert "Must provide either" in str(exc_info.value)
+
+    def test_add_column_both_params_provided(self, state_with_df):
+        """Test error when both expression and value provided."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="result",
+            expression="price * 2",
+            value=100,
+        )
+
+        with pytest.raises(ValueError) as exc_info:
+            add_column(state_with_df, params)
+        
+        assert "not both" in str(exc_info.value)
+
+    def test_add_column_json_serializable(self, state_with_df):
+        """Test that result is JSON serializable."""
+        params = AddColumnInput(
+            dataframe_name="test_df",
+            column_name="total",
+            expression="price * quantity",
+        )
+
+        result = add_column(state_with_df, params)
         json_str = result.model_dump_json()
 
         assert isinstance(json_str, str)
