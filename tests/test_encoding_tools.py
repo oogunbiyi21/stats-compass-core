@@ -2,22 +2,22 @@
 Tests for encoding tools: mean_target_encoding and bin_rare_categories.
 """
 
-import pytest
-import pandas as pd
 import numpy as np
+import pandas as pd
+import pytest
 
+from stats_compass_core.results import BinRareCategoriesResult, MeanTargetEncodingResult
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.results import MeanTargetEncodingResult, BinRareCategoriesResult
 from stats_compass_core.transforms.bin_rare_categories import (
-    bin_rare_categories,
     BinRareCategoriesInput,
+    bin_rare_categories,
 )
 
 # Conditional import for mean_target_encoding (requires sklearn)
 try:
     from stats_compass_core.transforms.mean_target_encoding import (
-        mean_target_encoding,
         MeanTargetEncodingInput,
+        mean_target_encoding,
     )
     SKLEARN_AVAILABLE = True
 except ImportError:
@@ -45,7 +45,7 @@ def rare_categories_df():
     # Most values are 'common1' and 'common2', a few are rare
     categories = ["common1"] * 40 + ["common2"] * 35 + ["rare1"] * 3 + ["rare2"] * 2
     np.random.shuffle(categories)
-    
+
     return pd.DataFrame({
         "category": categories,
         "value": np.random.randn(80),
@@ -104,7 +104,7 @@ class TestBinRareCategories:
         assert result.success is True
         assert "category" in result.columns_processed
         assert "category" in result.columns_modified
-        
+
         # Check that rare categories were binned
         df_result = state.get_dataframe("test")
         unique_cats = df_result["category"].unique()
@@ -145,7 +145,7 @@ class TestBinRareCategories:
 
         assert result.success is True
         assert result.bin_label == "RARE"
-        
+
         df_result = state.get_dataframe("test")
         assert "RARE" in df_result["category"].unique()
 
@@ -205,7 +205,7 @@ class TestBinRareCategories:
 
         assert result.dataframe_name == "binned"
         assert result.source_dataframe == "original"
-        
+
         # Both DataFrames should exist
         df_names = [df.name for df in state.list_dataframes()]
         assert "original" in df_names
@@ -226,11 +226,11 @@ class TestBinRareCategories:
 
         assert "category" in result.category_mapping
         mapping = result.category_mapping["category"]
-        
+
         # Common categories should map to themselves
         assert mapping["common1"] == "common1"
         assert mapping["common2"] == "common2"
-        
+
         # Rare categories should map to 'Other'
         assert mapping["rare1"] == "Other"
         assert mapping["rare2"] == "Other"
@@ -289,7 +289,7 @@ class TestMeanTargetEncoding:
         assert result.success is True
         assert "category_a" in result.original_columns
         assert "category_a_encoded" in result.encoded_columns
-        
+
         # Check encoded column exists in DataFrame
         df_result = state.get_dataframe("test")
         assert "category_a_encoded" in df_result.columns
@@ -328,7 +328,7 @@ class TestMeanTargetEncoding:
         assert result.success is True
         # Multiclass should create multiple encoded columns per feature
         assert len(result.encoded_columns) >= 1
-        
+
         # Column mapping should reflect multiple columns
         mapping = result.column_mapping["category"]
         if isinstance(mapping, list):
@@ -366,7 +366,7 @@ class TestMeanTargetEncoding:
         result = mean_target_encoding(state, params)
 
         assert result.encoder_id is not None
-        
+
         # Verify encoder can be retrieved
         models = state.list_models()
         assert any(result.encoder_id in m.model_id for m in models)
@@ -419,7 +419,7 @@ class TestMeanTargetEncoding:
         result = mean_target_encoding(state, params)
 
         assert result.success is True
-        
+
         df_result = state.get_dataframe("test")
         # Original column should be removed
         assert "category_a" not in df_result.columns
@@ -522,7 +522,7 @@ class TestEncodingIntegration:
         """Test binning rare categories then target encoding."""
         if not SKLEARN_AVAILABLE:
             pytest.skip("scikit-learn not installed")
-        
+
         state = DataFrameState()
         state.set_dataframe(rare_categories_df, name="data", operation="test")
 
@@ -547,6 +547,6 @@ class TestEncodingIntegration:
         # Verify the pipeline worked
         df_result = state.get_dataframe("data")
         assert "category_encoded" in df_result.columns
-        
+
         # The "Other" category from binning should now be encoded
         assert "Other" in df_result["category"].unique()

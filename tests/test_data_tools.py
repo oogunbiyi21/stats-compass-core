@@ -1,20 +1,27 @@
 """Tests for data tools (load_csv, get_schema, get_sample, list_dataframes, merge, concat, column operations)."""
 
+import os
+import tempfile
+
 import pandas as pd
 import pytest
-import tempfile
-import os
 
+from stats_compass_core.data.add_column import AddColumnInput, add_column
+from stats_compass_core.data.concat_dataframes import (
+    ConcatDataFramesInput,
+    concat_dataframes,
+)
+from stats_compass_core.data.drop_columns import DropColumnsInput, drop_columns
+from stats_compass_core.data.get_sample import GetSampleInput, get_sample
+from stats_compass_core.data.get_schema import GetSchemaInput, get_schema
+from stats_compass_core.data.list_dataframes import ListDataFramesInput, list_dataframes
+from stats_compass_core.data.load_csv import LoadCSVInput, load_csv
+from stats_compass_core.data.merge_dataframes import (
+    MergeDataFramesInput,
+    merge_dataframes,
+)
+from stats_compass_core.data.rename_columns import RenameColumnsInput, rename_columns
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.data.load_csv import load_csv, LoadCSVInput
-from stats_compass_core.data.get_schema import get_schema, GetSchemaInput
-from stats_compass_core.data.get_sample import get_sample, GetSampleInput
-from stats_compass_core.data.list_dataframes import list_dataframes, ListDataFramesInput
-from stats_compass_core.data.merge_dataframes import merge_dataframes, MergeDataFramesInput
-from stats_compass_core.data.concat_dataframes import concat_dataframes, ConcatDataFramesInput
-from stats_compass_core.data.drop_columns import drop_columns, DropColumnsInput
-from stats_compass_core.data.rename_columns import rename_columns, RenameColumnsInput
-from stats_compass_core.data.add_column import add_column, AddColumnInput
 
 
 class TestLoadCSV:
@@ -217,14 +224,14 @@ class TestMergeDataFrames:
     def state_with_two_dfs(self):
         """Create state with two DataFrames for merge testing."""
         state = DataFrameState()
-        
+
         # Left DataFrame: customers
         left_df = pd.DataFrame({
             "customer_id": [1, 2, 3, 4],
             "name": ["Alice", "Bob", "Charlie", "Diana"],
         })
         state.set_dataframe(left_df, name="customers", operation="test")
-        
+
         # Right DataFrame: orders
         right_df = pd.DataFrame({
             "customer_id": [1, 2, 2, 5],
@@ -232,7 +239,7 @@ class TestMergeDataFrames:
             "amount": [100.0, 200.0, 150.0, 300.0],
         })
         state.set_dataframe(right_df, name="orders", operation="test")
-        
+
         return state
 
     def test_merge_inner_join(self, state_with_two_dfs):
@@ -251,7 +258,7 @@ class TestMergeDataFrames:
         assert result.dataframe_name == "inner_result"
         # Customer 1 has 1 order, customer 2 has 2 orders = 3 rows
         assert result.rows_after == 3
-        
+
         df = state_with_two_dfs.get_dataframe("inner_result")
         assert "name" in df.columns
         assert "amount" in df.columns
@@ -314,19 +321,19 @@ class TestMergeDataFrames:
     def test_merge_different_column_names(self):
         """Test merge with different column names in each DataFrame."""
         state = DataFrameState()
-        
+
         left_df = pd.DataFrame({
             "id": [1, 2, 3],
             "value_a": ["a", "b", "c"],
         })
         state.set_dataframe(left_df, name="left", operation="test")
-        
+
         right_df = pd.DataFrame({
             "key": [1, 2, 4],
             "value_b": ["x", "y", "z"],
         })
         state.set_dataframe(right_df, name="right", operation="test")
-        
+
         params = MergeDataFramesInput(
             left_dataframe="left",
             right_dataframe="right",
@@ -387,25 +394,25 @@ class TestConcatDataFrames:
     def state_with_stackable_dfs(self):
         """Create state with DataFrames that can be stacked."""
         state = DataFrameState()
-        
+
         df1 = pd.DataFrame({
             "A": [1, 2, 3],
             "B": [4, 5, 6],
         })
         state.set_dataframe(df1, name="df1", operation="test")
-        
+
         df2 = pd.DataFrame({
             "A": [7, 8],
             "B": [9, 10],
         })
         state.set_dataframe(df2, name="df2", operation="test")
-        
+
         df3 = pd.DataFrame({
             "A": [11],
             "B": [12],
         })
         state.set_dataframe(df3, name="df3", operation="test")
-        
+
         return state
 
     def test_concat_vertical_basic(self, state_with_stackable_dfs):
@@ -420,7 +427,7 @@ class TestConcatDataFrames:
 
         assert result.success is True
         assert result.rows_after == 5  # 3 + 2
-        
+
         df = state_with_stackable_dfs.get_dataframe("stacked")
         assert list(df["A"]) == [1, 2, 3, 7, 8]
 
@@ -440,13 +447,13 @@ class TestConcatDataFrames:
     def test_concat_horizontal(self):
         """Test horizontal concatenation (adding columns)."""
         state = DataFrameState()
-        
+
         df1 = pd.DataFrame({"A": [1, 2, 3]})
         state.set_dataframe(df1, name="features1", operation="test")
-        
+
         df2 = pd.DataFrame({"B": [4, 5, 6]})
         state.set_dataframe(df2, name="features2", operation="test")
-        
+
         params = ConcatDataFramesInput(
             dataframes=["features1", "features2"],
             axis=1,
@@ -463,13 +470,13 @@ class TestConcatDataFrames:
     def test_concat_outer_join(self):
         """Test outer join - keeps all columns, fills NaN."""
         state = DataFrameState()
-        
+
         df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
         state.set_dataframe(df1, name="df1", operation="test")
-        
+
         df2 = pd.DataFrame({"A": [5, 6], "C": [7, 8]})  # Has C instead of B
         state.set_dataframe(df2, name="df2", operation="test")
-        
+
         params = ConcatDataFramesInput(
             dataframes=["df1", "df2"],
             axis=0,
@@ -488,13 +495,13 @@ class TestConcatDataFrames:
     def test_concat_inner_join(self):
         """Test inner join - keeps only common columns."""
         state = DataFrameState()
-        
+
         df1 = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
         state.set_dataframe(df1, name="df1", operation="test")
-        
+
         df2 = pd.DataFrame({"A": [5, 6], "C": [7, 8]})  # Has C instead of B
         state.set_dataframe(df2, name="df2", operation="test")
-        
+
         params = ConcatDataFramesInput(
             dataframes=["df1", "df2"],
             axis=0,
@@ -597,7 +604,7 @@ class TestDropColumns:
 
         with pytest.raises(KeyError) as exc_info:
             drop_columns(state_with_df, params)
-        
+
         assert "nonexistent" in str(exc_info.value)
 
     def test_drop_column_not_found_ignore(self, state_with_df):
@@ -697,7 +704,7 @@ class TestRenameColumns:
 
         with pytest.raises(KeyError) as exc_info:
             rename_columns(state_with_df, params)
-        
+
         assert "nonexistent" in str(exc_info.value)
 
     def test_rename_column_not_found_ignore(self, state_with_df):
@@ -860,7 +867,7 @@ class TestAddColumn:
 
         with pytest.raises(ValueError) as exc_info:
             add_column(state_with_df, params)
-        
+
         assert "Invalid expression" in str(exc_info.value)
 
     def test_add_column_missing_both_params(self, state_with_df):
@@ -872,7 +879,7 @@ class TestAddColumn:
 
         with pytest.raises(ValueError) as exc_info:
             add_column(state_with_df, params)
-        
+
         assert "Must provide either" in str(exc_info.value)
 
     def test_add_column_both_params_provided(self, state_with_df):
@@ -886,7 +893,7 @@ class TestAddColumn:
 
         with pytest.raises(ValueError) as exc_info:
             add_column(state_with_df, params)
-        
+
         assert "not both" in str(exc_info.value)
 
     def test_add_column_json_serializable(self, state_with_df):

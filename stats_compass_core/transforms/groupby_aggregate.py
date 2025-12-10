@@ -5,8 +5,11 @@ Tool for grouping and aggregating DataFrame data.
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
+from stats_compass_core.results import (
+    DataFrameQueryResult,
+    dataframe_to_json_safe_records,
+)
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.results import DataFrameQueryResult, dataframe_to_json_safe_records
 
 # Valid aggregation functions supported by this tool
 # This is a deliberately constrained list to ensure deterministic behavior
@@ -64,7 +67,7 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
     """
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     # Validate group-by columns
     missing_cols = set(params.by) - set(df.columns)
     if missing_cols:
@@ -79,31 +82,31 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
     # Perform groupby and aggregation
     try:
         result_df = df.groupby(params.by, as_index=params.as_index).agg(params.agg_func)
-        
+
         # Reset index to make it a proper DataFrame for storage
         if params.as_index:
             result_df = result_df.reset_index()
-        
+
         # Flatten multi-level column names if present
         if isinstance(result_df.columns, pd.MultiIndex):
             result_df.columns = ['_'.join(col).strip('_') for col in result_df.columns.values]
-        
+
     except Exception as e:
         raise TypeError(f"Aggregation failed: {str(e)}") from e
-    
+
     # Generate a name for the result if not provided
     result_name = params.save_as
     if result_name is None:
         by_str = '_'.join(params.by)
         result_name = f"{source_name}_grouped_by_{by_str}"
-    
+
     # Save result to state as new DataFrame
     stored_name = state.set_dataframe(result_df, name=result_name, operation="groupby_aggregate")
-    
+
     # Convert to JSON-safe dict (handles NaN, Timestamps, etc.)
     max_rows = 100
     data = dataframe_to_json_safe_records(result_df, max_rows=max_rows)
-    
+
     return DataFrameQueryResult(
         data={"records": data, "truncated": len(result_df) > max_rows},
         shape=(len(result_df), len(result_df.columns)),

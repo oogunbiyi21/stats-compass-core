@@ -14,8 +14,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import BinRareCategoriesResult
+from stats_compass_core.state import DataFrameState
 
 
 class BinRareCategoriesInput(BaseModel):
@@ -62,21 +62,21 @@ def _validate_categorical_column(
         # Check for corrupted data (mostly numeric strings)
         unique_vals = df[col].dropna().unique()
         numeric_looking = 0
-        
+
         for val in unique_vals:
             try:
                 float(str(val))
                 numeric_looking += 1
             except (ValueError, TypeError):
                 pass
-        
+
         # If >80% of values are numeric, likely a corrupted numeric column
         if len(unique_vals) > 0 and numeric_looking / len(unique_vals) > 0.8:
             return False, (
                 f"Column '{col}' appears to be a corrupted numeric column "
                 f"(most values are numeric strings). Clean the data first."
             )
-        
+
         return True, None
     else:
         return False, (
@@ -99,14 +99,14 @@ def _bin_column(
     """
     value_counts = series.value_counts()
     total_count = len(series.dropna())
-    
+
     # Determine which categories are rare
     if min_count is not None:
         rare_categories = value_counts[value_counts < min_count].index.tolist()
     else:
         value_frequencies = value_counts / total_count
         rare_categories = value_frequencies[value_frequencies < threshold].index.tolist()
-    
+
     # Build category mapping
     category_mapping = {}
     for cat in value_counts.index:
@@ -114,17 +114,17 @@ def _bin_column(
             category_mapping[str(cat)] = bin_label
         else:
             category_mapping[str(cat)] = str(cat)
-    
+
     # Apply binning
     binned_series = series.copy()
     if rare_categories:
         binned_series = binned_series.replace(rare_categories, bin_label)
-    
+
     # Calculate stats
     rows_affected = 0
     if rare_categories:
         rows_affected = int(series.isin(rare_categories).sum())
-    
+
     binning_info = {
         "categories_before": int(series.nunique()),
         "categories_after": int(binned_series.nunique()),
@@ -134,7 +134,7 @@ def _bin_column(
         "total_rows": total_count,
         "percent_affected": round(rows_affected / total_count * 100, 2) if total_count > 0 else 0,
     }
-    
+
     return binned_series, binning_info, category_mapping
 
 
@@ -177,14 +177,14 @@ def bin_rare_categories(
     # Validate columns are categorical
     valid_columns = []
     validation_errors = []
-    
+
     for col in params.categorical_columns:
         is_valid, error_msg = _validate_categorical_column(df, col)
         if is_valid:
             valid_columns.append(col)
         else:
             validation_errors.append(error_msg)
-    
+
     if validation_errors and not valid_columns:
         raise ValueError(
             "No valid categorical columns to process. Errors:\n" +
@@ -206,11 +206,11 @@ def bin_rare_categories(
             min_count=params.min_count,
             bin_label=params.bin_label,
         )
-        
+
         df_binned[col] = binned_series
         binning_details[col] = binning_info
         category_mapping[col] = col_mapping
-        
+
         if binning_info["rare_categories_count"] > 0:
             columns_modified.append(col)
 

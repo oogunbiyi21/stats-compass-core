@@ -4,13 +4,11 @@ Tool for evaluating classification model predictions.
 
 from __future__ import annotations
 
-import math
-
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ClassificationEvaluationResult
+from stats_compass_core.state import DataFrameState
 
 
 class EvaluateClassificationInput(BaseModel):
@@ -86,7 +84,7 @@ def evaluate_classification_model(
     # - Test set has a class model never predicts
     labels = sorted(set(y_true.unique().tolist()) | set(y_pred.unique().tolist()))
     average = params.average
-    
+
     # For binary average, validate exactly 2 classes and set pos_label
     if average == "binary":
         if len(labels) != 2:
@@ -97,7 +95,7 @@ def evaluate_classification_model(
         pos_label = 1  # Not used for non-binary averaging
 
     accuracy = float(metrics.accuracy_score(y_true, y_pred))
-    
+
     # Pass pos_label for binary classification to handle non-0/1 labels
     if average == "binary":
         precision = float(metrics.precision_score(
@@ -119,7 +117,7 @@ def evaluate_classification_model(
         f1 = float(metrics.f1_score(
             y_true, y_pred, average=average, labels=labels, zero_division=0
         ))
-    
+
     cm = metrics.confusion_matrix(y_true, y_pred, labels=labels)
 
     return ClassificationEvaluationResult(

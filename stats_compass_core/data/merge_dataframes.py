@@ -8,8 +8,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class MergeDataFramesInput(BaseModel):
@@ -113,7 +113,7 @@ def merge_dataframes(
         # Using different columns from each DataFrame
         left_cols = [params.left_on] if isinstance(params.left_on, str) else params.left_on
         right_cols = [params.right_on] if isinstance(params.right_on, str) else params.right_on
-        
+
         for col in left_cols:
             if col not in left_df.columns:
                 raise ValueError(
@@ -151,8 +151,8 @@ def merge_dataframes(
 
     # Store in state
     state.set_dataframe(
-        merged_df, 
-        name=result_name, 
+        merged_df,
+        name=result_name,
         operation=f"merge_{params.how}"
     )
 

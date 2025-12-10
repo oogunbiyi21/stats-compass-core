@@ -20,8 +20,8 @@ class TestChiSquareTests:
     def test_chi_square_independence_basic(self):
         """Test chi-square independence test with basic categorical data."""
         from stats_compass_core.eda.chi_square_tests import (
-            chi_square_independence,
             ChiSquareIndependenceInput,
+            chi_square_independence,
         )
 
         # Create sample data with association
@@ -54,8 +54,8 @@ class TestChiSquareTests:
     def test_chi_square_independence_significant(self):
         """Test chi-square independence with clearly associated data."""
         from stats_compass_core.eda.chi_square_tests import (
-            chi_square_independence,
             ChiSquareIndependenceInput,
+            chi_square_independence,
         )
 
         # Create data with strong association
@@ -82,8 +82,8 @@ class TestChiSquareTests:
     def test_chi_square_goodness_of_fit_uniform(self):
         """Test chi-square goodness of fit with uniform distribution."""
         from stats_compass_core.eda.chi_square_tests import (
-            chi_square_goodness_of_fit,
             ChiSquareGoodnessOfFitInput,
+            chi_square_goodness_of_fit,
         )
 
         # Create data close to uniform distribution
@@ -110,8 +110,8 @@ class TestChiSquareTests:
     def test_chi_square_goodness_of_fit_custom_expected(self):
         """Test chi-square goodness of fit with custom expected frequencies."""
         from stats_compass_core.eda.chi_square_tests import (
-            chi_square_goodness_of_fit,
             ChiSquareGoodnessOfFitInput,
+            chi_square_goodness_of_fit,
         )
 
         # Create data that matches expected proportions
@@ -135,8 +135,8 @@ class TestChiSquareTests:
     def test_chi_square_missing_column(self):
         """Test chi-square with missing column raises error."""
         from stats_compass_core.eda.chi_square_tests import (
-            chi_square_independence,
             ChiSquareIndependenceInput,
+            chi_square_independence,
         )
 
         df = pd.DataFrame({"a": [1, 2, 3]})
@@ -158,8 +158,8 @@ class TestDataQuality:
     def test_analyze_missing_data_basic(self):
         """Test missing data analysis."""
         from stats_compass_core.eda.data_quality import (
-            analyze_missing_data,
             AnalyzeMissingDataInput,
+            analyze_missing_data,
         )
 
         df = pd.DataFrame({
@@ -182,8 +182,8 @@ class TestDataQuality:
     def test_detect_outliers_iqr(self):
         """Test outlier detection with IQR method."""
         from stats_compass_core.eda.data_quality import (
-            detect_outliers,
             DetectOutliersInput,
+            detect_outliers,
         )
 
         df = pd.DataFrame({
@@ -207,8 +207,8 @@ class TestDataQuality:
     def test_detect_outliers_zscore(self):
         """Test outlier detection with z-score method."""
         from stats_compass_core.eda.data_quality import (
-            detect_outliers,
             DetectOutliersInput,
+            detect_outliers,
         )
 
         # Create data with clear outlier
@@ -230,8 +230,8 @@ class TestDataQuality:
     def test_data_quality_report_comprehensive(self):
         """Test comprehensive data quality report."""
         from stats_compass_core.eda.data_quality import (
-            data_quality_report,
             DataQualityReportInput,
+            data_quality_report,
         )
 
         df = pd.DataFrame({
@@ -262,8 +262,8 @@ class TestDataQuality:
     def test_data_quality_report_no_outliers(self):
         """Test data quality report without outlier analysis."""
         from stats_compass_core.eda.data_quality import (
-            data_quality_report,
             DataQualityReportInput,
+            data_quality_report,
         )
 
         df = pd.DataFrame({

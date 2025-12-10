@@ -13,19 +13,19 @@ import pandas as pd
 import pytest
 
 from stats_compass_core.ml.arima import (
+    FindOptimalARIMAInput,
     FitARIMAInput,
     ForecastARIMAInput,
-    FindOptimalARIMAInput,
     StationarityTestInput,
+    check_stationarity,
+    find_optimal_arima,
     fit_arima,
     forecast_arima,
-    find_optimal_arima,
-    check_stationarity,
 )
 from stats_compass_core.results import (
-    ARIMAResult,
     ARIMAForecastResult,
     ARIMAParameterSearchResult,
+    ARIMAResult,
     OperationError,
 )
 from stats_compass_core.state import DataFrameState
@@ -35,10 +35,10 @@ def create_state_with_timeseries(n: int = 100, trend: bool = False) -> DataFrame
     """Create a DataFrameState with time series data."""
     state = DataFrameState()
     np.random.seed(42)
-    
+
     # Create date index
     dates = pd.date_range(start="2020-01-01", periods=n, freq="D")
-    
+
     # Create a time series with some autocorrelation
     values = np.zeros(n)
     values[0] = 100
@@ -47,7 +47,7 @@ def create_state_with_timeseries(n: int = 100, trend: bool = False) -> DataFrame
         values[i] = 0.7 * values[i - 1] + np.random.normal(0, 5)
         if trend:
             values[i] += 0.1 * i  # Add trend
-    
+
     df = pd.DataFrame({"date": dates, "value": values, "other": np.random.randn(n)})
     state.set_dataframe(df, name="timeseries", operation="test")
     return state
@@ -66,9 +66,9 @@ class TestFitARIMA:
             d=0,
             q=0,
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, ARIMAResult)
         assert result.success is True
         assert result.order == (1, 0, 0)
@@ -88,9 +88,9 @@ class TestFitARIMA:
             d=1,
             q=1,
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, ARIMAResult)
         assert result.success is True
         assert result.order == (1, 1, 1)
@@ -106,9 +106,9 @@ class TestFitARIMA:
             d=0,
             q=0,
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, ARIMAResult)
         assert result.success is True
 
@@ -123,9 +123,9 @@ class TestFitARIMA:
             q=0,
             model_name="my_arima_model",
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, ARIMAResult)
         assert "my_arima_model" in result.model_id
 
@@ -139,9 +139,9 @@ class TestFitARIMA:
             d=0,
             q=0,
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, OperationError)
         assert result.error_type == "ColumnNotFound"
 
@@ -155,9 +155,9 @@ class TestFitARIMA:
             d=0,
             q=0,
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, OperationError)
         assert result.error_type == "DataFrameNotFound"
 
@@ -166,7 +166,7 @@ class TestFitARIMA:
         state = DataFrameState()
         df = pd.DataFrame({"value": [1, 2, 3, 4, 5]})  # Only 5 points
         state.set_dataframe(df, name="small", operation="test")
-        
+
         params = FitARIMAInput(
             dataframe_name="small",
             target_column="value",
@@ -174,9 +174,9 @@ class TestFitARIMA:
             d=0,
             q=0,
         )
-        
+
         result = fit_arima(state, params)
-        
+
         assert isinstance(result, OperationError)
         assert result.error_type == "InsufficientData"
 
@@ -187,7 +187,7 @@ class TestForecastARIMA:
     def test_forecast_basic(self) -> None:
         """Test basic ARIMA forecasting."""
         state = create_state_with_timeseries()
-        
+
         # First fit a model
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -198,16 +198,16 @@ class TestForecastARIMA:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # Then forecast
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
             n_periods=10,
             include_plot=False,
         )
-        
+
         result = forecast_arima(state, forecast_params)
-        
+
         assert isinstance(result, ARIMAForecastResult)
         assert result.success is True
         assert len(result.forecast_values) == 10
@@ -220,7 +220,7 @@ class TestForecastARIMA:
     def test_forecast_with_plot(self) -> None:
         """Test ARIMA forecasting with plot generation."""
         state = create_state_with_timeseries()
-        
+
         # First fit a model
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -231,16 +231,16 @@ class TestForecastARIMA:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # Then forecast with plot
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
             n_periods=10,
             include_plot=True,
         )
-        
+
         result = forecast_arima(state, forecast_params)
-        
+
         assert isinstance(result, ARIMAForecastResult)
         assert result.image_base64 is not None
         assert len(result.image_base64) > 0
@@ -248,7 +248,7 @@ class TestForecastARIMA:
     def test_forecast_custom_confidence(self) -> None:
         """Test ARIMA forecasting with custom confidence level."""
         state = create_state_with_timeseries()
-        
+
         # First fit a model
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -259,7 +259,7 @@ class TestForecastARIMA:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # Forecast with 90% confidence
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
@@ -267,23 +267,23 @@ class TestForecastARIMA:
             confidence_level=0.90,
             include_plot=False,
         )
-        
+
         result = forecast_arima(state, forecast_params)
-        
+
         assert isinstance(result, ARIMAForecastResult)
         assert result.confidence_level == 0.90
 
     def test_forecast_model_not_found(self) -> None:
         """Test error when model doesn't exist."""
         state = DataFrameState()
-        
+
         params = ForecastARIMAInput(
             model_id="nonexistent_model",
             n_periods=10,
         )
-        
+
         result = forecast_arima(state, params)
-        
+
         assert isinstance(result, OperationError)
         assert result.error_type == "ModelNotFound"
 
@@ -303,9 +303,9 @@ class TestFindOptimalARIMA:
             criterion="aic",
             top_n=3,
         )
-        
+
         result = find_optimal_arima(state, params)
-        
+
         assert isinstance(result, ARIMAParameterSearchResult)
         assert result.success is True
         assert result.best_order is not None
@@ -325,9 +325,9 @@ class TestFindOptimalARIMA:
             max_q=1,
             criterion="bic",
         )
-        
+
         result = find_optimal_arima(state, params)
-        
+
         assert isinstance(result, ARIMAParameterSearchResult)
         assert result.success is True
         # BIC should be in the message
@@ -344,9 +344,9 @@ class TestFindOptimalARIMA:
             max_q=2,
             top_n=5,
         )
-        
+
         result = find_optimal_arima(state, params)
-        
+
         assert isinstance(result, ARIMAParameterSearchResult)
         # Verify top models are sorted by AIC (ascending)
         if len(result.top_models) > 1:
@@ -365,18 +365,20 @@ class TestCheckStationarity:
             target_column="value",
             test_type="adf",
         )
-        
+
         result = check_stationarity(state, params)
-        
-        # Should return single result for single test
-        from stats_compass_core.ml.arima import StationarityTestResult
-        assert isinstance(result, StationarityTestResult)
+
+        from stats_compass_core.ml.arima import StationarityResult
+        assert isinstance(result, StationarityResult)
         assert result.success is True
-        assert result.test_type == "adf"
-        assert result.test_statistic is not None
-        assert result.p_value is not None
-        assert result.critical_values is not None
+        assert result.adf_result is not None
+        assert result.kpss_result is None
+        assert result.adf_result.test_type == "adf"
+        assert result.adf_result.test_statistic is not None
+        assert result.adf_result.p_value is not None
+        assert result.adf_result.critical_values is not None
         assert isinstance(result.is_stationary, bool)
+        assert result.recommendation is not None
 
     def test_stationarity_kpss(self) -> None:
         """Test KPSS stationarity test."""
@@ -386,13 +388,15 @@ class TestCheckStationarity:
             target_column="value",
             test_type="kpss",
         )
-        
+
         result = check_stationarity(state, params)
-        
-        from stats_compass_core.ml.arima import StationarityTestResult
-        assert isinstance(result, StationarityTestResult)
+
+        from stats_compass_core.ml.arima import StationarityResult
+        assert isinstance(result, StationarityResult)
         assert result.success is True
-        assert result.test_type == "kpss"
+        assert result.adf_result is None
+        assert result.kpss_result is not None
+        assert result.kpss_result.test_type == "kpss"
 
     def test_stationarity_both(self) -> None:
         """Test both ADF and KPSS tests."""
@@ -402,39 +406,43 @@ class TestCheckStationarity:
             target_column="value",
             test_type="both",
         )
-        
+
         result = check_stationarity(state, params)
-        
-        # Should return list with two results
-        assert isinstance(result, list)
-        assert len(result) == 2
-        test_types = {r.test_type for r in result}
-        assert test_types == {"adf", "kpss"}
+
+        from stats_compass_core.ml.arima import StationarityResult
+        assert isinstance(result, StationarityResult)
+        assert result.success is True
+        assert result.adf_result is not None
+        assert result.kpss_result is not None
+        assert result.adf_result.test_type == "adf"
+        assert result.kpss_result.test_type == "kpss"
+        assert result.recommendation is not None
+        assert result.n_observations == 100
 
     def test_stationarity_nonstationary_series(self) -> None:
         """Test stationarity on a clearly non-stationary series (random walk)."""
         state = DataFrameState()
         np.random.seed(42)
-        
+
         # Random walk (non-stationary)
         n = 200
         values = np.cumsum(np.random.randn(n))
         df = pd.DataFrame({"value": values})
         state.set_dataframe(df, name="random_walk", operation="test")
-        
+
         params = StationarityTestInput(
             dataframe_name="random_walk",
             target_column="value",
             test_type="adf",
         )
-        
+
         result = check_stationarity(state, params)
-        
-        from stats_compass_core.ml.arima import StationarityTestResult
-        assert isinstance(result, StationarityTestResult)
+
+        from stats_compass_core.ml.arima import StationarityResult
+        assert isinstance(result, StationarityResult)
         # Random walk should typically be non-stationary
-        # (though not guaranteed with small samples)
-        assert result.interpretation is not None
+        assert result.adf_result is not None
+        assert result.adf_result.interpretation is not None
 
     def test_stationarity_missing_column(self) -> None:
         """Test error when column doesn't exist."""
@@ -444,9 +452,9 @@ class TestCheckStationarity:
             target_column="nonexistent",
             test_type="adf",
         )
-        
+
         result = check_stationarity(state, params)
-        
+
         assert isinstance(result, OperationError)
         assert result.error_type == "ColumnNotFound"
 
@@ -457,7 +465,7 @@ class TestARIMAIntegration:
     def test_full_workflow(self) -> None:
         """Test complete workflow: fit -> forecast."""
         state = create_state_with_timeseries(n=100)
-        
+
         # 1. Test stationarity
         stat_params = StationarityTestInput(
             dataframe_name="timeseries",
@@ -465,9 +473,9 @@ class TestARIMAIntegration:
             test_type="adf",
         )
         stat_result = check_stationarity(state, stat_params)
-        from stats_compass_core.ml.arima import StationarityTestResult
-        assert isinstance(stat_result, StationarityTestResult)
-        
+        from stats_compass_core.ml.arima import StationarityResult
+        assert isinstance(stat_result, StationarityResult)
+
         # 2. Fit ARIMA model
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -478,7 +486,7 @@ class TestARIMAIntegration:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # 3. Generate forecast
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
@@ -493,7 +501,7 @@ class TestARIMAIntegration:
     def test_parameter_search_and_fit(self) -> None:
         """Test parameter search followed by fitting best model."""
         state = create_state_with_timeseries(n=50)
-        
+
         # 1. Find optimal parameters
         search_params = FindOptimalARIMAInput(
             dataframe_name="timeseries",
@@ -504,7 +512,7 @@ class TestARIMAIntegration:
         )
         search_result = find_optimal_arima(state, search_params)
         assert isinstance(search_result, ARIMAParameterSearchResult)
-        
+
         # 2. Fit with best parameters
         best_p, best_d, best_q = search_result.best_order
         fit_params = FitARIMAInput(
@@ -529,17 +537,21 @@ class TestInferFrequency:
 
     def test_infer_daily_frequency(self) -> None:
         """Test inferring daily frequency from data."""
-        from stats_compass_core.ml.arima import infer_frequency, InferFrequencyInput, InferFrequencyResult
-        
+        from stats_compass_core.ml.arima import (
+            InferFrequencyInput,
+            InferFrequencyResult,
+            infer_frequency,
+        )
+
         state = create_state_with_timeseries(n=100)
-        
+
         params = InferFrequencyInput(
             dataframe_name="timeseries",
             date_column="date",
         )
-        
+
         result = infer_frequency(state, params)
-        
+
         assert isinstance(result, InferFrequencyResult)
         assert result.success is True
         assert result.frequency_description == "daily"
@@ -550,8 +562,12 @@ class TestInferFrequency:
 
     def test_infer_weekly_frequency(self) -> None:
         """Test inferring weekly frequency from data."""
-        from stats_compass_core.ml.arima import infer_frequency, InferFrequencyInput, InferFrequencyResult
-        
+        from stats_compass_core.ml.arima import (
+            InferFrequencyInput,
+            InferFrequencyResult,
+            infer_frequency,
+        )
+
         # Create weekly data
         state = DataFrameState()
         dates = pd.date_range(start="2023-01-01", periods=52, freq="W")
@@ -560,14 +576,14 @@ class TestInferFrequency:
             "value": np.random.randn(52).cumsum(),
         })
         state.set_dataframe(df, name="weekly", operation="test")
-        
+
         params = InferFrequencyInput(
             dataframe_name="weekly",
             date_column="date",
         )
-        
+
         result = infer_frequency(state, params)
-        
+
         assert isinstance(result, InferFrequencyResult)
         assert result.success is True
         assert result.frequency_description == "weekly"
@@ -577,18 +593,18 @@ class TestInferFrequency:
 
     def test_infer_frequency_invalid_column(self) -> None:
         """Test error handling for invalid date column."""
-        from stats_compass_core.ml.arima import infer_frequency, InferFrequencyInput
+        from stats_compass_core.ml.arima import InferFrequencyInput, infer_frequency
         from stats_compass_core.results import OperationError
-        
+
         state = create_state_with_timeseries()
-        
+
         params = InferFrequencyInput(
             dataframe_name="timeseries",
             date_column="nonexistent",
         )
-        
+
         result = infer_frequency(state, params)
-        
+
         assert isinstance(result, OperationError)
         assert result.error_type == "ColumnNotFound"
 
@@ -599,7 +615,7 @@ class TestForecastWithNaturalLanguage:
     def test_forecast_30_days_daily_data(self) -> None:
         """Test forecasting 30 days on daily data."""
         state = create_state_with_timeseries(n=100)
-        
+
         # Fit model
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -611,7 +627,7 @@ class TestForecastWithNaturalLanguage:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # Forecast 30 days using natural language
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
@@ -619,9 +635,9 @@ class TestForecastWithNaturalLanguage:
             forecast_unit="days",
             include_plot=False,
         )
-        
+
         result = forecast_arima(state, forecast_params)
-        
+
         assert isinstance(result, ARIMAForecastResult)
         assert result.success is True
         # 30 days on daily data = 30 periods
@@ -631,7 +647,7 @@ class TestForecastWithNaturalLanguage:
     def test_forecast_3_months_daily_data(self) -> None:
         """Test forecasting 3 months on daily data."""
         state = create_state_with_timeseries(n=100)
-        
+
         # Fit model with date column for proper frequency inference
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -643,7 +659,7 @@ class TestForecastWithNaturalLanguage:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # Forecast 3 months
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
@@ -651,9 +667,9 @@ class TestForecastWithNaturalLanguage:
             forecast_unit="months",
             include_plot=False,
         )
-        
+
         result = forecast_arima(state, forecast_params)
-        
+
         assert isinstance(result, ARIMAForecastResult)
         assert result.success is True
         # 3 months ≈ 90 days on daily data
@@ -663,7 +679,7 @@ class TestForecastWithNaturalLanguage:
     def test_forecast_defaults_to_10_when_no_period_specified(self) -> None:
         """Test that forecast defaults to 10 periods when neither n_periods nor natural language specified."""
         state = create_state_with_timeseries(n=100)
-        
+
         # Fit model
         fit_params = FitARIMAInput(
             dataframe_name="timeseries",
@@ -674,15 +690,15 @@ class TestForecastWithNaturalLanguage:
         )
         fit_result = fit_arima(state, fit_params)
         assert isinstance(fit_result, ARIMAResult)
-        
+
         # Forecast without specifying any period
         forecast_params = ForecastARIMAInput(
             model_id=fit_result.model_id,
             include_plot=False,
         )
-        
+
         result = forecast_arima(state, forecast_params)
-        
+
         assert isinstance(result, ARIMAForecastResult)
         assert result.success is True
         assert result.n_periods == 10

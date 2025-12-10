@@ -14,8 +14,8 @@ from pydantic import BaseModel, Field
 from scipy import stats
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ChiSquareResult
+from stats_compass_core.state import DataFrameState
 
 
 class ChiSquareIndependenceInput(BaseModel):
@@ -76,10 +76,10 @@ def _check_expected_frequencies(expected: np.ndarray) -> tuple[int, str | None]:
     """
     low_count = int((expected < 5).sum())
     total_cells = expected.size
-    
+
     if low_count == 0:
         return 0, None
-    
+
     pct = (low_count / total_cells) * 100
     warning = (
         f"{low_count} cells ({pct:.1f}%) have expected frequency < 5. "
@@ -122,7 +122,7 @@ def chi_square_independence(
 
     # Get data and drop rows with missing values in either column
     data = df[[params.column1, params.column2]].dropna()
-    
+
     if len(data) < 2:
         raise ValueError(
             f"Insufficient data: need at least 2 rows, got {len(data)} after removing missing values"
@@ -130,7 +130,7 @@ def chi_square_independence(
 
     # Create contingency table
     contingency_table = pd.crosstab(data[params.column1], data[params.column2])
-    
+
     if contingency_table.shape[0] < 2 or contingency_table.shape[1] < 2:
         raise ValueError(
             f"Need at least 2 categories in each column. "
@@ -139,15 +139,15 @@ def chi_square_independence(
 
     # Perform chi-square test
     chi2_stat, p_value, dof, expected = stats.chi2_contingency(contingency_table)
-    
+
     # Calculate Cramér's V effect size
     n = contingency_table.sum().sum()
     min_dim = min(contingency_table.shape) - 1
     cramers_v = float(np.sqrt(chi2_stat / (n * min_dim))) if min_dim > 0 else 0.0
-    
+
     # Check for low expected frequencies
     low_count, low_warning = _check_expected_frequencies(expected)
-    
+
     # Convert tables to JSON-safe format
     observed_dict = contingency_table.to_dict()
     expected_df = pd.DataFrame(
@@ -156,7 +156,7 @@ def chi_square_independence(
         columns=contingency_table.columns
     )
     expected_dict = expected_df.round(2).to_dict()
-    
+
     return ChiSquareResult(
         test_type="independence",
         chi2_statistic=float(chi2_stat),
@@ -213,7 +213,7 @@ def chi_square_goodness_of_fit(
     categories = observed_freq.index.tolist()
     observed_values = observed_freq.values
     n_total = int(observed_values.sum())
-    
+
     if len(observed_values) < 2:
         raise ValueError(
             f"Need at least 2 categories for goodness of fit test, found {len(observed_values)}"
@@ -222,17 +222,17 @@ def chi_square_goodness_of_fit(
     # Determine expected frequencies
     if params.expected_frequencies is not None:
         expected_input = params.expected_frequencies
-        
+
         # Validate expected frequencies
         if any(f <= 0 for f in expected_input):
             raise ValueError("Expected frequencies must all be positive (greater than 0)")
-        
+
         if len(expected_input) != len(observed_values):
             raise ValueError(
                 f"Expected frequencies length ({len(expected_input)}) must match "
                 f"number of categories ({len(observed_values)})"
             )
-        
+
         # Normalize expected frequencies to sum to total observations
         expected_prop = np.array(expected_input) / np.sum(expected_input)
         expected_values = expected_prop * n_total
@@ -243,14 +243,14 @@ def chi_square_goodness_of_fit(
     # Perform chi-square test
     chi2_stat, p_value = stats.chisquare(observed_values, expected_values)
     dof = len(observed_values) - 1
-    
+
     # Check for low expected frequencies
     low_count, low_warning = _check_expected_frequencies(expected_values)
-    
+
     # Create frequency tables as dicts
     observed_dict = {str(cat): int(count) for cat, count in zip(categories, observed_values)}
     expected_dict = {str(cat): round(float(exp), 2) for cat, exp in zip(categories, expected_values)}
-    
+
     return ChiSquareResult(
         test_type="goodness_of_fit",
         chi2_statistic=float(chi2_stat),

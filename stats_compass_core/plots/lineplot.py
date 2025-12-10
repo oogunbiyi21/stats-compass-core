@@ -6,12 +6,11 @@ import base64
 from io import BytesIO
 from typing import Any
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ChartResult
+from stats_compass_core.state import DataFrameState
 
 
 class LinePlotInput(BaseModel):

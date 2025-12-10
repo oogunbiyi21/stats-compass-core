@@ -5,8 +5,8 @@ Tool for removing duplicate rows from a DataFrame.
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class DedupeInput(BaseModel):
@@ -54,7 +54,7 @@ def dedupe(state: DataFrameState, params: DedupeInput) -> DataFrameMutationResul
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     rows_before = len(df)
-    
+
     if params.subset:
         missing_cols = set(params.subset) - set(df.columns)
         if missing_cols:
@@ -67,18 +67,18 @@ def dedupe(state: DataFrameState, params: DedupeInput) -> DataFrameMutationResul
         keep=keep_value,  # type: ignore
         ignore_index=params.ignore_index,
     )
-    
+
     # Determine where to store the result
     result_name = params.save_as if params.save_as else source_name
     stored_name = state.set_dataframe(result_df, name=result_name, operation="dedupe")
-    
+
     rows_after = len(result_df)
     rows_affected = rows_before - rows_after
-    
+
     message = f"Removed {rows_affected} duplicate rows"
     if params.subset:
         message += f" (based on columns: {', '.join(params.subset)})"
-    
+
     return DataFrameMutationResult(
         success=True,
         operation="dedupe",

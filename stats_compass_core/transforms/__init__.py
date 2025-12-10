@@ -1,9 +1,9 @@
 """Data transformation tools."""
 
+from stats_compass_core.transforms.bin_rare_categories import bin_rare_categories
+from stats_compass_core.transforms.filter_dataframe import filter_dataframe
 from stats_compass_core.transforms.groupby_aggregate import groupby_aggregate
 from stats_compass_core.transforms.pivot import pivot
-from stats_compass_core.transforms.filter_dataframe import filter_dataframe
-from stats_compass_core.transforms.bin_rare_categories import bin_rare_categories
 
 # Conditional import for mean_target_encoding (requires sklearn)
 try:

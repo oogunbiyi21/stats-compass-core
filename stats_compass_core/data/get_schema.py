@@ -8,20 +8,20 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameSchemaResult
+from stats_compass_core.state import DataFrameState
 
 
 class GetSchemaInput(BaseModel):
     """Input schema for get_schema tool."""
 
     dataframe_name: str | None = Field(
-        default=None, 
+        default=None,
         description="Name of DataFrame to get schema for. Uses active if not specified."
     )
     sample_values: int = Field(
-        default=3, 
-        ge=0, 
+        default=3,
+        ge=0,
         le=10,
         description="Number of sample values to include per column"
     )
@@ -48,7 +48,7 @@ def get_schema(state: DataFrameState, params: GetSchemaInput) -> DataFrameSchema
     """
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     # Build column info
     columns: list[dict[str, Any]] = []
     for col in df.columns:
@@ -59,7 +59,7 @@ def get_schema(state: DataFrameState, params: GetSchemaInput) -> DataFrameSchema
             "null_percent": round(df[col].isna().mean() * 100, 2),
             "unique_count": int(df[col].nunique()),
         }
-        
+
         # Add sample values
         if params.sample_values > 0:
             non_null = df[col].dropna()
@@ -82,24 +82,24 @@ def get_schema(state: DataFrameState, params: GetSchemaInput) -> DataFrameSchema
                 col_info["sample_values"] = serializable_samples
             else:
                 col_info["sample_values"] = []
-        
+
         # Add numeric stats if numeric
         if pd.api.types.is_numeric_dtype(df[col]):
             col_info["min"] = float(df[col].min()) if not pd.isna(df[col].min()) else None
             col_info["max"] = float(df[col].max()) if not pd.isna(df[col].max()) else None
-        
+
         columns.append(col_info)
-    
+
     # Get memory usage
     memory_bytes = int(df.memory_usage(deep=True).sum())
-    
+
     # Get index info
     index_info: dict[str, Any] = {
         "name": df.index.name,
         "dtype": str(df.index.dtype),
         "is_unique": df.index.is_unique,
     }
-    
+
     return DataFrameSchemaResult(
         dataframe_name=source_name,
         shape=(len(df), len(df.columns)),

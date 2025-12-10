@@ -5,8 +5,8 @@ Tool for dropping rows or columns with missing values from a DataFrame.
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class DropNAInput(BaseModel):
@@ -52,7 +52,7 @@ def drop_na(state: DataFrameState, params: DropNAInput) -> DataFrameMutationResu
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     rows_before = len(df)
     cols_before = len(df.columns)
-    
+
     if params.subset:
         missing_cols = set(params.subset) - set(df.columns)
         if missing_cols:
@@ -66,16 +66,16 @@ def drop_na(state: DataFrameState, params: DropNAInput) -> DataFrameMutationResu
         kwargs["how"] = params.how
 
     result_df = df.dropna(**kwargs)
-    
+
     # Determine result name - use save_as if provided, otherwise modify in place
     result_name = params.save_as if params.save_as else source_name
-    
+
     # Save DataFrame to state
     stored_name = state.set_dataframe(result_df, name=result_name, operation="drop_na")
-    
+
     rows_after = len(result_df)
     cols_after = len(result_df.columns)
-    
+
     # Determine what was affected
     if params.axis == 0:
         rows_affected = rows_before - rows_after
@@ -85,7 +85,7 @@ def drop_na(state: DataFrameState, params: DropNAInput) -> DataFrameMutationResu
         rows_affected = cols_before - cols_after
         message = f"Dropped {rows_affected} columns with missing values"
         columns_affected = list(set(df.columns) - set(result_df.columns))
-    
+
     return DataFrameMutationResult(
         success=True,
         operation="drop_na",

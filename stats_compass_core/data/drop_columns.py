@@ -5,8 +5,8 @@ Tool for dropping columns from a DataFrame.
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class DropColumnsInput(BaseModel):
@@ -58,9 +58,9 @@ def drop_columns(
     """
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     cols_before = len(df.columns)
-    
+
     # Validate columns if errors='raise'
     if params.errors == "raise":
         missing = set(params.columns) - set(df.columns)
@@ -69,27 +69,27 @@ def drop_columns(
                 f"Columns not found in DataFrame: {sorted(missing)}. "
                 f"Available columns: {list(df.columns)}"
             )
-    
+
     # Drop columns
     result_df = df.drop(columns=params.columns, errors=params.errors)
-    
+
     cols_after = len(result_df.columns)
     dropped_count = cols_before - cols_after
-    
+
     # Determine which columns were actually dropped
     dropped_cols = [c for c in params.columns if c in df.columns]
-    
+
     # Determine result name
     result_name = params.save_as if params.save_as else source_name
-    
+
     # Store in state
     state.set_dataframe(result_df, name=result_name, operation="drop_columns")
-    
+
     if params.set_active:
         state.set_active_dataframe(result_name)
-    
+
     message = f"Dropped {dropped_count} column(s): {dropped_cols}"
-    
+
     return DataFrameMutationResult(
         success=True,
         operation="drop_columns",

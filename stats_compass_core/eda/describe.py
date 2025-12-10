@@ -3,12 +3,13 @@ Tool for generating descriptive statistics of DataFrame columns.
 """
 
 from typing import Any
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DescribeResult
+from stats_compass_core.state import DataFrameState
 
 
 class DescribeInput(BaseModel):
@@ -54,7 +55,7 @@ def describe(state: DataFrameState, params: DescribeInput) -> DescribeResult:
     """
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     # Validate percentiles
     if params.percentiles:
         for p in params.percentiles:
@@ -72,7 +73,7 @@ def describe(state: DataFrameState, params: DescribeInput) -> DescribeResult:
 
     try:
         stats_df = df.describe(**kwargs)
-        
+
         # Convert to JSON-serializable nested dict
         # Structure: {column: {stat_name: value}}
         statistics: dict[str, dict[str, Any]] = {}
@@ -87,7 +88,7 @@ def describe(state: DataFrameState, params: DescribeInput) -> DescribeResult:
                     statistics[col][stat] = value.item()
                 else:
                     statistics[col][stat] = value
-        
+
         # Determine included types
         include_types: list[str] | None = None
         if params.include:
@@ -95,7 +96,7 @@ def describe(state: DataFrameState, params: DescribeInput) -> DescribeResult:
                 include_types = [params.include]
             else:
                 include_types = params.include
-        
+
         return DescribeResult(
             statistics=statistics,
             dataframe_name=source_name,

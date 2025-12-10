@@ -11,8 +11,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ChartResult
+from stats_compass_core.state import DataFrameState
 
 
 class ScatterPlotInput(BaseModel):

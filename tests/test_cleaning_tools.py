@@ -1,13 +1,15 @@
 """Tests for cleaning tools (drop_na, dedupe, apply_imputation)."""
 
 import pandas as pd
-import numpy as np
 import pytest
 
+from stats_compass_core.cleaning.apply_imputation import (
+    ApplyImputationInput,
+    apply_imputation,
+)
+from stats_compass_core.cleaning.dedupe import DedupeInput, dedupe
+from stats_compass_core.cleaning.dropna import DropNAInput, drop_na
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.cleaning.dropna import drop_na, DropNAInput
-from stats_compass_core.cleaning.dedupe import dedupe, DedupeInput
-from stats_compass_core.cleaning.apply_imputation import apply_imputation, ApplyImputationInput
 
 
 class TestDropNA:
@@ -212,8 +214,8 @@ class TestOutlierHandling:
     def test_handle_outliers_cap(self):
         """Test capping outliers at percentile."""
         from stats_compass_core.cleaning.handle_outliers import (
-            handle_outliers,
             HandleOutliersInput,
+            handle_outliers,
         )
 
         # Create data with outliers
@@ -235,7 +237,7 @@ class TestOutlierHandling:
         assert result.success is True
         assert result.method == "cap"
         assert result.values_affected > 0
-        
+
         # Check the data was capped
         df_after = state.get_dataframe("test")
         assert df_after["value"].max() < 100
@@ -243,8 +245,8 @@ class TestOutlierHandling:
     def test_handle_outliers_clip_iqr(self):
         """Test clipping outliers using IQR method."""
         from stats_compass_core.cleaning.handle_outliers import (
-            handle_outliers,
             HandleOutliersInput,
+            handle_outliers,
         )
 
         df = pd.DataFrame({
@@ -269,8 +271,8 @@ class TestOutlierHandling:
     def test_handle_outliers_remove(self):
         """Test removing outlier rows."""
         from stats_compass_core.cleaning.handle_outliers import (
-            handle_outliers,
             HandleOutliersInput,
+            handle_outliers,
         )
 
         df = pd.DataFrame({
@@ -294,8 +296,8 @@ class TestOutlierHandling:
     def test_handle_outliers_log_transform(self):
         """Test log transformation."""
         from stats_compass_core.cleaning.handle_outliers import (
-            handle_outliers,
             HandleOutliersInput,
+            handle_outliers,
         )
 
         df = pd.DataFrame({
@@ -314,7 +316,7 @@ class TestOutlierHandling:
 
         assert result.success is True
         assert result.method == "log_transform"
-        
+
         # Check values were transformed
         df_after = state.get_dataframe("test")
         assert df_after["value"].max() < 100  # log1p(10000) ≈ 9.2
@@ -322,8 +324,8 @@ class TestOutlierHandling:
     def test_handle_outliers_log_transform_negative_fails(self):
         """Test log transformation fails with negative values."""
         from stats_compass_core.cleaning.handle_outliers import (
-            handle_outliers,
             HandleOutliersInput,
+            handle_outliers,
         )
 
         df = pd.DataFrame({
@@ -344,8 +346,8 @@ class TestOutlierHandling:
     def test_handle_outliers_create_new_column(self):
         """Test creating new column instead of modifying original."""
         from stats_compass_core.cleaning.handle_outliers import (
-            handle_outliers,
             HandleOutliersInput,
+            handle_outliers,
         )
 
         df = pd.DataFrame({
@@ -365,7 +367,7 @@ class TestOutlierHandling:
         result = handle_outliers(state, params)
 
         assert result.result_column == "value_cleaned"
-        
+
         df_after = state.get_dataframe("test")
         assert "value" in df_after.columns
         assert "value_cleaned" in df_after.columns

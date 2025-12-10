@@ -145,7 +145,7 @@ class StationarityTestInput(BaseModel):
 
 class InferFrequencyInput(BaseModel):
     """Input parameters for time series frequency inference."""
-    
+
     dataframe_name: str | None = Field(
         default=None,
         description="Name of the DataFrame to use. If not provided, uses the active DataFrame.",
@@ -157,10 +157,10 @@ class InferFrequencyInput(BaseModel):
 
 class InferFrequencyResult(BaseModel):
     """Result for time series frequency inference."""
-    
+
     success: bool = Field(description="Whether the inference succeeded")
     operation: str = Field(default="infer_frequency", description="Operation performed")
-    
+
     # Frequency info
     frequency_description: str = Field(
         description="Human-readable description of the frequency (e.g., 'daily', 'weekly')"
@@ -171,16 +171,16 @@ class InferFrequencyResult(BaseModel):
     frequency_days: float = Field(
         description="Frequency in days (e.g., 1.0 for daily, 7.0 for weekly)"
     )
-    
+
     # Data info
     n_observations: int = Field(description="Number of observations in the time series")
     date_range: str = Field(description="Date range of the time series")
-    
+
     # Conversion examples
     conversion_examples: dict[str, int] = Field(
         description="Examples of period conversions (e.g., {'30 days': 30, '3 months': 90})"
     )
-    
+
     # Message
     message: str = Field(description="Human-readable summary")
 
@@ -191,27 +191,53 @@ class InferFrequencyResult(BaseModel):
 
 
 class StationarityTestResult(BaseModel):
-    """Result for stationarity tests."""
+    """Result for a single stationarity test (ADF or KPSS)."""
 
-    success: bool = Field(description="Whether the test succeeded")
-    operation: str = Field(default="stationarity_test", description="Operation performed")
-
-    # Test results
-    test_type: str = Field(description="Type of test performed")
+    test_type: str = Field(description="Type of test performed ('adf' or 'kpss')")
     test_statistic: float = Field(description="Test statistic value")
     p_value: float = Field(description="P-value of the test")
     critical_values: dict[str, float] = Field(
         description="Critical values at different significance levels"
     )
     is_stationary: bool = Field(
-        description="Whether the series is stationary according to the test"
+        description="Whether the series is stationary according to this test"
+    )
+    n_lags: int | None = Field(default=None, description="Number of lags used")
+    interpretation: str = Field(description="Human-readable interpretation of results")
+
+
+class StationarityResult(BaseModel):
+    """
+    Combined result for stationarity testing.
+    
+    This unified result type provides a consistent interface for accessing
+    stationarity test results, whether one or both tests were run.
+    Useful for ARIMA preprocessing and other time series applications.
+    """
+
+    success: bool = Field(description="Whether the operation succeeded")
+    operation: str = Field(default="check_stationarity", description="Operation performed")
+
+    # Individual test results (None if not requested)
+    adf_result: StationarityTestResult | None = Field(
+        default=None, description="ADF test result (null hypothesis: non-stationary)"
+    )
+    kpss_result: StationarityTestResult | None = Field(
+        default=None, description="KPSS test result (null hypothesis: stationary)"
     )
 
-    # Additional info
-    n_lags: int | None = Field(default=None, description="Number of lags used")
+    # Overall assessment
+    is_stationary: bool = Field(
+        description="Overall stationarity assessment based on test(s) performed"
+    )
+    recommendation: str = Field(
+        description="Recommendation for differencing based on test results"
+    )
 
-    # Interpretation
-    interpretation: str = Field(description="Human-readable interpretation of results")
+    # Metadata
+    target_column: str = Field(description="Column that was tested")
+    n_observations: int = Field(description="Number of observations in the series")
+    message: str = Field(description="Human-readable summary")
 
 
 # ---------------------------------------------------------------------------
@@ -372,20 +398,20 @@ def _infer_time_frequency(time_index: pd.DatetimeIndex | pd.Index) -> pd.Timedel
     """
     if len(time_index) < 2:
         return pd.Timedelta(days=1)  # Default fallback
-    
+
     # Convert to DatetimeIndex if not already
     if not isinstance(time_index, pd.DatetimeIndex):
         try:
             time_index = pd.DatetimeIndex(time_index)
         except (TypeError, ValueError):
             return pd.Timedelta(days=1)  # Can't infer, use default
-    
+
     # Calculate all time differences
     time_diffs = time_index.to_series().diff().dropna()
-    
+
     if len(time_diffs) == 0:
         return pd.Timedelta(days=1)
-    
+
     # Use median - more robust than mean or mode
     return time_diffs.median()
 
@@ -409,7 +435,7 @@ def _convert_forecast_period_to_steps(
     """
     # Get the actual data frequency
     data_freq = _infer_time_frequency(time_index)
-    
+
     # Convert user's request to timedelta
     unit_mapping = {
         "days": pd.Timedelta(days=forecast_number),
@@ -418,15 +444,15 @@ def _convert_forecast_period_to_steps(
         "quarters": pd.Timedelta(days=forecast_number * 91),  # Approximate
         "years": pd.Timedelta(days=forecast_number * 365),  # Approximate
     }
-    
+
     requested_period = unit_mapping.get(forecast_unit.lower())
     if requested_period is None:
         # Invalid unit, just return the number as-is
         return forecast_number
-    
+
     # Calculate steps: how many data_freq periods fit in requested_period?
     steps = int(round(requested_period / data_freq))
-    
+
     return max(1, min(steps, 365))  # Bound between 1 and 365
 
 
@@ -441,7 +467,7 @@ def _describe_frequency(freq: pd.Timedelta) -> str:
         Human-readable description (e.g., "daily", "weekly", "monthly")
     """
     days = freq.days
-    
+
     if days == 0:
         hours = freq.seconds // 3600
         if hours <= 1:
@@ -521,7 +547,7 @@ def fit_arima(
         import warnings
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', category=UserWarning, module='statsmodels')
-            
+
             if seasonal_order:
                 model = ARIMA(series, order=order, seasonal_order=seasonal_order)
             else:
@@ -620,7 +646,7 @@ def forecast_arima(
         # Determine number of periods to forecast
         n_periods: int
         freq_description = ""
-        
+
         if params.forecast_number is not None and params.forecast_unit is not None:
             # Use natural language period specification
             time_index = model.model._index
@@ -753,7 +779,7 @@ def find_optimal_arima(
     import warnings
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore', category=UserWarning, module='statsmodels')
-        
+
         for p, d, q in combinations:
             try:
                 model = ARIMA(series, order=(p, d, q))
@@ -820,12 +846,12 @@ def find_optimal_arima(
 )
 def check_stationarity(
     state: DataFrameState, params: StationarityTestInput
-) -> StationarityTestResult | list[StationarityTestResult] | OperationError:
+) -> StationarityResult | OperationError:
     """
     Test if a time series is stationary using ADF and/or KPSS tests.
 
-    Stationarity is important for ARIMA modeling. A stationary series has
-    constant mean, variance, and autocorrelation over time.
+    Stationarity is important for ARIMA modeling and other time series analysis.
+    A stationary series has constant mean, variance, and autocorrelation over time.
 
     - ADF test: Null hypothesis is that the series has a unit root (non-stationary)
     - KPSS test: Null hypothesis is that the series is stationary
@@ -835,7 +861,7 @@ def check_stationarity(
         params: StationarityTestInput with test configuration
 
     Returns:
-        StationarityTestResult or list of results if both tests requested
+        StationarityResult with .adf_result and/or .kpss_result attributes
     """
     # Check dependencies
     error = _check_dependencies()
@@ -849,9 +875,10 @@ def check_stationarity(
     if isinstance(result, OperationError):
         return result
 
-    series, _, _ = result
+    series, _, target_col = result
 
-    results: list[StationarityTestResult] = []
+    adf_test_result: StationarityTestResult | None = None
+    kpss_test_result: StationarityTestResult | None = None
 
     # ADF Test
     if params.test_type in ("adf", "both"):
@@ -863,9 +890,9 @@ def check_stationarity(
             adf_critical = {k: float(v) for k, v in adf_result[4].items()}
 
             # Series is stationary if p-value < 0.05 (reject null of unit root)
-            is_stationary = adf_pvalue < 0.05
+            adf_is_stationary = adf_pvalue < 0.05
 
-            if is_stationary:
+            if adf_is_stationary:
                 interp = (
                     f"ADF test statistic: {adf_statistic:.4f} (p-value: {adf_pvalue:.4f}). "
                     f"The series IS stationary (p < 0.05). No differencing needed."
@@ -876,23 +903,20 @@ def check_stationarity(
                     f"The series is NOT stationary (p >= 0.05). Consider differencing (d >= 1)."
                 )
 
-            results.append(
-                StationarityTestResult(
-                    success=True,
-                    test_type="adf",
-                    test_statistic=adf_statistic,
-                    p_value=adf_pvalue,
-                    critical_values=adf_critical,
-                    is_stationary=is_stationary,
-                    n_lags=adf_lags,
-                    interpretation=interp,
-                )
+            adf_test_result = StationarityTestResult(
+                test_type="adf",
+                test_statistic=adf_statistic,
+                p_value=adf_pvalue,
+                critical_values=adf_critical,
+                is_stationary=adf_is_stationary,
+                n_lags=adf_lags,
+                interpretation=interp,
             )
         except Exception as e:
             return OperationError(
                 error_type="TestError",
                 error_message=f"ADF test failed: {str(e)}",
-                operation="test_stationarity",
+                operation="check_stationarity",
                 details={"error": str(e)},
             )
 
@@ -906,9 +930,9 @@ def check_stationarity(
             kpss_critical = {k: float(v) for k, v in kpss_result[3].items()}
 
             # Series is stationary if p-value > 0.05 (fail to reject null of stationarity)
-            is_stationary = kpss_pvalue > 0.05
+            kpss_is_stationary = kpss_pvalue > 0.05
 
-            if is_stationary:
+            if kpss_is_stationary:
                 interp = (
                     f"KPSS test statistic: {kpss_statistic:.4f} (p-value: {kpss_pvalue:.4f}). "
                     f"The series IS stationary (p > 0.05). No differencing needed."
@@ -919,30 +943,58 @@ def check_stationarity(
                     f"The series is NOT stationary (p <= 0.05). Consider differencing."
                 )
 
-            results.append(
-                StationarityTestResult(
-                    success=True,
-                    test_type="kpss",
-                    test_statistic=kpss_statistic,
-                    p_value=kpss_pvalue,
-                    critical_values=kpss_critical,
-                    is_stationary=is_stationary,
-                    n_lags=kpss_lags,
-                    interpretation=interp,
-                )
+            kpss_test_result = StationarityTestResult(
+                test_type="kpss",
+                test_statistic=kpss_statistic,
+                p_value=kpss_pvalue,
+                critical_values=kpss_critical,
+                is_stationary=kpss_is_stationary,
+                n_lags=kpss_lags,
+                interpretation=interp,
             )
         except Exception as e:
             return OperationError(
                 error_type="TestError",
                 error_message=f"KPSS test failed: {str(e)}",
-                operation="test_stationarity",
+                operation="check_stationarity",
                 details={"error": str(e)},
             )
 
-    # Return single result or list
-    if len(results) == 1:
-        return results[0]
-    return results
+    # Determine overall stationarity and recommendation
+    if adf_test_result and kpss_test_result:
+        # Both tests run - use consensus
+        if adf_test_result.is_stationary and kpss_test_result.is_stationary:
+            overall_stationary = True
+            recommendation = "Series is stationary. Use d=0 for ARIMA."
+        elif not adf_test_result.is_stationary and not kpss_test_result.is_stationary:
+            overall_stationary = False
+            recommendation = "Series is non-stationary. Use d=1 or d=2 for ARIMA."
+        elif adf_test_result.is_stationary and not kpss_test_result.is_stationary:
+            overall_stationary = False
+            recommendation = "Tests disagree (trend-stationary). Consider d=1 for ARIMA."
+        else:  # ADF says non-stationary, KPSS says stationary
+            overall_stationary = False
+            recommendation = "Tests disagree (difference-stationary). Consider d=1 for ARIMA."
+        msg = f"ADF: {'stationary' if adf_test_result.is_stationary else 'non-stationary'}, KPSS: {'stationary' if kpss_test_result.is_stationary else 'non-stationary'}. {recommendation}"
+    elif adf_test_result:
+        overall_stationary = adf_test_result.is_stationary
+        recommendation = "No differencing needed." if overall_stationary else "Consider d=1 for ARIMA."
+        msg = f"ADF test: {'stationary' if overall_stationary else 'non-stationary'}. {recommendation}"
+    else:  # kpss_test_result
+        overall_stationary = kpss_test_result.is_stationary
+        recommendation = "No differencing needed." if overall_stationary else "Consider d=1 for ARIMA."
+        msg = f"KPSS test: {'stationary' if overall_stationary else 'non-stationary'}. {recommendation}"
+
+    return StationarityResult(
+        success=True,
+        adf_result=adf_test_result,
+        kpss_result=kpss_test_result,
+        is_stationary=overall_stationary,
+        recommendation=recommendation,
+        target_column=target_col,
+        n_observations=len(series),
+        message=msg,
+    )
 
 
 @registry.register(

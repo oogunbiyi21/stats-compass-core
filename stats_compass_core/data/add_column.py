@@ -4,12 +4,11 @@ Tool for adding or transforming columns in a DataFrame.
 
 from typing import Any
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class AddColumnInput(BaseModel):
@@ -77,16 +76,16 @@ def add_column(
     """
     if params.expression is None and params.value is None:
         raise ValueError("Must provide either 'expression' or 'value'")
-    
+
     if params.expression is not None and params.value is not None:
         raise ValueError("Provide either 'expression' or 'value', not both")
-    
+
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     result_df = df.copy()
     is_new_column = params.column_name not in df.columns
-    
+
     if params.expression is not None:
         # Use pandas.eval for safe expression evaluation
         try:
@@ -99,22 +98,22 @@ def add_column(
     else:
         # Constant value assignment
         result_df[params.column_name] = params.value
-    
+
     # Determine result name
     result_name = params.save_as if params.save_as else source_name
-    
+
     # Store in state
     state.set_dataframe(result_df, name=result_name, operation="add_column")
-    
+
     if params.set_active:
         state.set_active_dataframe(result_name)
-    
+
     action = "Added new" if is_new_column else "Updated existing"
     if params.expression:
         message = f"{action} column '{params.column_name}' = {params.expression}"
     else:
         message = f"{action} column '{params.column_name}' = {repr(params.value)}"
-    
+
     return DataFrameMutationResult(
         success=True,
         operation="add_column",

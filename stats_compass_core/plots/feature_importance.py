@@ -11,8 +11,8 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ChartResult
+from stats_compass_core.state import DataFrameState
 
 
 class FeatureImportanceInput(BaseModel):
@@ -83,7 +83,7 @@ def feature_importance(state: DataFrameState, params: FeatureImportanceInput) ->
     # Get model from state
     model = state.get_model(params.model_id)
     model_info = state.get_model_info(params.model_id)
-    
+
     if model is None:
         raise ValueError(f"Model '{params.model_id}' not found in state")
 

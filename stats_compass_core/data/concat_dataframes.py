@@ -8,8 +8,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class ConcatDataFramesInput(BaseModel):
@@ -81,18 +81,18 @@ def concat_dataframes(
     # Get all DataFrames
     dfs: list[pd.DataFrame] = []
     df_info: list[tuple[str, int, int]] = []  # (name, rows, cols)
-    
+
     for df_name in params.dataframes:
         df = state.get_dataframe(df_name)
         dfs.append(df)
         df_info.append((df_name, len(df), len(df.columns)))
 
     total_rows_before = sum(info[1] for info in df_info)
-    
+
     # For horizontal concat (axis=1), ignore_index would reset column names to integers
     # which breaks downstream operations. Only use ignore_index for vertical concat.
     use_ignore_index = params.ignore_index if params.axis == 0 else False
-    
+
     # Perform concatenation
     result_df = pd.concat(
         dfs,
@@ -124,7 +124,7 @@ def concat_dataframes(
     # Build message
     axis_desc = "vertically (rows)" if params.axis == 0 else "horizontally (columns)"
     df_list = ", ".join(f"'{name}' ({rows}×{cols})" for name, rows, cols in df_info)
-    
+
     message = (
         f"Concatenated {len(params.dataframes)} DataFrames {axis_desc}: {df_list}. "
         f"Result: {len(result_df)} rows × {len(result_df.columns)} columns."

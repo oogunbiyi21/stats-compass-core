@@ -2,11 +2,11 @@
 Tool for listing available DataFrames in the session.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameListResult
+from stats_compass_core.state import DataFrameState
 
 
 class ListDataFramesInput(BaseModel):
@@ -33,13 +33,13 @@ def list_dataframes(state: DataFrameState, params: ListDataFramesInput) -> DataF
         DataFrameListResult with list of DataFrames and metadata
     """
     dataframes_info = state.list_dataframes()
-    
+
     # Convert DataFrameInfo objects to dicts for JSON serialization
     dataframes_dicts = [df_info.model_dump() for df_info in dataframes_info]
-    
+
     # Convert memory from MB to bytes
     total_memory_bytes = int(state.get_total_memory_mb() * 1024 * 1024)
-    
+
     return DataFrameListResult(
         dataframes=dataframes_dicts,
         active_dataframe=state.get_active_dataframe_name(),

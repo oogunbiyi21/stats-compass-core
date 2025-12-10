@@ -18,8 +18,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import OutlierHandlingResult
+from stats_compass_core.state import DataFrameState
 
 
 class HandleOutliersInput(BaseModel):
@@ -83,15 +83,15 @@ def _cap_at_percentile(
     """Cap values at specified percentiles."""
     df_result = df.copy()
     original_values = df_result[column].copy()
-    
+
     upper_threshold = df_result[column].quantile(upper_pct / 100)
-    
+
     if lower_pct is not None:
         lower_threshold = df_result[column].quantile(lower_pct / 100)
         df_result[column] = df_result[column].clip(lower=lower_threshold, upper=upper_threshold)
         n_lower = int((original_values < lower_threshold).sum())
         n_upper = int((original_values > upper_threshold).sum())
-        
+
         stats = {
             "lower_threshold": float(lower_threshold),
             "upper_threshold": float(upper_threshold),
@@ -102,13 +102,13 @@ def _cap_at_percentile(
     else:
         df_result[column] = df_result[column].clip(upper=upper_threshold)
         n_capped = int((original_values > upper_threshold).sum())
-        
+
         stats = {
             "lower_threshold": None,
             "upper_threshold": float(upper_threshold),
             "total_affected": n_capped,
         }
-    
+
     return df_result, stats
 
 
@@ -116,19 +116,19 @@ def _clip_iqr(df: pd.DataFrame, column: str) -> tuple[pd.DataFrame, dict]:
     """Cap values using IQR method (1.5 * IQR beyond Q1/Q3)."""
     df_result = df.copy()
     original_values = df_result[column].copy()
-    
+
     q1 = df_result[column].quantile(0.25)
     q3 = df_result[column].quantile(0.75)
     iqr = q3 - q1
-    
+
     lower_bound = q1 - 1.5 * iqr
     upper_bound = q3 + 1.5 * iqr
-    
+
     df_result[column] = df_result[column].clip(lower=lower_bound, upper=upper_bound)
-    
+
     n_lower = int((original_values < lower_bound).sum())
     n_upper = int((original_values > upper_bound).sum())
-    
+
     stats = {
         "q1": float(q1),
         "q3": float(q3),
@@ -137,7 +137,7 @@ def _clip_iqr(df: pd.DataFrame, column: str) -> tuple[pd.DataFrame, dict]:
         "upper_threshold": float(upper_bound),
         "total_affected": n_lower + n_upper,
     }
-    
+
     return df_result, stats
 
 
@@ -149,7 +149,7 @@ def _remove_outliers(
 ) -> tuple[pd.DataFrame, dict]:
     """Remove rows with outlier values."""
     upper_threshold = df[column].quantile(upper_pct / 100)
-    
+
     if lower_pct is not None:
         lower_threshold = df[column].quantile(lower_pct / 100)
         mask = (df[column] >= lower_threshold) & (df[column] <= upper_threshold)
@@ -163,10 +163,10 @@ def _remove_outliers(
             "lower_threshold": None,
             "upper_threshold": float(upper_threshold),
         }
-    
+
     df_result = df[mask].copy()
     stats["total_affected"] = len(df) - len(df_result)
-    
+
     return df_result, stats
 
 
@@ -174,24 +174,24 @@ def _log_transform(df: pd.DataFrame, column: str) -> tuple[pd.DataFrame, dict]:
     """Apply log transformation (log1p to handle zeros)."""
     df_result = df.copy()
     original_values = df_result[column].copy()
-    
+
     # Check for negative values
     if (original_values < 0).any():
         raise ValueError(
             f"Cannot log-transform column '{column}' - contains negative values. "
             "Consider using a different method or transforming the data first."
         )
-    
+
     # Use log1p (log(1+x)) to handle zeros
     df_result[column] = np.log1p(original_values)
-    
+
     stats = {
         "lower_threshold": None,
         "upper_threshold": None,
         "total_affected": len(df_result),  # All values transformed
         "n_zeros": int((original_values == 0).sum()),
     }
-    
+
     return df_result, stats
 
 
@@ -270,7 +270,7 @@ def handle_outliers(
     # Get stats after
     stats_after = _get_column_stats(df_result[result_column].dropna())
     rows_after = len(df_result)
-    
+
     values_affected = method_stats.get("total_affected", 0)
     pct_affected = (values_affected / rows_before * 100) if rows_before > 0 else 0
 
@@ -288,7 +288,7 @@ def handle_outliers(
         "winsorize": "Winsorization",
         "log_transform": "Log Transformation",
     }
-    
+
     if params.method == "remove":
         message = f"{method_names[params.method]}: Removed {values_affected} rows ({pct_affected:.1f}%)"
     elif params.method == "log_transform":

@@ -32,11 +32,14 @@ Import statsmodels separately with: pip install stats-compass-core[timeseries]
 # ARIMA tools - available when statsmodels is installed
 try:
     from stats_compass_core.ml.arima import (
+        check_stationarity,
+        find_optimal_arima,
         fit_arima,
         forecast_arima,
-        find_optimal_arima,
-        check_stationarity,
         infer_frequency,
+        # Result types for type hints
+        StationarityResult,
+        StationarityTestResult,
     )
 
     __all__ = [
@@ -45,6 +48,8 @@ try:
         "find_optimal_arima",
         "check_stationarity",
         "infer_frequency",
+        "StationarityResult",
+        "StationarityTestResult",
     ]
 except ImportError:
     # statsmodels not available

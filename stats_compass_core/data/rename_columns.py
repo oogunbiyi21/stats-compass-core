@@ -5,8 +5,8 @@ Tool for renaming columns in a DataFrame.
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.state import DataFrameState
 
 
 class RenameColumnsInput(BaseModel):
@@ -57,7 +57,7 @@ def rename_columns(
     """
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     # Validate columns if errors='raise'
     if params.errors == "raise":
         missing = set(params.mapping.keys()) - set(df.columns)
@@ -66,28 +66,28 @@ def rename_columns(
                 f"Columns to rename not found: {sorted(missing)}. "
                 f"Available columns: {list(df.columns)}"
             )
-    
+
     # Filter mapping to only existing columns if errors='ignore'
     if params.errors == "ignore":
         actual_mapping = {k: v for k, v in params.mapping.items() if k in df.columns}
     else:
         actual_mapping = params.mapping
-    
+
     # Rename columns
     result_df = df.rename(columns=actual_mapping)
-    
+
     # Determine result name
     result_name = params.save_as if params.save_as else source_name
-    
+
     # Store in state
     state.set_dataframe(result_df, name=result_name, operation="rename_columns")
-    
+
     if params.set_active:
         state.set_active_dataframe(result_name)
-    
+
     renamed_list = [f"'{k}' → '{v}'" for k, v in actual_mapping.items()]
     message = f"Renamed {len(actual_mapping)} column(s): {', '.join(renamed_list)}"
-    
+
     return DataFrameMutationResult(
         success=True,
         operation="rename_columns",

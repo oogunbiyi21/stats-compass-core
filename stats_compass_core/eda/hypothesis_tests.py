@@ -6,13 +6,12 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 from pydantic import BaseModel, Field
 from scipy import stats
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import HypothesisTestResult
+from stats_compass_core.state import DataFrameState
 
 
 class TTestInput(BaseModel):

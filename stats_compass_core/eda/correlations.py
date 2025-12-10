@@ -3,12 +3,13 @@ Tool for computing pairwise correlation of DataFrame columns.
 """
 
 from typing import Any
+
 import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import CorrelationsResult
+from stats_compass_core.state import DataFrameState
 
 
 class CorrelationsInput(BaseModel):
@@ -57,7 +58,7 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
     """
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     if params.numeric_only:
         numeric_df = df.select_dtypes(include=["number"])
         if numeric_df.empty:
@@ -72,7 +73,7 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
             min_periods=params.min_periods,
             numeric_only=params.numeric_only,
         )
-        
+
         # Convert to JSON-serializable nested dict
         correlations_dict: dict[str, dict[str, float]] = {}
         for col in corr_df.columns:
@@ -85,7 +86,7 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
                     correlations_dict[col][row] = value.item()
                 else:
                     correlations_dict[col][row] = float(value)
-        
+
         # Find high correlation pairs if threshold is provided
         high_correlations: list[dict[str, Any]] | None = None
         if params.threshold is not None:
@@ -102,7 +103,7 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
                         })
             # Sort by absolute correlation descending
             high_correlations.sort(key=lambda x: abs(x["correlation"]), reverse=True)
-        
+
         return CorrelationsResult(
             correlations=correlations_dict,
             method=params.method,

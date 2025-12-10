@@ -2,8 +2,8 @@
 
 from stats_compass_core.plots.bar_chart import bar_chart
 from stats_compass_core.plots.classification_curves import (
-    roc_curve_plot,
     precision_recall_curve_plot,
+    roc_curve_plot,
 )
 from stats_compass_core.plots.feature_importance import feature_importance
 from stats_compass_core.plots.histogram import histogram

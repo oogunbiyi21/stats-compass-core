@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import hashlib
 
-import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
+from stats_compass_core.results import (
+    DataFrameQueryResult,
+    dataframe_to_json_safe_records,
+)
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.results import DataFrameQueryResult, dataframe_to_json_safe_records
 
 
 class FilterDataFrameInput(BaseModel):

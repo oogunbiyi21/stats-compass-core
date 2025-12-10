@@ -9,13 +9,12 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import MeanTargetEncodingResult
+from stats_compass_core.state import DataFrameState
 
 # Lazy import sklearn to allow graceful failure if not installed
 try:
@@ -65,7 +64,7 @@ class MeanTargetEncodingInput(BaseModel):
 def _infer_target_type(series: pd.Series) -> str:
     """Infer the target type from the data."""
     n_unique = series.nunique()
-    
+
     if n_unique == 2:
         return "binary"
     elif pd.api.types.is_numeric_dtype(series) and n_unique > 10:
@@ -84,7 +83,7 @@ def _get_encoding_stats(
         "original_unique_categories": int(df[original_col].nunique()),
         "encoded_columns_count": len(encoded_cols),
     }
-    
+
     for enc_col in encoded_cols:
         col_stats = {
             "min": float(df[enc_col].min()),
@@ -93,7 +92,7 @@ def _get_encoding_stats(
             "std": float(df[enc_col].std()),
         }
         stats[enc_col] = col_stats
-    
+
     return stats
 
 

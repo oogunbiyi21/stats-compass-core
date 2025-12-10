@@ -4,10 +4,10 @@ Tool for training a random forest regressor.
 
 from pydantic import BaseModel, Field
 
-from stats_compass_core.ml.common import prepare_ml_data, create_training_result
-from stats_compass_core.state import DataFrameState
-from stats_compass_core.results import ModelTrainingResult
+from stats_compass_core.ml.common import create_training_result, prepare_ml_data
 from stats_compass_core.registry import registry
+from stats_compass_core.results import ModelTrainingResult
+from stats_compass_core.state import DataFrameState
 
 
 class TrainRandomForestRegressorInput(BaseModel):
@@ -74,13 +74,13 @@ def train_random_forest_regressor(
         )
 
         model = RandomForestRegressor(
-            n_estimators=params.n_estimators, 
+            n_estimators=params.n_estimators,
             random_state=params.random_state
         )
         model.fit(X_train, y_train)
         train_score = model.score(X_train, y_train)
         test_score = model.score(X_test, y_test) if len(X_test) > 0 else None
-        
+
     except ImportError as e:
         raise ImportError(
             "scikit-learn is required for ML tools. "
@@ -99,7 +99,7 @@ def train_random_forest_regressor(
         test_size=len(X_test) if params.test_size > 0 else None,
         source_name=source_name,
         hyperparameters={
-            "test_size": params.test_size, 
+            "test_size": params.test_size,
             "random_state": params.random_state,
             "n_estimators": params.n_estimators,
         },

@@ -1,13 +1,14 @@
 """Tests for plot tools."""
 
-import pandas as pd
-import pytest
 import base64
 
+import pandas as pd
+import pytest
+
+from stats_compass_core.plots.bar_chart import BarChartInput, bar_chart
+from stats_compass_core.plots.histogram import HistogramInput, histogram
+from stats_compass_core.plots.scatter_plot import ScatterPlotInput, scatter_plot
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.plots.histogram import histogram, HistogramInput
-from stats_compass_core.plots.bar_chart import bar_chart, BarChartInput
-from stats_compass_core.plots.scatter_plot import scatter_plot, ScatterPlotInput
 
 
 class TestHistogram:
@@ -166,8 +167,8 @@ class TestClassificationCurves:
     def test_roc_curve_basic(self):
         """Test ROC curve generation."""
         from stats_compass_core.plots.classification_curves import (
-            roc_curve_plot,
             ROCCurveInput,
+            roc_curve_plot,
         )
 
         np.random.seed(42)
@@ -198,8 +199,8 @@ class TestClassificationCurves:
     def test_roc_curve_perfect_classifier(self):
         """Test ROC curve with perfect classifier."""
         from stats_compass_core.plots.classification_curves import (
-            roc_curve_plot,
             ROCCurveInput,
+            roc_curve_plot,
         )
 
         df = pd.DataFrame({
@@ -223,8 +224,8 @@ class TestClassificationCurves:
     def test_precision_recall_curve_basic(self):
         """Test PR curve generation."""
         from stats_compass_core.plots.classification_curves import (
-            precision_recall_curve_plot,
             PrecisionRecallCurveInput,
+            precision_recall_curve_plot,
         )
 
         np.random.seed(42)
@@ -253,8 +254,8 @@ class TestClassificationCurves:
     def test_curve_missing_column(self):
         """Test curve tools raise error for missing columns."""
         from stats_compass_core.plots.classification_curves import (
-            roc_curve_plot,
             ROCCurveInput,
+            roc_curve_plot,
         )
 
         df = pd.DataFrame({"y_true": [0, 1, 0, 1]})

@@ -14,8 +14,8 @@ import numpy as np
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ClassificationCurveResult
+from stats_compass_core.state import DataFrameState
 
 
 class ROCCurveInput(BaseModel):
@@ -128,7 +128,7 @@ def roc_curve_plot(
         ValueError: If columns are missing or data is invalid
     """
     try:
-        from sklearn.metrics import roc_curve, auc
+        from sklearn.metrics import auc, roc_curve
     except ImportError as e:
         raise ImportError(
             "scikit-learn is required for ROC curves. "
@@ -153,7 +153,7 @@ def roc_curve_plot(
 
     # Get data and drop missing values
     data = df[[params.true_column, params.prob_column]].dropna()
-    
+
     if len(data) < 2:
         raise ValueError(
             f"Insufficient data: need at least 2 rows, got {len(data)}"
@@ -175,13 +175,13 @@ def roc_curve_plot(
 
     # Create plot
     fig, ax = plt.subplots(figsize=params.figsize)
-    
+
     # Plot ROC curve
     ax.plot(fpr, tpr, color="blue", lw=2, label=f"ROC curve (AUC = {roc_auc:.3f})")
-    
+
     # Plot diagonal (random classifier)
     ax.plot([0, 1], [0, 1], color="gray", lw=1, linestyle="--", label="Random (AUC = 0.5)")
-    
+
     # Formatting
     title = params.title or f"ROC Curve: {params.true_column}"
     ax.set_xlabel("False Positive Rate (1 - Specificity)")
@@ -252,7 +252,7 @@ def precision_recall_curve_plot(
         ValueError: If columns are missing or data is invalid
     """
     try:
-        from sklearn.metrics import precision_recall_curve, average_precision_score
+        from sklearn.metrics import average_precision_score, precision_recall_curve
     except ImportError as e:
         raise ImportError(
             "scikit-learn is required for PR curves. "
@@ -277,7 +277,7 @@ def precision_recall_curve_plot(
 
     # Get data and drop missing values
     data = df[[params.true_column, params.prob_column]].dropna()
-    
+
     if len(data) < 2:
         raise ValueError(
             f"Insufficient data: need at least 2 rows, got {len(data)}"
@@ -296,20 +296,20 @@ def precision_recall_curve_plot(
     # Calculate PR curve
     precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
     ap_score = average_precision_score(y_true, y_prob)
-    
+
     # Baseline (random classifier for imbalanced data)
     positive_ratio = float(np.mean(y_true))
 
     # Create plot
     fig, ax = plt.subplots(figsize=params.figsize)
-    
+
     # Plot PR curve
     ax.plot(recall, precision, color="blue", lw=2, label=f"PR curve (AP = {ap_score:.3f})")
-    
+
     # Plot baseline (horizontal line at positive class ratio)
-    ax.axhline(y=positive_ratio, color="gray", lw=1, linestyle="--", 
+    ax.axhline(y=positive_ratio, color="gray", lw=1, linestyle="--",
                label=f"Random (AP = {positive_ratio:.3f})")
-    
+
     # Formatting
     title = params.title or f"Precision-Recall Curve: {params.true_column}"
     ax.set_xlabel("Recall (Sensitivity)")

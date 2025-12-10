@@ -70,17 +70,17 @@ class ToolRegistry:
         key = f"{category}.{name}"
         metadata = self._tools.get(key)
         return metadata.function if metadata else None
-    
+
     def get_tool_metadata(self, category: str, name: str) -> ToolMetadata | None:
         """Get metadata for a specific tool by category and name."""
         key = f"{category}.{name}"
         return self._tools.get(key)
 
     def invoke(
-        self, 
-        category: str, 
-        name: str, 
-        state: Any, 
+        self,
+        category: str,
+        name: str,
+        state: Any,
         params: dict[str, Any] | BaseModel
     ) -> Any:
         """
@@ -108,7 +108,7 @@ class ToolRegistry:
         metadata = self.get_tool_metadata(category, name)
         if metadata is None:
             raise ValueError(f"Tool not found: {category}.{name}")
-        
+
         # Validate and convert params if needed
         if metadata.input_schema:
             if isinstance(params, dict):
@@ -122,7 +122,7 @@ class ToolRegistry:
                 )
         else:
             validated_params = params
-        
+
         # Call the tool with state injected
         return metadata.function(state, validated_params)
 
@@ -141,7 +141,7 @@ class ToolRegistry:
                 meta for key, meta in self._tools.items() if meta.category == category
             ]
         return list(self._tools.values())
-    
+
     def get_tool_schemas(self) -> dict[str, dict[str, Any]]:
         """
         Get JSON schemas for all tools (useful for MCP tool definitions).

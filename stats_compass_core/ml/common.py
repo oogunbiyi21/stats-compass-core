@@ -1,10 +1,11 @@
 """Common models and utilities for ML tools."""
 
 from typing import Any
+
 import pandas as pd
 
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import ModelTrainingResult
+from stats_compass_core.state import DataFrameState
 
 
 def prepare_ml_data(
@@ -27,11 +28,11 @@ def prepare_ml_data(
     """
     df = state.get_dataframe(dataframe_name)
     source_name = dataframe_name or state.get_active_dataframe_name()
-    
+
     # Validate target column
     if target_column not in df.columns:
         raise ValueError(f"Target column '{target_column}' not found in DataFrame")
-    
+
     # Determine feature columns
     if feature_columns:
         feature_cols = feature_columns
@@ -44,15 +45,15 @@ def prepare_ml_data(
         feature_cols = [col for col in numeric_cols if col != target_column]
         if not feature_cols:
             raise ValueError("No numeric feature columns available")
-    
+
     # Prepare data
     X = df[feature_cols]
     y = df[target_column]
-    
+
     # Check for sufficient data
     if len(df) < 2:
         raise ValueError("Insufficient data: need at least 2 samples")
-    
+
     return X, y, feature_cols, source_name
 
 
@@ -96,20 +97,20 @@ def create_training_result(
         feature_columns=feature_cols,
         source_dataframe=source_name,
     )
-    
+
     # Build metrics dict
     metrics: dict[str, float] = {"train_score": train_score}
     if test_score is not None:
         metrics["test_score"] = test_score
-    
+
     # Extract feature importances if available
     feature_importances: dict[str, float] | None = None
     if hasattr(model, 'feature_importances_'):
         feature_importances = {
-            col: float(imp) 
+            col: float(imp)
             for col, imp in zip(feature_cols, model.feature_importances_)
         }
-    
+
     # Extract coefficients if available
     coefficients: dict[str, float] | None = None
     intercept: float | None = None
@@ -125,7 +126,7 @@ def create_training_result(
             intercept = intercept_val.item()
         elif isinstance(intercept_val, (int, float)):
             intercept = float(intercept_val)
-    
+
     return ModelTrainingResult(
         model_id=model_id,
         model_type=model_type,

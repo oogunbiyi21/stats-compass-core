@@ -4,10 +4,10 @@ Tool for training a linear regression model.
 
 from pydantic import BaseModel, Field
 
-from stats_compass_core.ml.common import prepare_ml_data, create_training_result
-from stats_compass_core.state import DataFrameState
-from stats_compass_core.results import ModelTrainingResult
+from stats_compass_core.ml.common import create_training_result, prepare_ml_data
 from stats_compass_core.registry import registry
+from stats_compass_core.results import ModelTrainingResult
+from stats_compass_core.state import DataFrameState
 
 
 class TrainLinearRegressionInput(BaseModel):
@@ -74,7 +74,7 @@ def train_linear_regression(
         model.fit(X_train, y_train)
         train_score = model.score(X_train, y_train)
         test_score = model.score(X_test, y_test) if len(X_test) > 0 else None
-        
+
     except ImportError as e:
         raise ImportError(
             "scikit-learn is required for ML tools. "

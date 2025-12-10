@@ -6,11 +6,11 @@ import os
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataFrameLoadResult
+from stats_compass_core.state import DataFrameState
 
 
 class LoadCSVInput(BaseModel):
@@ -22,18 +22,18 @@ class LoadCSVInput(BaseModel):
         alias="path",
     )
     name: str | None = Field(
-        default=None, 
+        default=None,
         description="Name to assign to the DataFrame. If None, uses filename without extension."
     )
     set_active: bool = Field(
-        default=True, 
+        default=True,
         description="Whether to set this as the active DataFrame"
     )
     # Common pandas read_csv parameters
     delimiter: str = Field(default=",", description="Field delimiter")
     encoding: str = Field(default="utf-8", description="File encoding")
     nrows: int | None = Field(
-        default=None, 
+        default=None,
         ge=1,
         description="Number of rows to read (useful for large files)"
     )
@@ -62,14 +62,14 @@ def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult
     # Validate file exists
     if not os.path.isfile(params.file_path):
         raise FileNotFoundError(f"File not found: {params.file_path}")
-    
+
     # Determine DataFrame name
     if params.name:
         df_name = params.name
     else:
         # Use filename without extension
         df_name = os.path.splitext(os.path.basename(params.file_path))[0]
-    
+
     # Load the CSV
     try:
         read_kwargs: dict[str, Any] = {
@@ -78,21 +78,21 @@ def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult
         }
         if params.nrows is not None:
             read_kwargs["nrows"] = params.nrows
-        
+
         df = pd.read_csv(params.file_path, **read_kwargs)
     except Exception as e:
         raise ValueError(f"Failed to parse CSV file: {str(e)}") from e
-    
+
     # Store in state (set_dataframe returns the name string)
     stored_name = state.set_dataframe(df, name=df_name, operation="load_csv")
 
     # Set as active if requested
     if params.set_active:
         state.set_active_dataframe(stored_name)
-    
+
     # Get dtypes as strings
     dtypes = {col: str(dtype) for col, dtype in df.dtypes.items()}
-    
+
     return DataFrameLoadResult(
         success=True,
         dataframe_name=stored_name,

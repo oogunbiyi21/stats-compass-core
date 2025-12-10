@@ -16,8 +16,8 @@ import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
-from stats_compass_core.state import DataFrameState
 from stats_compass_core.results import DataQualityResult
+from stats_compass_core.state import DataFrameState
 
 
 class AnalyzeMissingDataInput(BaseModel):
@@ -78,15 +78,15 @@ def _analyze_missing_patterns(df: pd.DataFrame, threshold: float) -> list[dict]:
     """Find columns with correlated missing patterns."""
     # Create missing indicator matrix
     missing_matrix = df.isnull().astype(int)
-    
+
     # Find columns with missing data
     cols_with_missing = missing_matrix.columns[missing_matrix.sum() > 0].tolist()
-    
+
     if len(cols_with_missing) < 2:
         return []
-    
+
     correlated_patterns = []
-    
+
     for i, col1 in enumerate(cols_with_missing):
         for col2 in cols_with_missing[i+1:]:
             # Calculate correlation between missing indicators
@@ -97,7 +97,7 @@ def _analyze_missing_patterns(df: pd.DataFrame, threshold: float) -> list[dict]:
                     "column2": col2,
                     "correlation": round(float(corr), 3),
                 })
-    
+
     return correlated_patterns
 
 
@@ -106,12 +106,12 @@ def _detect_outliers_iqr(series: pd.Series, threshold: float = 1.5) -> dict:
     q1 = series.quantile(0.25)
     q3 = series.quantile(0.75)
     iqr = q3 - q1
-    
+
     lower_bound = q1 - threshold * iqr
     upper_bound = q3 + threshold * iqr
-    
+
     outliers = series[(series < lower_bound) | (series > upper_bound)]
-    
+
     return {
         "method": "iqr",
         "lower_bound": float(lower_bound),
@@ -129,7 +129,7 @@ def _detect_outliers_zscore(series: pd.Series, threshold: float = 3.0) -> dict:
     """Detect outliers using z-score method."""
     mean = series.mean()
     std = series.std()
-    
+
     if std == 0:
         return {
             "method": "zscore",
@@ -140,10 +140,10 @@ def _detect_outliers_zscore(series: pd.Series, threshold: float = 3.0) -> dict:
             "outlier_percentage": 0,
             "outlier_indices": [],
         }
-    
+
     z_scores = (series - mean) / std
     outliers = series[abs(z_scores) > threshold]
-    
+
     return {
         "method": "zscore",
         "mean": float(mean),
@@ -159,7 +159,7 @@ def _detect_outliers_modified_zscore(series: pd.Series, threshold: float = 3.5) 
     """Detect outliers using modified z-score (MAD-based) method."""
     median = series.median()
     mad = np.median(np.abs(series - median))
-    
+
     if mad == 0:
         return {
             "method": "modified_zscore",
@@ -170,10 +170,10 @@ def _detect_outliers_modified_zscore(series: pd.Series, threshold: float = 3.5) 
             "outlier_percentage": 0,
             "outlier_indices": [],
         }
-    
+
     modified_z_scores = 0.6745 * (series - median) / mad
     outliers = series[abs(modified_z_scores) > threshold]
-    
+
     return {
         "method": "modified_zscore",
         "median": float(median),
@@ -213,7 +213,7 @@ def _generate_recommendations(
 ) -> list[str]:
     """Generate data quality improvement recommendations."""
     recommendations = []
-    
+
     # Missing data recommendations
     empty_cols = missing_summary.get("completely_empty_columns", [])
     if empty_cols:
@@ -221,22 +221,22 @@ def _generate_recommendations(
             f"Remove completely empty columns: {', '.join(empty_cols[:5])}"
             + (f" (+{len(empty_cols)-5} more)" if len(empty_cols) > 5 else "")
         )
-    
+
     mostly_missing = missing_summary.get("mostly_missing_columns", [])
     if mostly_missing:
         recommendations.append(
             f"Consider removing high-missing columns (>80%): {', '.join(mostly_missing[:5])}"
             + (f" (+{len(mostly_missing)-5} more)" if len(mostly_missing) > 5 else "")
         )
-    
-    partial_missing = [col for col, pct in missing_summary.get("missing_by_column", {}).items() 
+
+    partial_missing = [col for col, pct in missing_summary.get("missing_by_column", {}).items()
                        if 0 < pct < 80 and col not in mostly_missing]
     if partial_missing:
         recommendations.append(
             f"Consider imputation for partially missing columns: {', '.join(partial_missing[:5])}"
             + (f" (+{len(partial_missing)-5} more)" if len(partial_missing) > 5 else "")
         )
-    
+
     # Outlier recommendations
     if outlier_summary:
         high_outlier_cols = [
@@ -247,17 +247,17 @@ def _generate_recommendations(
             recommendations.append(
                 f"Investigate columns with >5% outliers: {', '.join(high_outlier_cols[:5])}"
             )
-    
+
     # Duplicate recommendations
     if duplicate_count > 0:
         dup_pct = duplicate_count / total_rows * 100
         recommendations.append(
             f"Remove {duplicate_count} duplicate rows ({dup_pct:.1f}% of data)"
         )
-    
+
     if not recommendations:
         recommendations.append("Data quality looks good! No major issues detected.")
-    
+
     return recommendations
 
 
@@ -287,22 +287,22 @@ def analyze_missing_data(
 
     total_rows = len(df)
     total_cols = len(df.columns)
-    
+
     # Calculate missing data statistics
     missing_counts = df.isnull().sum()
     missing_pcts = (missing_counts / total_rows * 100).round(2) if total_rows > 0 else missing_counts * 0
-    
+
     # Categorize columns by missing percentage
     columns_with_missing = missing_counts[missing_counts > 0].to_dict()
     completely_empty = [col for col, count in columns_with_missing.items() if count == total_rows]
     mostly_missing = [col for col, pct in missing_pcts.items() if 80 <= pct < 100]
-    
+
     # Find correlated missing patterns
     correlated_patterns = _analyze_missing_patterns(df, params.correlation_threshold)
-    
+
     # Calculate average missing per row
     avg_missing_per_row = float(df.isnull().sum(axis=1).mean())
-    
+
     missing_summary = {
         "total_missing_values": int(missing_counts.sum()),
         "columns_with_missing_count": len(columns_with_missing),
@@ -312,14 +312,14 @@ def analyze_missing_data(
         "avg_missing_per_row": round(avg_missing_per_row, 2),
         "correlated_missing_patterns": correlated_patterns,
     }
-    
+
     # Generate recommendations
     recommendations = _generate_recommendations(missing_summary, None, 0, total_rows)
-    
+
     # Calculate quality score (based on missing data only)
     overall_missing_pct = missing_counts.sum() / (total_rows * total_cols) * 100 if total_rows * total_cols > 0 else 0
     quality_score = _calculate_quality_score(overall_missing_pct, 0, 0)
-    
+
     return DataQualityResult(
         dataframe_name=source_name,
         total_rows=total_rows,
@@ -359,10 +359,10 @@ def detect_outliers(
 
     total_rows = len(df)
     total_cols = len(df.columns)
-    
+
     # Get numeric columns
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    
+
     if not numeric_cols:
         return DataQualityResult(
             dataframe_name=source_name,
@@ -388,19 +388,19 @@ def detect_outliers(
     # Detect outliers in each numeric column
     outlier_results = {}
     total_outliers = 0
-    
+
     for col in numeric_cols:
         series = df[col].dropna()
         if len(series) == 0:
             continue
-            
+
         if params.method == "iqr":
             result = _detect_outliers_iqr(series, threshold)
         elif params.method == "zscore":
             result = _detect_outliers_zscore(series, threshold)
         else:
             result = _detect_outliers_modified_zscore(series, threshold)
-        
+
         outlier_results[col] = result
         total_outliers += result["outlier_count"]
 
@@ -409,7 +409,7 @@ def detect_outliers(
         col for col, info in outlier_results.items()
         if info["outlier_count"] > 0
     ]
-    
+
     outlier_summary = {
         "method": params.method,
         "threshold": threshold,
@@ -418,7 +418,7 @@ def detect_outliers(
         "numeric_columns_analyzed": numeric_cols,
         "by_column": outlier_results,
     }
-    
+
     # Generate recommendations
     recommendations = []
     high_outlier_cols = [
@@ -431,11 +431,11 @@ def detect_outliers(
         )
     if total_outliers > 0:
         recommendations.append(
-            f"Use handle_outliers tool to cap, remove, or transform outlier values"
+            "Use handle_outliers tool to cap, remove, or transform outlier values"
         )
     if not recommendations:
         recommendations.append("No significant outliers detected")
-    
+
     return DataQualityResult(
         dataframe_name=source_name,
         total_rows=total_rows,
@@ -473,18 +473,18 @@ def data_quality_report(
 
     total_rows = len(df)
     total_cols = len(df.columns)
-    
+
     # === Missing Data Analysis ===
     missing_counts = df.isnull().sum()
     missing_pcts = (missing_counts / total_rows * 100).round(2) if total_rows > 0 else missing_counts
-    
+
     columns_with_missing = missing_counts[missing_counts > 0].to_dict()
     completely_empty = [col for col, count in columns_with_missing.items() if count == total_rows]
     mostly_missing = [col for col, pct in missing_pcts.items() if 80 <= pct < 100]
-    
+
     correlated_patterns = _analyze_missing_patterns(df, 0.5)
     avg_missing_per_row = float(df.isnull().sum(axis=1).mean()) if total_rows > 0 else 0
-    
+
     missing_summary = {
         "total_missing_values": int(missing_counts.sum()),
         "columns_with_missing_count": len(columns_with_missing),
@@ -494,40 +494,40 @@ def data_quality_report(
         "avg_missing_per_row": round(avg_missing_per_row, 2),
         "correlated_missing_patterns": correlated_patterns,
     }
-    
+
     # === Outlier Analysis ===
     outlier_summary = None
     total_outliers = 0
     overall_outlier_pct = 0
-    
+
     if params.include_outliers:
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        
+
         if numeric_cols:
             threshold = 1.5 if params.outlier_method == "iqr" else (3.0 if params.outlier_method == "zscore" else 3.5)
             outlier_results = {}
-            
+
             for col in numeric_cols:
                 series = df[col].dropna()
                 if len(series) == 0:
                     continue
-                    
+
                 if params.outlier_method == "iqr":
                     result = _detect_outliers_iqr(series, threshold)
                 elif params.outlier_method == "zscore":
                     result = _detect_outliers_zscore(series, threshold)
                 else:
                     result = _detect_outliers_modified_zscore(series, threshold)
-                
+
                 outlier_results[col] = result
                 total_outliers += result["outlier_count"]
-            
+
             columns_with_outliers = [col for col, info in outlier_results.items() if info["outlier_count"] > 0]
-            
+
             # Calculate overall outlier percentage (across all numeric values)
             total_numeric_values = sum(len(df[col].dropna()) for col in numeric_cols)
             overall_outlier_pct = total_outliers / total_numeric_values * 100 if total_numeric_values > 0 else 0
-            
+
             outlier_summary = {
                 "method": params.outlier_method,
                 "threshold": threshold,
@@ -536,18 +536,18 @@ def data_quality_report(
                 "numeric_columns_analyzed": numeric_cols,
                 "by_column": outlier_results,
             }
-    
+
     # === Duplicate Detection ===
     duplicate_count = int(df.duplicated().sum())
     duplicate_pct = duplicate_count / total_rows * 100 if total_rows > 0 else 0
-    
+
     # === Calculate Quality Score ===
     overall_missing_pct = missing_counts.sum() / (total_rows * total_cols) * 100 if total_rows * total_cols > 0 else 0
     quality_score = _calculate_quality_score(overall_missing_pct, overall_outlier_pct, duplicate_pct)
-    
+
     # === Generate Recommendations ===
     recommendations = _generate_recommendations(missing_summary, outlier_summary, duplicate_count, total_rows)
-    
+
     return DataQualityResult(
         dataframe_name=source_name,
         total_rows=total_rows,

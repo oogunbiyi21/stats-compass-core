@@ -15,12 +15,12 @@ from stats_compass_core.state import DataFrameState
 # Only import ML tools if sklearn is available
 if HAS_SKLEARN:
     from stats_compass_core.ml.train_linear_regression import (
-        train_linear_regression,
         TrainLinearRegressionInput,
+        train_linear_regression,
     )
     from stats_compass_core.ml.train_random_forest_classifier import (
-        train_random_forest_classifier,
         TrainRandomForestClassifierInput,
+        train_random_forest_classifier,
     )
 
 
