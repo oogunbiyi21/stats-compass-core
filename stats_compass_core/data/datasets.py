@@ -9,8 +9,8 @@ from typing import Literal
 
 import pandas as pd
 
-# Path to datasets directory (relative to package installation)
-_DATASETS_DIR = Path(__file__).parent.parent.parent / "datasets"
+# Path to datasets directory (inside the package)
+_DATASETS_DIR = Path(__file__).parent.parent / "datasets"
 
 
 def list_datasets() -> list[str]:

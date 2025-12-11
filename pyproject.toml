@@ -1,12 +1,12 @@
 [tool.poetry]
 name = "stats-compass-core"
-version = "0.1.1"
+version = "0.1.2"
 description = "A clean toolkit of deterministic pandas-based data tools"
 authors = ["Olatunji Ogunbiyi <oogunbiyi21@users.noreply.github.com>"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "stats_compass_core"}]
-include = ["datasets/*.csv"]
+include = ["stats_compass_core/datasets/*.csv"]
 keywords = ["pandas", "data", "tools", "data-science", "eda", "ml"]
 classifiers = [
     "Development Status :: 3 - Alpha",
