@@ -142,6 +142,15 @@ class DataFrameLoadResult(BaseModel):
     message: str = Field(description="Human-readable summary")
 
 
+class FileListResult(BaseModel):
+    """Result for file listing tools."""
+
+    directory: str = Field(description="Directory that was scanned")
+    files: list[str] = Field(description="List of file paths found")
+    count: int = Field(description="Number of files found")
+    message: str = Field(description="Human-readable summary")
+
+
 class DescribeResult(BaseModel):
     """Result for descriptive statistics tools."""
 

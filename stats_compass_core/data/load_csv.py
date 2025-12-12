@@ -42,11 +42,15 @@ class LoadCSVInput(BaseModel):
 @registry.register(
     category="data",
     input_schema=LoadCSVInput,
-    description="Load data from a CSV file into the session",
+    description="Load data from a local CSV file. Requires a valid filesystem path accessible to the server. Cannot read files uploaded to the chat.",
 )
 def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult:
     """
     Load a CSV file into the session state.
+
+    IMPORTANT: This tool requires a valid path on the local filesystem where the
+    server is running. It cannot access files uploaded directly to the chat interface
+    unless they are saved to a known local path.
 
     Args:
         state: DataFrameState to store the loaded DataFrame

@@ -20,6 +20,27 @@
 - 📊 **Base64 Charts**: Visualization tools return PNG images as base64 strings
 - 🤖 **Model Storage**: Trained ML models stored by ID for later use
 
+## 📂 Data Loading Guide
+
+**Crucial:** Stats Compass runs locally on your machine. It cannot see files you drag-and-drop into the Claude chat window. You must tell it where your files are on your disk.
+
+### How to load your own data
+
+1.  **Find your file**:
+    Ask Claude to look for your file. For example:
+    > "List files in my Downloads folder: /Users/me/Downloads"
+    
+    Claude will use the `list_files` tool to show you what it can see.
+
+2.  **Load the file**:
+    Once Claude confirms the file exists, ask it to load it:
+    > "Load the housing_data.csv file from that folder"
+
+    Claude will use `load_csv` with the correct absolute path.
+
+### Why does drag-and-drop not work?
+When you drag a file into Claude, it stays in Claude's cloud sandbox. Stats Compass runs on your local computer. To bridge this gap, you must point Stats Compass to the actual file path on your hard drive.
+
 ## Architecture
 
 ```
