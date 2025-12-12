@@ -18,7 +18,7 @@ class LoadCSVInput(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     file_path: str = Field(
-        description="Absolute or relative path to the CSV file",
+        description="Absolute path to the CSV file (e.g. /Users/username/data.csv). Relative paths are relative to the server's working directory.",
         alias="path",
     )
     name: str | None = Field(
