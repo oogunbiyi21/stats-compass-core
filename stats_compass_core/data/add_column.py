@@ -2,8 +2,11 @@
 Tool for adding or transforming columns in a DataFrame.
 """
 
+import re
 from typing import Any
 
+import numpy as np
+import pandas as pd
 from pydantic import BaseModel, Field
 
 from stats_compass_core.registry import registry
@@ -24,9 +27,11 @@ class AddColumnInput(BaseModel):
     expression: str | None = Field(
         default=None,
         description=(
-            "Pandas expression to compute the column value. "
-            "Can reference existing columns by name, e.g. 'price * quantity' or 'age + 1'. "
-            "Uses pandas.eval() for safe evaluation. "
+            "Python/Pandas expression to compute the column value. "
+            "You can use: "
+            "1. Column names directly as variables (e.g., 'price * quantity') "
+            "2. The dataframe as 'df' (e.g., 'df[\"price\"] * 1.1') "
+            "3. Pandas/Numpy functions (e.g., 'pd.to_numeric(bathrooms)', 'np.log(price)') "
             "Either expression or value must be provided."
         ),
     )
@@ -50,7 +55,7 @@ class AddColumnInput(BaseModel):
 @registry.register(
     category="data",
     input_schema=AddColumnInput,
-    description="Add a new column or transform an existing column using an expression or constant value",
+    description="Add a new column or transform an existing column using a Python expression or constant value",
 )
 def add_column(
     state: DataFrameState, params: AddColumnInput
@@ -59,8 +64,9 @@ def add_column(
     Add a new column or transform an existing column.
 
     Supports two modes:
-    1. Expression mode: Compute column from existing columns using pandas.eval()
-       Example: expression="price * quantity" creates a new column from price and quantity
+    1. Expression mode: Compute column using a Python expression with access to df, pd, np.
+       Example: expression="pd.to_numeric(bathrooms, errors='coerce')"
+       Example: expression="price * quantity"
     2. Constant mode: Assign the same value to all rows
        Example: value=0 or value="unknown"
 
@@ -87,13 +93,40 @@ def add_column(
     is_new_column = params.column_name not in df.columns
 
     if params.expression is not None:
-        # Use pandas.eval for safe expression evaluation
+        # Security check for dangerous patterns
+        dangerous_patterns = [
+            r"\bimport\b",
+            r"\bexec\b",
+            r"\beval\b",
+            r"\bopen\b",
+            r"\.to_csv",
+            r"\.to_excel",
+            r"\b__.*?__\b",
+            r"\bdel\b",
+        ]
+        if any(re.search(p, params.expression, re.IGNORECASE) for p in dangerous_patterns):
+            raise ValueError("Unsafe operation detected in expression")
+
+        # Create namespace with safe globals and column variables
+        namespace = {
+            "df": result_df,
+            "pd": pd,
+            "np": np,
+            "__builtins__": {},  # Restrict builtins
+        }
+
+        # Add valid column names to namespace for convenience (e.g. price * quantity)
+        for col in result_df.columns:
+            if isinstance(col, str) and col.isidentifier():
+                namespace[col] = result_df[col]
+
         try:
-            result_df[params.column_name] = result_df.eval(params.expression)
+            # Evaluate expression in restricted namespace
+            result_df[params.column_name] = eval(params.expression, namespace)
         except Exception as e:
             raise ValueError(
                 f"Invalid expression '{params.expression}': {str(e)}. "
-                f"Available columns: {list(df.columns)}"
+                f"Available variables: df, pd, np, and columns."
             ) from e
     else:
         # Constant value assignment

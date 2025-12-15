@@ -10,6 +10,30 @@
 
 **stats-compass-core** is a Python package that provides a curated collection of data tools designed for use with LLM agents via the Model Context Protocol (MCP). Unlike traditional pandas libraries, this package manages server-side state, allowing AI agents to work with DataFrames across multiple tool invocations without passing raw data over the wire.
 
+## 🚀 Quick Start
+
+### 1. Install
+```bash
+pip install stats-compass-mcp
+```
+
+### 2. Configure Claude Desktop
+We provide a simple command to automatically configure Claude Desktop:
+
+```bash
+stats-compass-mcp install
+```
+
+This will:
+1. Locate your `claude_desktop_config.json`
+2. Back it up
+3. Add the Stats Compass MCP server configuration
+4. Ask you to restart Claude Desktop
+
+### 3. Start Analyzing
+Open Claude Desktop and ask:
+> "Load the housing.csv file from my Downloads folder and analyze the price distribution."
+
 ### Key Features
 
 - 🔄 **Stateful Design**: Server-side `DataFrameState` manages multiple DataFrames and trained models
@@ -40,6 +64,16 @@
 
 ### Why does drag-and-drop not work?
 When you drag a file into Claude, it stays in Claude's cloud sandbox. Stats Compass runs on your local computer. To bridge this gap, you must point Stats Compass to the actual file path on your hard drive.
+
+### Saving your work
+
+You can save your processed data and trained models back to your local disk.
+
+- **Save Data**: Use `save_csv` to save a DataFrame to a CSV file.
+  > "Save the cleaned dataframe to ~/Documents/cleaned_data.csv"
+
+- **Save Models**: Use `save_model` to save a trained model (using joblib).
+  > "Save the regression model to ~/models/price_predictor.joblib"
 
 ## Architecture
 

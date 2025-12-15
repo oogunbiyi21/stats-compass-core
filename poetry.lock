@@ -3959,4 +3959,4 @@ timeseries = ["matplotlib", "statsmodels"]
 [metadata]
 lock-version = "2.1"
 python-versions = "^3.11"
-content-hash = "8ed693f9635f89cd70814600067de0151bacaece7bcf692635381259d8f08999"
+content-hash = "0ec4abcd5fa0b5a74970145bd5e672414f23e23a95388e5210775920f0ce6dd2"

@@ -17,7 +17,7 @@ class ListFilesInput(BaseModel):
 
     directory: str = Field(
         default=".",
-        description="Directory to list files from. Defaults to current working directory.",
+        description="Directory to list files from. Defaults to current working directory. Supports '~' expansion (e.g. '~/Downloads').",
     )
 
 
@@ -38,8 +38,8 @@ def list_files(state: DataFrameState, params: ListFilesInput) -> FileListResult:
         FileListResult with list of files.
     """
     try:
-        # Resolve directory path
-        directory = Path(params.directory).resolve()
+        # Resolve directory path (handle ~ for home directory)
+        directory = Path(params.directory).expanduser().resolve()
         
         if not directory.exists():
             raise FileNotFoundError(f"Directory not found: {directory}")
