@@ -7,9 +7,11 @@ Requires the [timeseries] extra: pip install stats-compass-core[timeseries]
 import base64
 import io
 import itertools
+import os
 import time
 from typing import Any, Literal
 
+import joblib
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -72,6 +74,9 @@ class FitARIMAInput(BaseModel):
     )
     model_name: str | None = Field(
         default=None, description="Custom name for storing the model"
+    )
+    save_path: str | None = Field(
+        default=None, description="Path to save the trained model (e.g., 'model.joblib')"
     )
 
 
@@ -568,6 +573,12 @@ def fit_arima(
 
         # Calculate residual std
         residual_std = float(np.std(fitted_model.resid))
+
+        # Save model to disk if requested
+        if params.save_path:
+            filepath = os.path.expanduser(params.save_path)
+            os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+            joblib.dump(fitted_model, filepath)
 
         # Create summary message
         if seasonal_order:

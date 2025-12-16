@@ -8,7 +8,9 @@ binary classification models.
 from __future__ import annotations
 
 import base64
+import os
 from io import BytesIO
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -42,6 +44,12 @@ class ROCCurveInput(BaseModel):
         description="Figure size as (width, height) in inches",
     )
     dpi: int = Field(default=100, ge=50, le=300, description="Resolution in DPI")
+    save_path: str | None = Field(
+        default=None, description="Path to save the plot image (e.g., 'plot.png')"
+    )
+    format: Literal["png", "json"] = Field(
+        default="png", description="Output format: 'png' for image, 'json' for raw data"
+    )
 
 
 class PrecisionRecallCurveInput(BaseModel):
@@ -68,6 +76,12 @@ class PrecisionRecallCurveInput(BaseModel):
         description="Figure size as (width, height) in inches",
     )
     dpi: int = Field(default=100, ge=50, le=300, description="Resolution in DPI")
+    save_path: str | None = Field(
+        default=None, description="Path to save the plot image (e.g., 'plot.png')"
+    )
+    format: Literal["png", "json"] = Field(
+        default="png", description="Output format: 'png' for image, 'json' for raw data"
+    )
 
 
 def _interpret_auc(auc_score: float) -> str:
@@ -103,7 +117,7 @@ def _interpret_ap(ap_score: float, baseline: float) -> str:
 @registry.register(
     category="plots",
     input_schema=ROCCurveInput,
-    description="Create ROC curve for binary classification model evaluation",
+    description="Create ROC curve for binary classification model evaluation. Use format='json' to get raw data for interactive visualizations.",
 )
 def roc_curve_plot(
     state: DataFrameState, params: ROCCurveInput
@@ -173,6 +187,28 @@ def roc_curve_plot(
     fpr, tpr, thresholds = roc_curve(y_true, y_prob)
     roc_auc = auc(fpr, tpr)
 
+    # Generate interpretation
+    interpretation = (
+        f"AUC = {roc_auc:.3f} ({_interpret_auc(roc_auc)}). "
+        f"The model correctly ranks a random positive instance higher than a random negative instance "
+        f"{roc_auc*100:.1f}% of the time."
+    )
+
+    # Handle JSON format
+    if params.format == "json":
+        return ClassificationCurveResult(
+            curve_type="roc",
+            x_values=[float(x) for x in fpr],
+            y_values=[float(y) for y in tpr],
+            thresholds=[float(t) for t in thresholds] if len(thresholds) == len(fpr) else None,
+            auc_score=float(roc_auc),
+            image_base64=None,
+            model_id=params.model_id,
+            dataframe_name=source_name,
+            target_column=params.true_column,
+            interpretation=interpretation,
+        )
+
     # Create plot
     fig, ax = plt.subplots(figsize=params.figsize)
 
@@ -193,6 +229,10 @@ def roc_curve_plot(
     ax.set_ylim([0.0, 1.05])
 
     plt.tight_layout()
+
+    if params.save_path:
+        save_path = os.path.expanduser(params.save_path)
+        fig.savefig(save_path, dpi=params.dpi, bbox_inches='tight')
 
     # Convert to base64
     buf = BytesIO()
@@ -226,7 +266,7 @@ def roc_curve_plot(
 @registry.register(
     category="plots",
     input_schema=PrecisionRecallCurveInput,
-    description="Create Precision-Recall curve for binary classification, especially useful for imbalanced datasets",
+    description="Create Precision-Recall curve for binary classification, especially useful for imbalanced datasets. Use format='json' to get raw data for interactive visualizations.",
 )
 def precision_recall_curve_plot(
     state: DataFrameState, params: PrecisionRecallCurveInput
@@ -300,6 +340,28 @@ def precision_recall_curve_plot(
     # Baseline (random classifier for imbalanced data)
     positive_ratio = float(np.mean(y_true))
 
+    # Generate interpretation
+    interpretation = (
+        f"Average Precision = {ap_score:.3f} ({_interpret_ap(ap_score, positive_ratio)}). "
+        f"Baseline (random) = {positive_ratio:.3f} (positive class ratio). "
+        f"PR curves are more informative than ROC for imbalanced datasets."
+    )
+
+    # Handle JSON format
+    if params.format == "json":
+        return ClassificationCurveResult(
+            curve_type="precision_recall",
+            x_values=[float(x) for x in recall],
+            y_values=[float(y) for y in precision],
+            thresholds=[float(t) for t in thresholds] if len(thresholds) > 0 else None,
+            auc_score=float(ap_score),
+            image_base64=None,
+            model_id=params.model_id,
+            dataframe_name=source_name,
+            target_column=params.true_column,
+            interpretation=interpretation,
+        )
+
     # Create plot
     fig, ax = plt.subplots(figsize=params.figsize)
 
@@ -321,6 +383,10 @@ def precision_recall_curve_plot(
     ax.set_ylim([0.0, 1.05])
 
     plt.tight_layout()
+
+    if params.save_path:
+        save_path = os.path.expanduser(params.save_path)
+        fig.savefig(save_path, dpi=params.dpi, bbox_inches='tight')
 
     # Convert to base64
     buf = BytesIO()

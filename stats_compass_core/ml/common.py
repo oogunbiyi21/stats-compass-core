@@ -1,7 +1,9 @@
 """Common models and utilities for ML tools."""
 
+import os
 from typing import Any
 
+import joblib
 import pandas as pd
 
 from stats_compass_core.results import ModelTrainingResult
@@ -69,6 +71,7 @@ def create_training_result(
     test_size: int | None,
     source_name: str,
     hyperparameters: dict[str, Any],
+    save_path: str | None = None,
 ) -> ModelTrainingResult:
     """
     Create a ModelTrainingResult and store the model in state.
@@ -85,6 +88,7 @@ def create_training_result(
         test_size: Number of test samples
         source_name: Source DataFrame name
         hyperparameters: Model hyperparameters
+        save_path: Optional path to save the model file
     
     Returns:
         ModelTrainingResult with model stored in state
@@ -97,6 +101,12 @@ def create_training_result(
         feature_columns=feature_cols,
         source_dataframe=source_name,
     )
+
+    # Save model to disk if requested
+    if save_path:
+        filepath = os.path.expanduser(save_path)
+        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+        joblib.dump(model, filepath)
 
     # Build metrics dict
     metrics: dict[str, float] = {"train_score": train_score}

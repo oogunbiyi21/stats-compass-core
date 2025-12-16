@@ -33,6 +33,9 @@ class TrainLogisticRegressionInput(BaseModel):
     max_iter: int = Field(
         default=1000, ge=100, description="Maximum iterations for solver convergence"
     )
+    save_path: str | None = Field(
+        default=None, description="Path to save the trained model (e.g., 'model.joblib')"
+    )
 
 
 @registry.register(
@@ -100,4 +103,5 @@ def train_logistic_regression(
             "random_state": params.random_state,
             "max_iter": params.max_iter,
         },
+        save_path=params.save_path,
     )

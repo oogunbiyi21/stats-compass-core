@@ -5,7 +5,9 @@ Tool for creating bar charts from categorical columns.
 from __future__ import annotations
 
 import base64
+import os
 from io import BytesIO
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -34,12 +36,18 @@ class BarChartInput(BaseModel):
     figsize: tuple[float, float] = Field(
         default=(10, 6), description="Figure size as (width, height)"
     )
+    save_path: str | None = Field(
+        default=None, description="Path to save the plot image (e.g., 'plot.png')"
+    )
+    format: Literal["png", "json"] = Field(
+        default="png", description="Output format: 'png' for image, 'json' for raw data"
+    )
 
 
 @registry.register(
     category="plots",
     input_schema=BarChartInput,
-    description="Create a bar chart showing category counts",
+    description="Create a bar chart. Use format='json' to get raw data for interactive visualizations.",
 )
 def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
     """
@@ -76,6 +84,35 @@ def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
     if params.top_n:
         counts = counts.head(params.top_n)
 
+    chart_title = params.title or f"Counts for {params.column}"
+
+    # Handle JSON format
+    if params.format == "json":
+        chart_data = {
+            "type": "bar",
+            "title": chart_title,
+            "xlabel": params.column if params.orientation == "vertical" else "Count",
+            "ylabel": "Count" if params.orientation == "vertical" else params.column,
+            "categories": counts.index.astype(str).tolist(),
+            "values": counts.values.tolist(),
+            "orientation": params.orientation
+        }
+        
+        return ChartResult(
+            image_base64=None,
+            image_format="json",
+            title=chart_title,
+            chart_type="bar_chart",
+            dataframe_name=source_name,
+            data=chart_data,
+            metadata={
+                "column": params.column,
+                "top_n": params.top_n,
+                "categories_shown": len(counts),
+                "orientation": params.orientation,
+            }
+        )
+
     fig, ax = plt.subplots(figsize=params.figsize)
 
     if params.orientation == "vertical":
@@ -92,6 +129,10 @@ def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
     ax.grid(True, axis="y", alpha=0.3)
 
     plt.tight_layout()
+
+    if params.save_path:
+        save_path = os.path.expanduser(params.save_path)
+        fig.savefig(save_path, bbox_inches='tight')
 
     # Convert to base64 PNG
     buf = BytesIO()

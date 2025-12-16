@@ -5,7 +5,9 @@ Tool for visualizing feature importance from trained models.
 from __future__ import annotations
 
 import base64
+import os
 from io import BytesIO
+from typing import Literal
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -33,6 +35,12 @@ class FeatureImportanceInput(BaseModel):
     figsize: tuple[float, float] = Field(
         default=(10, 6), description="Figure size as (width, height)"
     )
+    save_path: str | None = Field(
+        default=None, description="Path to save the plot image (e.g., 'plot.png')"
+    )
+    format: Literal["png", "json"] = Field(
+        default="png", description="Output format: 'png' for image, 'json' for raw data"
+    )
 
 
 def _extract_importances(model: object) -> np.ndarray:
@@ -55,7 +63,7 @@ def _extract_importances(model: object) -> np.ndarray:
 @registry.register(
     category="plots",
     input_schema=FeatureImportanceInput,
-    description="Visualize feature importance or coefficients for trained models",
+    description="Visualize feature importance. Use format='json' to get raw data for interactive visualizations.",
 )
 def feature_importance(state: DataFrameState, params: FeatureImportanceInput) -> ChartResult:
     """
@@ -104,6 +112,36 @@ def feature_importance(state: DataFrameState, params: FeatureImportanceInput) ->
     if params.top_n:
         importance_df = importance_df.head(params.top_n)
 
+    chart_title = params.title or f"Feature Importance - {model_info.model_type}"
+
+    # Handle JSON format
+    if params.format == "json":
+        chart_data = {
+            "type": "bar",
+            "title": chart_title,
+            "xlabel": "Importance" if params.orientation == "horizontal" else "Feature",
+            "ylabel": "Feature" if params.orientation == "horizontal" else "Importance",
+            "categories": importance_df["feature"].tolist(),
+            "values": importance_df["importance"].tolist(),
+            "orientation": params.orientation
+        }
+        
+        return ChartResult(
+            image_base64=None,
+            image_format="json",
+            title=chart_title,
+            chart_type="feature_importance",
+            dataframe_name=model_info.source_dataframe,
+            data=chart_data,
+            metadata={
+                "model_id": params.model_id,
+                "model_type": model_info.model_type,
+                "top_n": params.top_n,
+                "orientation": params.orientation,
+                "features_shown": len(importance_df),
+            }
+        )
+
     fig, ax = plt.subplots(figsize=params.figsize)
 
     if params.orientation == "horizontal":
@@ -123,6 +161,10 @@ def feature_importance(state: DataFrameState, params: FeatureImportanceInput) ->
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+
+    if params.save_path:
+        save_path = os.path.expanduser(params.save_path)
+        fig.savefig(save_path, bbox_inches='tight')
 
     # Convert to base64 PNG
     buf = BytesIO()

@@ -8,12 +8,16 @@ from stats_compass_core.data.get_schema import get_schema
 from stats_compass_core.data.list_dataframes import list_dataframes
 from stats_compass_core.data.list_files import list_files
 from stats_compass_core.data.load_csv import load_csv
+from stats_compass_core.data.load_excel import load_excel
 from stats_compass_core.data.load_dataset import load_dataset
 from stats_compass_core.data.merge_dataframes import merge_dataframes
 from stats_compass_core.data.rename_columns import rename_columns
+from stats_compass_core.data.save_csv import save_csv
 
 __all__ = [
     "load_csv",
+    "load_excel",
+    "save_csv",
     "load_dataset",
     "get_schema",
     "get_sample",

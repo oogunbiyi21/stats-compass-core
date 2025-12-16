@@ -10,29 +10,32 @@
 
 **stats-compass-core** is a Python package that provides a curated collection of data tools designed for use with LLM agents via the Model Context Protocol (MCP). Unlike traditional pandas libraries, this package manages server-side state, allowing AI agents to work with DataFrames across multiple tool invocations without passing raw data over the wire.
 
+This is the **core library** containing the business logic, state management, and tool definitions. If you are looking for the MCP server to use with Claude or other clients, please see [stats-compass-mcp](https://github.com/oogunbiyi21/stats-compass-mcp).
+
 ## 🚀 Quick Start
 
 ### 1. Install
 ```bash
-pip install stats-compass-mcp
+pip install stats-compass-core[all]
 ```
 
-### 2. Configure Claude Desktop
-We provide a simple command to automatically configure Claude Desktop:
+### 2. Usage in Python
 
-```bash
-stats-compass-mcp install
+```python
+from stats_compass_core import DataFrameState, registry
+import pandas as pd
+
+# Initialize state
+state = DataFrameState()
+
+# Load data
+df = pd.read_csv("data.csv")
+state.set_dataframe(df, name="my_data", operation="load")
+
+# Invoke tools
+result = registry.invoke("eda", "describe", state, {"dataframe_name": "my_data"})
+print(result.statistics)
 ```
-
-This will:
-1. Locate your `claude_desktop_config.json`
-2. Back it up
-3. Add the Stats Compass MCP server configuration
-4. Ask you to restart Claude Desktop
-
-### 3. Start Analyzing
-Open Claude Desktop and ask:
-> "Load the housing.csv file from my Downloads folder and analyze the price distribution."
 
 ### Key Features
 
@@ -46,24 +49,18 @@ Open Claude Desktop and ask:
 
 ## 📂 Data Loading Guide
 
-**Crucial:** Stats Compass runs locally on your machine. It cannot see files you drag-and-drop into the Claude chat window. You must tell it where your files are on your disk.
+**Crucial:** Stats Compass tools operate on local files. When using this library via an MCP server (like `stats-compass-mcp`), the server runs locally on your machine. It cannot see files you drag-and-drop into a chat window. You must tell it where your files are on your disk.
 
 ### How to load your own data
 
 1.  **Find your file**:
-    Ask Claude to look for your file. For example:
-    > "List files in my Downloads folder: /Users/me/Downloads"
+    Use the `list_files` tool to explore directories.
     
-    Claude will use the `list_files` tool to show you what it can see.
-
 2.  **Load the file**:
-    Once Claude confirms the file exists, ask it to load it:
-    > "Load the housing_data.csv file from that folder"
-
-    Claude will use `load_csv` with the correct absolute path.
+    Use `load_csv` or `load_excel` with the correct **absolute path**.
 
 ### Why does drag-and-drop not work?
-When you drag a file into Claude, it stays in Claude's cloud sandbox. Stats Compass runs on your local computer. To bridge this gap, you must point Stats Compass to the actual file path on your hard drive.
+When you drag a file into a chat interface, it stays in the cloud sandbox. Stats Compass tools run on your local computer. To bridge this gap, you must point the tools to the actual file path on your hard drive.
 
 ### Saving your work
 

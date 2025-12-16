@@ -36,6 +36,9 @@ class TrainGradientBoostingRegressorInput(BaseModel):
     learning_rate: float = Field(
         default=0.1, gt=0.0, le=1.0, description="Learning rate shrinks contribution of each tree"
     )
+    save_path: str | None = Field(
+        default=None, description="Path to save the trained model (e.g., 'model.joblib')"
+    )
 
 
 @registry.register(
@@ -108,4 +111,5 @@ def train_gradient_boosting_regressor(
             "n_estimators": params.n_estimators,
             "learning_rate": params.learning_rate,
         },
+        save_path=params.save_path,
     )

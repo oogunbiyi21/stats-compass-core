@@ -30,6 +30,9 @@ class TrainLinearRegressionInput(BaseModel):
     random_state: int | None = Field(
         default=42, description="Random seed for reproducibility"
     )
+    save_path: str | None = Field(
+        default=None, description="Path to save the trained model (e.g., 'model.joblib')"
+    )
 
 
 @registry.register(
@@ -93,4 +96,5 @@ def train_linear_regression(
         test_size=len(X_test) if params.test_size > 0 else None,
         source_name=source_name,
         hyperparameters={"test_size": params.test_size, "random_state": params.random_state},
+        save_path=params.save_path,
     )

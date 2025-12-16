@@ -183,11 +183,12 @@ class CorrelationsResult(BaseModel):
 class ChartResult(BaseModel):
     """Result for visualization tools."""
 
-    image_base64: str = Field(description="Base64-encoded PNG image")
+    image_base64: str | None = Field(default=None, description="Base64-encoded PNG image")
     image_format: str = Field(default="png", description="Image format")
     title: str = Field(description="Chart title")
     chart_type: str = Field(description="Type of chart (histogram, line, scatter, etc.)")
     dataframe_name: str = Field(description="Name of the source DataFrame")
+    data: dict[str, Any] | None = Field(default=None, description="Raw data for interactive charts")
     metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional chart metadata (axes, columns used, etc.)"
@@ -455,7 +456,7 @@ class ClassificationCurveResult(BaseModel):
     auc_score: float = Field(description="Area under the curve")
 
     # Chart
-    image_base64: str = Field(description="Base64-encoded PNG image of the curve")
+    image_base64: str | None = Field(default=None, description="Base64-encoded PNG image of the curve")
 
     # Metadata
     model_id: str = Field(description="ID of the model being evaluated")

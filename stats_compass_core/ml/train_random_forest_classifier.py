@@ -33,6 +33,9 @@ class TrainRandomForestClassifierInput(BaseModel):
     n_estimators: int = Field(
         default=100, ge=1, description="Number of trees in the forest"
     )
+    save_path: str | None = Field(
+        default=None, description="Path to save the trained model (e.g., 'model.joblib')"
+    )
 
 
 @registry.register(
@@ -103,4 +106,5 @@ def train_random_forest_classifier(
             "random_state": params.random_state,
             "n_estimators": params.n_estimators,
         },
+        save_path=params.save_path,
     )

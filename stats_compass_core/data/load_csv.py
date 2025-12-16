@@ -42,7 +42,7 @@ class LoadCSVInput(BaseModel):
 @registry.register(
     category="data",
     input_schema=LoadCSVInput,
-    description="Load data from a local CSV file. Requires a valid filesystem path accessible to the server. Cannot read files uploaded to the chat.",
+    description="Load data from a local CSV file. You MUST provide an absolute file path. Drag-and-drop uploads are NOT supported.",
 )
 def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult:
     """

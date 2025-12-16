@@ -3,9 +3,11 @@ Tool for creating histogram plots from DataFrame columns.
 """
 
 import base64
+import os
 from io import BytesIO
-from typing import Any
+from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 
@@ -33,12 +35,18 @@ class HistogramInput(BaseModel):
         default=(10, 6), description="Figure size as (width, height) in inches"
     )
     dpi: int = Field(default=100, ge=50, le=300, description="Resolution in dots per inch")
+    save_path: str | None = Field(
+        default=None, description="Path to save the plot image (e.g., 'plot.png')"
+    )
+    format: Literal["png", "json"] = Field(
+        default="png", description="Output format: 'png' for image, 'json' for raw data"
+    )
 
 
 @registry.register(
     category="plots",
     input_schema=HistogramInput,
-    description="Create a histogram plot from DataFrame column",
+    description="Create a histogram plot. Use format='json' to get raw data for interactive visualizations.",
 )
 def histogram(state: DataFrameState, params: HistogramInput) -> ChartResult:
     """
@@ -76,21 +84,62 @@ def histogram(state: DataFrameState, params: HistogramInput) -> ChartResult:
     if not pd.api.types.is_numeric_dtype(df[params.column]):
         raise ValueError(f"Column '{params.column}' is not numeric")
 
+    data = df[params.column].dropna()
+    title = params.title or f"Histogram of {params.column}"
+
+    # Handle JSON format
+    if params.format == "json":
+        counts, bin_edges = np.histogram(data, bins=params.bins)
+        
+        # Create bin labels (e.g., "10-20")
+        bin_labels = []
+        for i in range(len(bin_edges) - 1):
+            bin_labels.append(f"{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}")
+            
+        chart_data = {
+            "type": "histogram",
+            "title": title,
+            "xlabel": params.xlabel or params.column,
+            "ylabel": params.ylabel,
+            "bins": bin_labels,
+            "counts": counts.tolist(),
+            "bin_edges": bin_edges.tolist(),
+        }
+        
+        return ChartResult(
+            image_base64=None,
+            image_format="json",
+            title=title,
+            chart_type="histogram",
+            dataframe_name=source_name,
+            data=chart_data,
+            metadata={
+                "column": params.column,
+                "bins": params.bins,
+                "data_points": len(data),
+                "min_value": float(data.min()),
+                "max_value": float(data.max()),
+                "mean_value": float(data.mean()),
+            }
+        )
+
     # Create figure
     fig, ax = plt.subplots(figsize=params.figsize)
 
     # Plot histogram
-    data = df[params.column].dropna()
     ax.hist(data, bins=params.bins, edgecolor="black", alpha=0.7)
 
     # Set labels and title
-    title = params.title or f"Histogram of {params.column}"
     ax.set_xlabel(params.xlabel or params.column)
     ax.set_ylabel(params.ylabel)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+
+    if params.save_path:
+        save_path = os.path.expanduser(params.save_path)
+        fig.savefig(save_path, dpi=params.dpi, bbox_inches='tight')
 
     # Convert figure to base64 PNG
     buf = BytesIO()

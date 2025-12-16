@@ -5,7 +5,9 @@ Tool for creating scatter plots for two numeric columns.
 from __future__ import annotations
 
 import base64
+import os
 from io import BytesIO
+from typing import Literal
 
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -33,12 +35,18 @@ class ScatterPlotInput(BaseModel):
         default=(10, 6), description="Figure size as (width, height)"
     )
     alpha: float = Field(default=0.8, ge=0, le=1, description="Point opacity")
+    save_path: str | None = Field(
+        default=None, description="Path to save the plot image (e.g., 'plot.png')"
+    )
+    format: Literal["png", "json"] = Field(
+        default="png", description="Output format: 'png' for image, 'json' for raw data"
+    )
 
 
 @registry.register(
     category="plots",
     input_schema=ScatterPlotInput,
-    description="Create a scatter plot for two numeric columns",
+    description="Create a scatter plot. Use format='json' to get raw data for interactive visualizations.",
 )
 def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult:
     """
@@ -77,6 +85,45 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
     if params.hue and params.hue not in df.columns:
         raise ValueError(f"Hue column '{params.hue}' not found in DataFrame")
 
+    chart_title = params.title or f"{params.y} vs {params.x}"
+
+    # Handle JSON format
+    if params.format == "json":
+        # Limit data points for JSON to avoid huge payloads
+        MAX_POINTS = 5000
+        plot_df = df[[params.x, params.y]].copy()
+        if params.hue:
+            plot_df[params.hue] = df[params.hue]
+            
+        if len(plot_df) > MAX_POINTS:
+            plot_df = plot_df.sample(MAX_POINTS)
+            
+        chart_data = {
+            "type": "scatter",
+            "title": chart_title,
+            "xlabel": params.x,
+            "ylabel": params.y,
+            "data": plot_df.to_dict(orient="records"),
+            "hue": params.hue
+        }
+        
+        return ChartResult(
+            image_base64=None,
+            image_format="json",
+            title=chart_title,
+            chart_type="scatter_plot",
+            dataframe_name=source_name,
+            data=chart_data,
+            metadata={
+                "x": params.x,
+                "y": params.y,
+                "hue": params.hue,
+                "alpha": params.alpha,
+                "data_points": len(plot_df),
+                "total_points": len(df)
+            }
+        )
+
     fig, ax = plt.subplots(figsize=params.figsize)
 
     if params.hue:
@@ -98,6 +145,10 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
+
+    if params.save_path:
+        save_path = os.path.expanduser(params.save_path)
+        fig.savefig(save_path, bbox_inches='tight')
 
     # Convert to base64 PNG
     buf = BytesIO()
