@@ -5,14 +5,15 @@ Tool for concatenating multiple DataFrames together.
 from typing import Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class ConcatDataFramesInput(BaseModel):
+class ConcatDataFramesInput(StrictToolInput):
     """Input schema for concat_dataframes tool."""
 
     dataframes: list[str] = Field(

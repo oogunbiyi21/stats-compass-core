@@ -10,14 +10,15 @@ from io import BytesIO
 from typing import Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
 
 
-class ScatterPlotInput(BaseModel):
+class ScatterPlotInput(StrictToolInput):
     """Input schema for scatter_plot tool."""
 
     dataframe_name: str | None = Field(
@@ -31,8 +32,11 @@ class ScatterPlotInput(BaseModel):
         description="Optional categorical column for coloring points",
     )
     title: str | None = Field(default=None, description="Optional plot title")
-    figsize: tuple[float, float] = Field(
-        default=(10, 6), description="Figure size as (width, height)"
+    figsize: list[float] = Field(
+        default_factory=lambda: [10.0, 6.0],
+        min_length=2,
+        max_length=2,
+        description="Figure size as [width, height]"
     )
     alpha: float = Field(default=0.8, ge=0, le=1, description="Point opacity")
     save_path: str | None = Field(
@@ -124,7 +128,8 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
             }
         )
 
-    fig, ax = plt.subplots(figsize=params.figsize)
+    figsize = tuple(params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     if params.hue:
         for category, group in df.groupby(params.hue):

@@ -7,13 +7,14 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 
-class InspectDataInput(BaseModel):
+class InspectDataInput(StrictToolInput):
     """Input schema for inspect_data tool."""
 
     dataframe_name: str | None = Field(

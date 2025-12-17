@@ -5,14 +5,15 @@ Tool for merging two DataFrames using SQL-style joins.
 from typing import Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class MergeDataFramesInput(BaseModel):
+class MergeDataFramesInput(StrictToolInput):
     """Input schema for merge_dataframes tool."""
 
     left_dataframe: str = Field(
@@ -43,9 +44,9 @@ class MergeDataFramesInput(BaseModel):
         default=None,
         description="Column(s) from right DataFrame to join on (if different from left)"
     )
-    suffixes: tuple[str, str] = Field(
-        default=("_left", "_right"),
-        description="Suffixes to apply to overlapping column names"
+    suffixes: list[str] = Field(
+        default=["_left", "_right"],
+        description="Suffixes to apply to overlapping column names (must be length 2)"
     )
     save_as: str | None = Field(
         default=None,
@@ -133,6 +134,9 @@ def merge_dataframes(
         )
 
     # Perform merge
+    # Convert list to tuple for pandas suffixes
+    suffixes_tuple = tuple(params.suffixes) if params.suffixes else ("_left", "_right")
+
     merged_df = pd.merge(
         left_df,
         right_df,
@@ -140,7 +144,7 @@ def merge_dataframes(
         on=params.on,
         left_on=params.left_on,
         right_on=params.right_on,
-        suffixes=params.suffixes,
+        suffixes=suffixes_tuple,
     )
 
     # Determine result name

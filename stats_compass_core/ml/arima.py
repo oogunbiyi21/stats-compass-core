@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import (
     ARIMAForecastResult,
@@ -50,7 +51,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 
-class FitARIMAInput(BaseModel):
+class FitARIMAInput(StrictToolInput):
     """Input parameters for fitting an ARIMA model."""
 
     dataframe_name: str | None = Field(
@@ -68,9 +69,9 @@ class FitARIMAInput(BaseModel):
     d: int = Field(default=1, ge=0, le=3, description="Differencing order")
     q: int = Field(default=1, ge=0, le=10, description="MA order (moving average)")
     seasonal: bool = Field(default=False, description="Whether to fit a seasonal model")
-    seasonal_order: tuple[int, int, int, int] | None = Field(
+    seasonal_order: list[int] | None = Field(
         default=None,
-        description="Seasonal order (P, D, Q, m) where m is the seasonal period",
+        description="Seasonal order (P, D, Q, m) where m is the seasonal period. Must be a list of 4 integers.",
     )
     model_name: str | None = Field(
         default=None, description="Custom name for storing the model"
@@ -80,7 +81,7 @@ class FitARIMAInput(BaseModel):
     )
 
 
-class ForecastARIMAInput(BaseModel):
+class ForecastARIMAInput(StrictToolInput):
     """Input parameters for ARIMA forecasting."""
 
     model_id: str = Field(description="ID of the fitted ARIMA model to use")
@@ -107,7 +108,7 @@ class ForecastARIMAInput(BaseModel):
     )
 
 
-class FindOptimalARIMAInput(BaseModel):
+class FindOptimalARIMAInput(StrictToolInput):
     """Input parameters for automatic ARIMA parameter search."""
 
     dataframe_name: str | None = Field(
@@ -132,7 +133,7 @@ class FindOptimalARIMAInput(BaseModel):
     )
 
 
-class StationarityTestInput(BaseModel):
+class StationarityTestInput(StrictToolInput):
     """Input parameters for stationarity testing."""
 
     dataframe_name: str | None = Field(
@@ -148,7 +149,7 @@ class StationarityTestInput(BaseModel):
     )
 
 
-class InferFrequencyInput(BaseModel):
+class InferFrequencyInput(StrictToolInput):
     """Input parameters for time series frequency inference."""
 
     dataframe_name: str | None = Field(
@@ -545,7 +546,11 @@ def fit_arima(
     seasonal_order = None
 
     if params.seasonal and params.seasonal_order:
-        seasonal_order = params.seasonal_order
+        # Convert list to tuple if needed
+        if isinstance(params.seasonal_order, list):
+            seasonal_order = tuple(params.seasonal_order)
+        else:
+            seasonal_order = params.seasonal_order
 
     try:
         # Fit ARIMA model (suppress convergence warnings)

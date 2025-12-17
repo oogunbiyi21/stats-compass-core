@@ -2,15 +2,16 @@
 Tool for training a random forest regressor.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.ml.common import create_training_result, prepare_ml_data
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ModelTrainingResult
 from stats_compass_core.state import DataFrameState
 
 
-class TrainRandomForestRegressorInput(BaseModel):
+class TrainRandomForestRegressorInput(StrictToolInput):
     """Input schema for train_random_forest_regressor tool."""
 
     dataframe_name: str | None = Field(

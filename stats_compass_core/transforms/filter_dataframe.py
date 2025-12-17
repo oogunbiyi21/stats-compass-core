@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import hashlib
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import (
     DataFrameQueryResult,
@@ -16,7 +17,7 @@ from stats_compass_core.results import (
 from stats_compass_core.state import DataFrameState
 
 
-class FilterDataFrameInput(BaseModel):
+class FilterDataFrameInput(StrictToolInput):
     """Input schema for filter_dataframe tool."""
 
     dataframe_name: str | None = Field(

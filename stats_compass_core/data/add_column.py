@@ -7,14 +7,15 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class AddColumnInput(BaseModel):
+class AddColumnInput(StrictToolInput):
     """Input schema for add_column tool."""
 
     dataframe_name: str | None = Field(
@@ -35,10 +36,11 @@ class AddColumnInput(BaseModel):
             "Either expression or value must be provided."
         ),
     )
-    value: Any = Field(
+    value: str | None = Field(
         default=None,
         description=(
             "Constant value to assign to all rows in the new column. "
+            "If the string looks like a number (e.g. '123' or '12.5'), it will be converted. "
             "Either expression or value must be provided."
         ),
     )
@@ -130,7 +132,18 @@ def add_column(
             ) from e
     else:
         # Constant value assignment
-        result_df[params.column_name] = params.value
+        val = params.value
+        # Try to convert string to number if it looks like one
+        if isinstance(val, str):
+            try:
+                if "." in val:
+                    val = float(val)
+                else:
+                    val = int(val)
+            except ValueError:
+                pass  # Keep as string
+        
+        result_df[params.column_name] = val
 
     # Determine result name
     result_name = params.save_as if params.save_as else source_name

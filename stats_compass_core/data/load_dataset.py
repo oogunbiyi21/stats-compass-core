@@ -5,8 +5,9 @@ Tool for loading built-in sample datasets.
 from pathlib import Path
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameLoadResult
 from stats_compass_core.state import DataFrameState
@@ -22,9 +23,9 @@ def _list_available_datasets() -> list[str]:
     return [f.stem for f in _DATASETS_DIR.glob("*.csv")]
 
 
-class LoadDatasetInput(BaseModel):
+class LoadDatasetInput(StrictToolInput):
     """Input schema for load_dataset tool."""
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     name: str = Field(
         description=f"Name of the dataset to load. Available: {', '.join(_list_available_datasets())}",

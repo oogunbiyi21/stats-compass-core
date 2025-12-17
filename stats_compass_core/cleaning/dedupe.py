@@ -2,14 +2,15 @@
 Tool for removing duplicate rows from a DataFrame.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class DedupeInput(BaseModel):
+class DedupeInput(StrictToolInput):
     """Input schema for dedupe tool."""
 
     dataframe_name: str | None = Field(

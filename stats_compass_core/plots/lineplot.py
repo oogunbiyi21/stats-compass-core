@@ -7,14 +7,15 @@ import os
 from io import BytesIO
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
 
 
-class LinePlotInput(BaseModel):
+class LinePlotInput(StrictToolInput):
     """Input schema for lineplot tool."""
 
     dataframe_name: str | None = Field(
@@ -27,8 +28,11 @@ class LinePlotInput(BaseModel):
     title: str | None = Field(default=None, description="Plot title")
     xlabel: str | None = Field(default=None, description="X-axis label")
     ylabel: str | None = Field(default=None, description="Y-axis label")
-    figsize: tuple[float, float] = Field(
-        default=(10, 6), description="Figure size as (width, height) in inches"
+    figsize: list[float] = Field(
+        default_factory=lambda: [10.0, 6.0],
+        min_length=2,
+        max_length=2,
+        description="Figure size as [width, height] in inches",
     )
     marker: str | None = Field(
         default=None, description="Marker style (e.g., 'o', 's', '^')"
@@ -84,7 +88,8 @@ def lineplot(state: DataFrameState, params: LinePlotInput) -> ChartResult:
         raise ValueError(f"Column '{params.x_column}' not found in DataFrame")
 
     # Create figure
-    fig, ax = plt.subplots(figsize=params.figsize)
+    figsize = tuple(params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     # Prepare data
     if params.x_column:
@@ -143,7 +148,7 @@ def lineplot(state: DataFrameState, params: LinePlotInput) -> ChartResult:
         )
 
     # Create figure
-    fig, ax = plt.subplots(figsize=params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     # Plot line
     if params.marker:

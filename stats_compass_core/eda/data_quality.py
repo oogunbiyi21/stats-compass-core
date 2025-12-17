@@ -13,14 +13,15 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataQualityResult
 from stats_compass_core.state import DataFrameState
 
 
-class AnalyzeMissingDataInput(BaseModel):
+class AnalyzeMissingDataInput(StrictToolInput):
     """Input schema for missing data analysis tool."""
 
     dataframe_name: str | None = Field(
@@ -35,7 +36,7 @@ class AnalyzeMissingDataInput(BaseModel):
     )
 
 
-class DetectOutliersInput(BaseModel):
+class DetectOutliersInput(StrictToolInput):
     """Input schema for outlier detection tool."""
 
     dataframe_name: str | None = Field(
@@ -57,7 +58,7 @@ class DetectOutliersInput(BaseModel):
     )
 
 
-class DataQualityReportInput(BaseModel):
+class DataQualityReportInput(StrictToolInput):
     """Input schema for comprehensive data quality report."""
 
     dataframe_name: str | None = Field(

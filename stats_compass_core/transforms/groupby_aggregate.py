@@ -4,6 +4,7 @@ Tool for grouping and aggregating DataFrame data.
 
 from pydantic import BaseModel, Field
 
+from stats_compass_core.base import StrictToolInput, ToolComponent
 from stats_compass_core.registry import registry
 from stats_compass_core.results import (
     DataFrameQueryResult,
@@ -29,15 +30,21 @@ VALID_AGGS = [
 ]
 
 
-class GroupByAggregateInput(BaseModel):
+class ColumnAggregation(ToolComponent):
+    """Aggregation configuration for a single column."""
+    column: str = Field(description="Column to aggregate")
+    functions: list[str] = Field(description="List of aggregation functions (e.g. ['mean', 'sum'])")
+
+
+class GroupByAggregateInput(StrictToolInput):
     """Input schema for groupby_aggregate tool."""
 
     dataframe_name: str | None = Field(
         default=None, description="Name of DataFrame to operate on. Uses active if not specified."
     )
     by: list[str] = Field(description="Column labels to group by")
-    agg_func: dict[str, str | list[str]] = Field(
-        description="Dictionary mapping column names to aggregation functions"
+    aggregations: list[ColumnAggregation] = Field(
+        description="List of column aggregation operations"
     )
     as_index: bool = Field(default=True, description="If True, use group keys as index")
     save_as: str | None = Field(
@@ -73,15 +80,18 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
     if missing_cols:
         raise ValueError(f"Group-by columns not found: {missing_cols}")
 
+    # Convert list of objects to dictionary for pandas
+    agg_func = {agg.column: agg.functions for agg in params.aggregations}
+
     # Validate aggregation columns
-    agg_cols = set(params.agg_func.keys())
+    agg_cols = set(agg_func.keys())
     missing_agg_cols = agg_cols - set(df.columns)
     if missing_agg_cols:
         raise ValueError(f"Aggregation columns not found: {missing_agg_cols}")
 
     # Perform groupby and aggregation
     try:
-        result_df = df.groupby(params.by, as_index=params.as_index).agg(params.agg_func)
+        result_df = df.groupby(params.by, as_index=params.as_index).agg(agg_func)
 
         # Reset index to make it a proper DataFrame for storage
         if params.as_index:

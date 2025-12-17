@@ -5,14 +5,15 @@ Tool for applying simple imputation strategies to DataFrame columns.
 from __future__ import annotations
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class ApplyImputationInput(BaseModel):
+class ApplyImputationInput(StrictToolInput):
     """Input schema for apply_imputation tool."""
 
     dataframe_name: str | None = Field(
@@ -28,9 +29,9 @@ class ApplyImputationInput(BaseModel):
         default=None,
         description="Columns to impute. Defaults depend on strategy (numeric for mean/median, all for others).",
     )
-    fill_value: float | int | str | None = Field(
+    fill_value: str | None = Field(
         default=None,
-        description="Constant value used when strategy='constant'",
+        description="Constant value used when strategy='constant'. Will be converted to number if possible.",
     )
     save_as: str | None = Field(
         default=None,
@@ -102,7 +103,18 @@ def apply_imputation(
         else:  # constant
             if params.fill_value is None:
                 raise ValueError("fill_value is required when strategy='constant'")
+            
             fill_value = params.fill_value
+            # Try to convert string to number if it looks like one
+            if isinstance(fill_value, str):
+                try:
+                    if "." in fill_value:
+                        fill_value = float(fill_value)
+                    else:
+                        fill_value = int(fill_value)
+                except ValueError:
+                    pass  # Keep as string
+
 
         if fill_value is not None:
             imputed_df.loc[missing_mask, col] = fill_value

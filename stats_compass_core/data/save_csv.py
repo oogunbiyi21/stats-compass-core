@@ -1,13 +1,14 @@
 import os
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 
-class SaveCSVInput(BaseModel):
+class SaveCSVInput(StrictToolInput):
     """Input for saving a DataFrame to a CSV file."""
 
     dataframe_name: str = Field(..., description="Name of the DataFrame to save")

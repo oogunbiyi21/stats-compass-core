@@ -6,14 +6,15 @@ from __future__ import annotations
 
 import math
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import RegressionEvaluationResult
 from stats_compass_core.state import DataFrameState
 
 
-class EvaluateRegressionInput(BaseModel):
+class EvaluateRegressionInput(StrictToolInput):
     """Input schema for evaluate_regression_model tool."""
 
     dataframe_name: str | None = Field(

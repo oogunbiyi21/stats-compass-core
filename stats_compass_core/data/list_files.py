@@ -5,14 +5,15 @@ Tool for listing files in a local directory.
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import FileListResult
 from stats_compass_core.state import DataFrameState
 
 
-class ListFilesInput(BaseModel):
+class ListFilesInput(StrictToolInput):
     """Input schema for list_files tool."""
 
     directory: str = Field(

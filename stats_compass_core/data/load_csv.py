@@ -6,16 +6,17 @@ import os
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import ConfigDict, Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameLoadResult
 from stats_compass_core.state import DataFrameState
 
 
-class LoadCSVInput(BaseModel):
+class LoadCSVInput(StrictToolInput):
     """Input schema for load_csv tool."""
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     file_path: str = Field(
         description="Absolute path to the CSV file. Supports '~' expansion (e.g. ~/Downloads/data.csv). Relative paths are relative to the server's working directory.",

@@ -4,20 +4,27 @@ Tool for renaming columns in a DataFrame.
 
 from pydantic import BaseModel, Field
 
+from stats_compass_core.base import StrictToolInput, ToolComponent
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class RenameColumnsInput(BaseModel):
+class ColumnMapping(ToolComponent):
+    """Mapping for a single column rename operation."""
+    old_name: str = Field(description="Existing column name")
+    new_name: str = Field(description="New column name")
+
+
+class RenameColumnsInput(StrictToolInput):
     """Input schema for rename_columns tool."""
 
     dataframe_name: str | None = Field(
         default=None,
         description="Name of DataFrame to operate on. Uses active if not specified.",
     )
-    mapping: dict[str, str] = Field(
-        description="Mapping of old column names to new names, e.g. {'old_name': 'new_name'}",
+    mappings: list[ColumnMapping] = Field(
+        description="List of column rename operations",
     )
     errors: str = Field(
         default="raise",
@@ -58,9 +65,12 @@ def rename_columns(
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
 
+    # Convert list of objects to dictionary
+    mapping_dict = {m.old_name: m.new_name for m in params.mappings}
+
     # Validate columns if errors='raise'
     if params.errors == "raise":
-        missing = set(params.mapping.keys()) - set(df.columns)
+        missing = set(mapping_dict.keys()) - set(df.columns)
         if missing:
             raise KeyError(
                 f"Columns to rename not found: {sorted(missing)}. "
@@ -69,9 +79,9 @@ def rename_columns(
 
     # Filter mapping to only existing columns if errors='ignore'
     if params.errors == "ignore":
-        actual_mapping = {k: v for k, v in params.mapping.items() if k in df.columns}
+        actual_mapping = {k: v for k, v in mapping_dict.items() if k in df.columns}
     else:
-        actual_mapping = params.mapping
+        actual_mapping = mapping_dict
 
     # Rename columns
     result_df = df.rename(columns=actual_mapping)

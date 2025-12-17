@@ -12,6 +12,16 @@
 
 This is the **core library** containing the business logic, state management, and tool definitions. If you are looking for the MCP server to use with Claude or other clients, please see [stats-compass-mcp](https://github.com/oogunbiyi21/stats-compass-mcp).
 
+## ✅ Supported Clients
+
+Stats Compass is designed and tested for official Model Context Protocol (MCP) integrations.
+
+- **VS Code Copilot Chat**: Fully supported via native MCP integration.
+- **Claude Desktop**: Fully supported.
+- **Cursor**: Supported (pending official MCP release).
+
+> **Note:** Third-party extensions such as **Roo Code** are **not supported** due to incompatible JSON Schema validation logic that conflicts with the official spec.
+
 ## 🚀 Quick Start
 
 ### 1. Install

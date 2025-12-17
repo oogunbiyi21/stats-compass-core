@@ -11,14 +11,15 @@ from __future__ import annotations
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import BinRareCategoriesResult
 from stats_compass_core.state import DataFrameState
 
 
-class BinRareCategoriesInput(BaseModel):
+class BinRareCategoriesInput(StrictToolInput):
     """Input schema for bin rare categories tool."""
 
     dataframe_name: str | None = Field(

@@ -5,14 +5,15 @@ Tool for getting the schema/metadata of a DataFrame.
 from typing import Any
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameSchemaResult
 from stats_compass_core.state import DataFrameState
 
 
-class GetSchemaInput(BaseModel):
+class GetSchemaInput(StrictToolInput):
     """Input schema for get_schema tool."""
 
     dataframe_name: str | None = Field(

@@ -10,8 +10,9 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import MeanTargetEncodingResult
 from stats_compass_core.state import DataFrameState
@@ -24,7 +25,7 @@ except ImportError:
     SKLEARN_AVAILABLE = False
 
 
-class MeanTargetEncodingInput(BaseModel):
+class MeanTargetEncodingInput(StrictToolInput):
     """Input schema for mean target encoding tool."""
 
     dataframe_name: str | None = Field(

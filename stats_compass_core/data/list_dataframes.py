@@ -2,14 +2,13 @@
 Tool for listing available DataFrames in the session.
 """
 
-from pydantic import BaseModel
-
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameListResult
 from stats_compass_core.state import DataFrameState
 
 
-class ListDataFramesInput(BaseModel):
+class ListDataFramesInput(StrictToolInput):
     """Input schema for list_dataframes tool."""
 
     # No inputs required - lists all DataFrames

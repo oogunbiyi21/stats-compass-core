@@ -2,14 +2,15 @@
 Tool for dropping columns from a DataFrame.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
 
 
-class DropColumnsInput(BaseModel):
+class DropColumnsInput(StrictToolInput):
     """Input schema for drop_columns tool."""
 
     dataframe_name: str | None = Field(

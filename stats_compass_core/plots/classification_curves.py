@@ -13,14 +13,15 @@ from io import BytesIO
 from typing import Literal
 
 import numpy as np
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ClassificationCurveResult
 from stats_compass_core.state import DataFrameState
 
 
-class ROCCurveInput(BaseModel):
+class ROCCurveInput(StrictToolInput):
     """Input schema for ROC curve tool."""
 
     dataframe_name: str | None = Field(
@@ -39,9 +40,11 @@ class ROCCurveInput(BaseModel):
         default=None,
         description="Custom title for the chart. If None, auto-generated.",
     )
-    figsize: tuple[float, float] = Field(
-        default=(8, 6),
-        description="Figure size as (width, height) in inches",
+    figsize: list[float] = Field(
+        default_factory=lambda: [8.0, 6.0],
+        min_length=2,
+        max_length=2,
+        description="Figure size as [width, height] in inches",
     )
     dpi: int = Field(default=100, ge=50, le=300, description="Resolution in DPI")
     save_path: str | None = Field(
@@ -52,7 +55,7 @@ class ROCCurveInput(BaseModel):
     )
 
 
-class PrecisionRecallCurveInput(BaseModel):
+class PrecisionRecallCurveInput(StrictToolInput):
     """Input schema for Precision-Recall curve tool."""
 
     dataframe_name: str | None = Field(
@@ -71,9 +74,11 @@ class PrecisionRecallCurveInput(BaseModel):
         default=None,
         description="Custom title for the chart. If None, auto-generated.",
     )
-    figsize: tuple[float, float] = Field(
-        default=(8, 6),
-        description="Figure size as (width, height) in inches",
+    figsize: list[float] = Field(
+        default_factory=lambda: [8.0, 6.0],
+        min_length=2,
+        max_length=2,
+        description="Figure size as [width, height] in inches",
     )
     dpi: int = Field(default=100, ge=50, le=300, description="Resolution in DPI")
     save_path: str | None = Field(
@@ -210,7 +215,8 @@ def roc_curve_plot(
         )
 
     # Create plot
-    fig, ax = plt.subplots(figsize=params.figsize)
+    figsize = tuple(params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     # Plot ROC curve
     ax.plot(fpr, tpr, color="blue", lw=2, label=f"ROC curve (AUC = {roc_auc:.3f})")
@@ -363,7 +369,8 @@ def precision_recall_curve_plot(
         )
 
     # Create plot
-    fig, ax = plt.subplots(figsize=params.figsize)
+    figsize = tuple(params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     # Plot PR curve
     ax.plot(recall, precision, color="blue", lw=2, label=f"PR curve (AP = {ap_score:.3f})")

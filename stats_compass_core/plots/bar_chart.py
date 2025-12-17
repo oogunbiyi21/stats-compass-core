@@ -9,14 +9,15 @@ import os
 from io import BytesIO
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
 
 
-class BarChartInput(BaseModel):
+class BarChartInput(StrictToolInput):
     """Input schema for bar_chart tool."""
 
     dataframe_name: str | None = Field(
@@ -33,8 +34,11 @@ class BarChartInput(BaseModel):
     title: str | None = Field(
         default=None, description="Optional plot title (defaults to column name)"
     )
-    figsize: tuple[float, float] = Field(
-        default=(10, 6), description="Figure size as (width, height)"
+    figsize: list[float] = Field(
+        default_factory=lambda: [10.0, 6.0],
+        min_length=2,
+        max_length=2,
+        description="Figure size as [width, height]"
     )
     save_path: str | None = Field(
         default=None, description="Path to save the plot image (e.g., 'plot.png')"
@@ -113,7 +117,8 @@ def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
             }
         )
 
-    fig, ax = plt.subplots(figsize=params.figsize)
+    figsize = tuple(params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     if params.orientation == "vertical":
         counts.plot(kind="bar", ax=ax, edgecolor="black")

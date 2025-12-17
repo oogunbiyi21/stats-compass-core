@@ -6,15 +6,16 @@ from __future__ import annotations
 
 import math
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 from scipy import stats
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import HypothesisTestResult
 from stats_compass_core.state import DataFrameState
 
 
-class TTestInput(BaseModel):
+class TTestInput(StrictToolInput):
     """Input schema for two-sample t-test."""
 
     dataframe_name: str | None = Field(
@@ -33,7 +34,7 @@ class TTestInput(BaseModel):
     )
 
 
-class ZTestInput(BaseModel):
+class ZTestInput(StrictToolInput):
     """Input schema for two-sample z-test on means."""
 
     dataframe_name: str | None = Field(

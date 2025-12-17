@@ -15,14 +15,15 @@ from typing import Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import OutlierHandlingResult
 from stats_compass_core.state import DataFrameState
 
 
-class HandleOutliersInput(BaseModel):
+class HandleOutliersInput(StrictToolInput):
     """Input schema for outlier handling tool."""
 
     dataframe_name: str | None = Field(

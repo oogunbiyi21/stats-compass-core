@@ -9,14 +9,15 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
 
 
-class HistogramInput(BaseModel):
+class HistogramInput(StrictToolInput):
     """Input schema for histogram tool."""
 
     dataframe_name: str | None = Field(
@@ -31,8 +32,11 @@ class HistogramInput(BaseModel):
         default=None, description="X-axis label. If None, uses column name"
     )
     ylabel: str = Field(default="Frequency", description="Y-axis label")
-    figsize: tuple[float, float] = Field(
-        default=(10, 6), description="Figure size as (width, height) in inches"
+    figsize: list[float] = Field(
+        default_factory=lambda: [10.0, 6.0],
+        min_length=2,
+        max_length=2,
+        description="Figure size as [width, height] in inches"
     )
     dpi: int = Field(default=100, ge=50, le=300, description="Resolution in dots per inch")
     save_path: str | None = Field(
@@ -124,7 +128,8 @@ def histogram(state: DataFrameState, params: HistogramInput) -> ChartResult:
         )
 
     # Create figure
-    fig, ax = plt.subplots(figsize=params.figsize)
+    figsize = tuple(params.figsize)
+    fig, ax = plt.subplots(figsize=figsize)
 
     # Plot histogram
     ax.hist(data, bins=params.bins, edgecolor="black", alpha=0.7)

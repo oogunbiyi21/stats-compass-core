@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import Field
 from scipy import stats
 
+from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChiSquareResult
 from stats_compass_core.state import DataFrameState
 
 
-class ChiSquareIndependenceInput(BaseModel):
+class ChiSquareIndependenceInput(StrictToolInput):
     """Input schema for chi-square test of independence."""
 
     dataframe_name: str | None = Field(
@@ -35,7 +36,7 @@ class ChiSquareIndependenceInput(BaseModel):
     )
 
 
-class ChiSquareGoodnessOfFitInput(BaseModel):
+class ChiSquareGoodnessOfFitInput(StrictToolInput):
     """Input schema for chi-square goodness of fit test."""
 
     dataframe_name: str | None = Field(
