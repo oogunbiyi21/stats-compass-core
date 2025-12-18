@@ -232,6 +232,24 @@ class ModelTrainingResult(BaseModel):
     )
     dataframe_name: str = Field(description="Name of the source DataFrame")
 
+    # Predictions DataFrame info (for regression and classification)
+    predictions_dataframe: str | None = Field(
+        default=None,
+        description="Name of DataFrame containing predictions (original columns + predictions)"
+    )
+    prediction_column: str | None = Field(
+        default=None,
+        description="Name of the prediction column in predictions_dataframe"
+    )
+    probability_columns: list[str] | None = Field(
+        default=None,
+        description="Names of probability columns for classification (one per class)"
+    )
+    class_labels: list[Any] | None = Field(
+        default=None,
+        description="Class labels for classification models"
+    )
+
     # Hyperparameters
     hyperparameters: dict[str, Any] = Field(
         default_factory=dict,

@@ -73,6 +73,10 @@ def train_linear_regression(
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=params.test_size, random_state=params.random_state
         )
+        
+        # Capture indices for predictions DataFrame
+        train_indices = X_train.index
+        test_indices = X_test.index
 
         model = LinearRegression()
         model.fit(X_train, y_train)
@@ -98,4 +102,11 @@ def train_linear_regression(
         source_name=source_name,
         hyperparameters={"test_size": params.test_size, "random_state": params.random_state},
         save_path=params.save_path,
+        X_train=X_train,
+        X_test=X_test,
+        y_train=y_train,
+        y_test=y_test,
+        train_indices=train_indices,
+        test_indices=test_indices,
+        is_classifier=False,
     )
