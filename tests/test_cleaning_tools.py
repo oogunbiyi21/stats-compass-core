@@ -173,7 +173,7 @@ class TestApplyImputation:
     def test_imputation_constant(self, state_with_nulls):
         """Test constant value imputation."""
         params = ApplyImputationInput(
-            columns=["A"], strategy="constant", fill_value=0
+            columns=["A"], strategy="constant", fill_value="0"
         )
 
         result = apply_imputation(state_with_nulls, params)

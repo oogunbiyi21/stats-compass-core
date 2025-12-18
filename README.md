@@ -221,7 +221,10 @@ print(result.model_dump_json())  # JSON-serializable output
 # 4. Chain operations
 result = registry.invoke("transforms", "groupby_aggregate", state, {
     "by": ["region"],
-    "agg_func": {"revenue": "sum", "quantity": "mean"}
+    "aggregations": [
+        {"column": "revenue", "functions": ["sum"]},
+        {"column": "quantity", "functions": ["mean"]}
+    ]
 })
 # Result DataFrame saved to state automatically
 print(f"New DataFrame: {result.dataframe_name}")
@@ -434,7 +437,10 @@ print(f"Filled {result.rows_affected} values")
 # Step 3: Aggregate by region
 result = registry.invoke("transforms", "groupby_aggregate", state, {
     "by": ["region"],
-    "agg_func": {"revenue": "sum", "quantity": "mean"},
+    "aggregations": [
+        {"column": "revenue", "functions": ["sum"]},
+        {"column": "quantity", "functions": ["mean"]}
+    ],
     "save_as": "regional_summary"
 })
 print(f"Created: {result.dataframe_name}")
@@ -538,7 +544,7 @@ Transform operations create new named DataFrames:
 ```python
 result = registry.invoke("transforms", "groupby_aggregate", state, {
     "by": ["region"],
-    "agg_func": {"sales": "sum"},
+    "aggregations": [{"column": "sales", "functions": ["sum"]}],
     "save_as": "regional_totals"  # Optional custom name
 })
 # New DataFrame now available as state.get_dataframe("regional_totals")

@@ -269,3 +269,134 @@ class TestClassificationCurves:
 
         with pytest.raises(ValueError, match="not found"):
             roc_curve_plot(state, params)
+
+
+class TestConfusionMatrix:
+    """Tests for confusion_matrix_plot tool."""
+
+    def test_confusion_matrix_basic(self):
+        """Test basic confusion matrix generation."""
+        from stats_compass_core.plots.confusion_matrix import (
+            ConfusionMatrixInput,
+            confusion_matrix_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": [0, 0, 0, 1, 1, 1, 0, 1],
+            "y_pred": [0, 0, 1, 1, 1, 0, 0, 1],
+        })
+        state = make_state_with_df(df)
+
+        params = ConfusionMatrixInput(
+            dataframe_name="test",
+            true_column="y_true",
+            pred_column="y_pred",
+        )
+
+        result = confusion_matrix_plot(state, params)
+
+        assert result.chart_type == "confusion_matrix"
+        assert result.image_base64 is not None
+        assert len(result.image_base64) > 0
+
+    def test_confusion_matrix_multiclass(self):
+        """Test confusion matrix with multiple classes."""
+        from stats_compass_core.plots.confusion_matrix import (
+            ConfusionMatrixInput,
+            confusion_matrix_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": [0, 0, 1, 1, 2, 2, 0, 1, 2],
+            "y_pred": [0, 1, 1, 1, 2, 0, 0, 1, 2],
+        })
+        state = make_state_with_df(df)
+
+        params = ConfusionMatrixInput(
+            dataframe_name="test",
+            true_column="y_true",
+            pred_column="y_pred",
+        )
+
+        result = confusion_matrix_plot(state, params)
+
+        # Should have metadata with metrics for 3 classes
+        assert result.metadata is not None
+        assert result.metadata.get("n_classes") == 3
+
+    def test_confusion_matrix_with_normalization(self):
+        """Test confusion matrix with normalization."""
+        from stats_compass_core.plots.confusion_matrix import (
+            ConfusionMatrixInput,
+            confusion_matrix_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": [0, 0, 0, 1, 1, 1],
+            "y_pred": [0, 0, 1, 1, 1, 0],
+        })
+        state = make_state_with_df(df)
+
+        params = ConfusionMatrixInput(
+            dataframe_name="test",
+            true_column="y_true",
+            pred_column="y_pred",
+            normalize="true",  # Normalize by true labels
+        )
+
+        result = confusion_matrix_plot(state, params)
+
+        assert result.chart_type == "confusion_matrix"
+        assert result.image_base64 is not None
+
+    def test_confusion_matrix_json_format(self):
+        """Test confusion matrix with JSON output format."""
+        from stats_compass_core.plots.confusion_matrix import (
+            ConfusionMatrixInput,
+            confusion_matrix_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": [0, 0, 1, 1],
+            "y_pred": [0, 1, 1, 1],
+        })
+        state = make_state_with_df(df)
+
+        params = ConfusionMatrixInput(
+            dataframe_name="test",
+            true_column="y_true",
+            pred_column="y_pred",
+            format="json",
+        )
+
+        result = confusion_matrix_plot(state, params)
+
+        # JSON format should have data with matrix
+        assert result.data is not None
+        assert "confusion_matrix" in result.data
+        # No image in JSON mode
+        assert result.image_base64 is None
+
+    def test_confusion_matrix_json_serializable(self):
+        """Test that confusion matrix result is JSON serializable."""
+        from stats_compass_core.plots.confusion_matrix import (
+            ConfusionMatrixInput,
+            confusion_matrix_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": [0, 0, 1, 1],
+            "y_pred": [0, 1, 1, 1],
+        })
+        state = make_state_with_df(df)
+
+        params = ConfusionMatrixInput(
+            dataframe_name="test",
+            true_column="y_true",
+            pred_column="y_pred",
+        )
+
+        result = confusion_matrix_plot(state, params)
+        json_str = result.model_dump_json()
+
+        assert isinstance(json_str, str)

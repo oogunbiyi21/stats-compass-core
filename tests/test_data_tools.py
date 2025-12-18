@@ -670,7 +670,7 @@ class TestRenameColumns:
         """Test renaming a single column."""
         params = RenameColumnsInput(
             dataframe_name="test_df",
-            mapping={"old_a": "new_a"},
+            mappings=[{"old_name": "old_a", "new_name": "new_a"}],
         )
 
         result = rename_columns(state_with_df, params)
@@ -684,7 +684,10 @@ class TestRenameColumns:
         """Test renaming multiple columns."""
         params = RenameColumnsInput(
             dataframe_name="test_df",
-            mapping={"old_a": "A", "old_b": "B"},
+            mappings=[
+                {"old_name": "old_a", "new_name": "A"},
+                {"old_name": "old_b", "new_name": "B"},
+            ],
         )
 
         result = rename_columns(state_with_df, params)
@@ -698,7 +701,7 @@ class TestRenameColumns:
         """Test error when column to rename not found."""
         params = RenameColumnsInput(
             dataframe_name="test_df",
-            mapping={"nonexistent": "something"},
+            mappings=[{"old_name": "nonexistent", "new_name": "something"}],
             errors="raise",
         )
 
@@ -711,7 +714,10 @@ class TestRenameColumns:
         """Test ignoring missing columns when errors='ignore'."""
         params = RenameColumnsInput(
             dataframe_name="test_df",
-            mapping={"nonexistent": "something", "old_a": "A"},
+            mappings=[
+                {"old_name": "nonexistent", "new_name": "something"},
+                {"old_name": "old_a", "new_name": "A"},
+            ],
             errors="ignore",
         )
 
@@ -725,7 +731,7 @@ class TestRenameColumns:
         """Test saving result as new DataFrame."""
         params = RenameColumnsInput(
             dataframe_name="test_df",
-            mapping={"old_a": "A"},
+            mappings=[{"old_name": "old_a", "new_name": "A"}],
             save_as="renamed_df",
         )
 
@@ -741,7 +747,7 @@ class TestRenameColumns:
         """Test that result is JSON serializable."""
         params = RenameColumnsInput(
             dataframe_name="test_df",
-            mapping={"old_a": "A"},
+            mappings=[{"old_name": "old_a", "new_name": "A"}],
         )
 
         result = rename_columns(state_with_df, params)
@@ -816,7 +822,7 @@ class TestAddColumn:
         params = AddColumnInput(
             dataframe_name="test_df",
             column_name="discount",
-            value=0,
+            value="0",
         )
 
         result = add_column(state_with_df, params)
@@ -888,7 +894,7 @@ class TestAddColumn:
             dataframe_name="test_df",
             column_name="result",
             expression="price * 2",
-            value=100,
+            value="100",
         )
 
         with pytest.raises(ValueError) as exc_info:

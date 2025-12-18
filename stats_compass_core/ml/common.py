@@ -128,8 +128,8 @@ def create_predictions_dataframe(
     class_labels: list[Any] | None = None
     
     if is_classifier and hasattr(model, "predict_proba"):
-        # Get class labels from model
-        class_labels = list(model.classes_)
+        # Get class labels from model (convert numpy types to Python native for JSON serialization)
+        class_labels = [label.item() if hasattr(label, 'item') else label for label in model.classes_]
         probability_columns = []
         
         # Generate probability columns for each class
@@ -152,7 +152,12 @@ def create_predictions_dataframe(
     
     # Store predictions DataFrame with descriptive name
     predictions_df_name = f"{source_name}_predictions"
-    state.set_dataframe(predictions_df_name, predictions_df, set_active=False)
+    state.set_dataframe(
+        df=predictions_df,
+        name=predictions_df_name,
+        operation=f"predictions_{model.__class__.__name__}",
+        set_active=False,
+    )
     
     return predictions_df_name, pred_col_name, probability_columns, class_labels
 
