@@ -4,7 +4,15 @@
   <h1>stats-compass-core</h1>
   
   <p>A stateful, MCP-compatible toolkit of pandas-based data tools for AI-powered data analysis.</p>
+
+  [![PyPI version](https://badge.fury.io/py/stats-compass-core.svg)](https://badge.fury.io/py/stats-compass-core)
+  [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 </div>
+
+> ⚠️ **Status: Early developer release (v0.1)**  
+> Optimized for Claude Desktop. VS Code Copilot support is beta.  
+> Gemini and GPT tool calling may be inconsistent.
 
 ## Overview
 
@@ -192,6 +200,16 @@ git clone https://github.com/oogunbiyi21/stats-compass-core.git
 cd stats-compass-core
 poetry install --with dev  # Installs all deps including optional ones
 ```
+
+### Installation Matrix
+
+| Use Case | Install Command |
+|----------|----------------|
+| Core only (data, cleaning, EDA) | `pip install stats-compass-core` |
+| With ML tools | `pip install stats-compass-core[ml]` |
+| With plotting | `pip install stats-compass-core[plots]` |
+| With time series | `pip install stats-compass-core[timeseries]` |
+| Everything | `pip install stats-compass-core[all]` |
 
 ## Quick Start
 
