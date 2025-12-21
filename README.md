@@ -26,7 +26,6 @@ Stats Compass is designed and tested for official Model Context Protocol (MCP) i
 
 - **VS Code Copilot Chat**: Fully supported via native MCP integration.
 - **Claude Desktop**: Fully supported.
-- **Cursor**: Supported (pending official MCP release).
 
 > **Note:** Third-party extensions such as **Roo Code** are **not supported** due to incompatible JSON Schema validation logic that conflicts with the official spec.
 
