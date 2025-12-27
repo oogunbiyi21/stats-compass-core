@@ -8,7 +8,6 @@ with support for binary and multi-class classification.
 from __future__ import annotations
 
 import base64
-import os
 from io import BytesIO
 from typing import Any, Literal
 
@@ -20,6 +19,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils import safe_save
 
 
 class ConfusionMatrixInput(StrictToolInput):
@@ -331,12 +331,9 @@ def confusion_matrix_plot(
     image_base64 = base64.b64encode(buf.getvalue()).decode()
     plt.close(fig)
 
-    # Save to file if requested
+    # Save to file if requested (never overwrites, auto-increments)
     if params.save_path:
-        save_path = os.path.expanduser(params.save_path)
-        os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
-        with open(save_path, "wb") as f:
-            f.write(base64.b64decode(image_base64))
+        safe_save(fig, params.save_path, "figure")
 
     return ChartResult(
         chart_type="confusion_matrix",

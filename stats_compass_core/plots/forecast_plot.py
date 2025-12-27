@@ -8,7 +8,6 @@ properly render the output as an image, rather than embedding it in JSON data.
 from __future__ import annotations
 
 import base64
-import os
 from io import BytesIO
 from typing import Literal
 
@@ -19,6 +18,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils import safe_save
 
 
 class ForecastPlotInput(StrictToolInput):
@@ -226,13 +226,9 @@ def forecast_plot(state: DataFrameState, params: ForecastPlotInput) -> ChartResu
     plt.xticks(rotation=45)
     plt.tight_layout()
 
-    # Save to file if requested (before converting to base64)
+    # Save to file if requested (never overwrites, auto-increments)
     if params.save_path:
-        save_path = os.path.expanduser(params.save_path)
-        dir_name = os.path.dirname(os.path.abspath(save_path))
-        if dir_name:
-            os.makedirs(dir_name, exist_ok=True)
-        fig.savefig(save_path, format="png", dpi=params.dpi, bbox_inches="tight")
+        safe_save(fig, params.save_path, "figure", dpi=params.dpi)
 
     # Convert to base64
     buf = BytesIO()

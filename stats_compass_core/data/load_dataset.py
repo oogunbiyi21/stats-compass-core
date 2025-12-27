@@ -40,6 +40,7 @@ class LoadDatasetInput(StrictToolInput):
     category="data",
     input_schema=LoadDatasetInput,
     description="Load a built-in sample dataset (e.g. Housing, TATASTEEL, Bukayo_Saka_7322)",
+    tier="util",
 )
 def load_dataset(state: DataFrameState, params: LoadDatasetInput) -> DataFrameLoadResult:
     """

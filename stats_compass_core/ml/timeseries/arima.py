@@ -343,14 +343,31 @@ def _create_forecast_plot(
     upper_ci: pd.Series | None,
     title: str,
 ) -> str | None:
-    """Create a forecast plot and return as base64 string."""
+    """
+    Create a forecast plot and return as base64 string.
+    
+    Shows only recent historical data (3x the forecast period) to make
+    the forecast clearly visible. This matches the behavior of the
+    forecast_plot tool in the plots category.
+    """
     if not MATPLOTLIB_AVAILABLE:
         return None
 
     fig, ax = plt.subplots(figsize=(12, 6))
 
+    # Limit historical data to show - forecast should be at most 25% of plot
+    # So we show 3x the forecast period of historical data
+    n_forecast = len(forecast)
+    history_to_show = n_forecast * 3
+    
+    # Take the last N periods of historical data
+    if len(historical) > history_to_show:
+        historical_display = historical.iloc[-history_to_show:]
+    else:
+        historical_display = historical
+
     # Plot historical data
-    ax.plot(historical.index, historical.values, label="Historical", color="blue")
+    ax.plot(historical_display.index, historical_display.values, label="Historical", color="blue")
 
     # Plot forecast
     ax.plot(forecast.index, forecast.values, label="Forecast", color="red", linestyle="--")
@@ -363,7 +380,7 @@ def _create_forecast_plot(
             upper_ci.values,
             alpha=0.3,
             color="red",
-            label="Confidence Interval",
+            label="95% Confidence Interval",
         )
 
     ax.set_title(title)

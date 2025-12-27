@@ -44,6 +44,7 @@ class LoadCSVInput(StrictToolInput):
     category="data",
     input_schema=LoadCSVInput,
     description="Load data from a local CSV file. You MUST provide an absolute file path. Drag-and-drop uploads are NOT supported.",
+    tier="util",
 )
 def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult:
     """

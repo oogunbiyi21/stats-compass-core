@@ -5,9 +5,13 @@ Tool registry for auto-loading and managing all stats-compass-core tools.
 import importlib
 import pkgutil
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict
+
+
+# Tool tier determines MCP exposure level
+ToolTier = Literal["util", "parent", "workflow", "sub"]
 
 
 class ToolMetadata(BaseModel):
@@ -20,6 +24,7 @@ class ToolMetadata(BaseModel):
     function: Any
     input_schema: type[BaseModel] | None = None
     description: str = ""
+    tier: ToolTier = "sub"  # Default to sub for backward compatibility
 
 
 class ToolRegistry:
@@ -35,6 +40,7 @@ class ToolRegistry:
         name: str | None = None,
         input_schema: type[BaseModel] | None = None,
         description: str = "",
+        tier: ToolTier = "sub",
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         """
         Decorator to register a tool function.
@@ -44,6 +50,11 @@ class ToolRegistry:
             name: Optional tool name (defaults to function name)
             input_schema: Optional Pydantic schema for input validation
             description: Optional tool description
+            tier: Tool tier for MCP exposure (util, parent, workflow, sub)
+                  - util: Always exposed, essential tools (load_csv, list_dataframes)
+                  - parent: Category controllers (describe_*, execute_*)
+                  - workflow: High-level pipelines (run_eda_report, run_preprocessing)
+                  - sub: Granular tools, accessed via execute_* (default)
 
         Returns:
             Decorated function
@@ -57,6 +68,7 @@ class ToolRegistry:
                 function=func,
                 input_schema=input_schema,
                 description=description or func.__doc__ or "",
+                tier=tier,
             )
             self._tools[f"{category}.{tool_name}"] = metadata
             # Mark function as a registered tool for auto-discovery filtering
@@ -142,6 +154,35 @@ class ToolRegistry:
             ]
         return list(self._tools.values())
 
+    def list_tools_by_tier(
+        self, 
+        tiers: list[ToolTier] | None = None,
+        category: str | None = None
+    ) -> list[ToolMetadata]:
+        """
+        List tools filtered by tier(s) and optionally by category.
+        
+        Args:
+            tiers: List of tiers to include. If None, returns all tools.
+            category: Optional category to filter by.
+        
+        Returns:
+            List of tool metadata matching the filters.
+        """
+        tools = self.list_tools(category)
+        if tiers is not None:
+            tools = [t for t in tools if t.tier in tiers]
+        return tools
+
+    def list_exposed_tools(self) -> list[ToolMetadata]:
+        """
+        List tools meant for direct MCP exposure.
+        
+        Returns tools with tiers: util, parent, workflow.
+        Sub-tools are excluded (accessed via execute_* dispatchers).
+        """
+        return self.list_tools_by_tier(tiers=["util", "parent", "workflow"])
+
     def get_tool_schemas(self) -> dict[str, dict[str, Any]]:
         """
         Get JSON schemas for all tools (useful for MCP tool definitions).
@@ -193,6 +234,18 @@ class ToolRegistry:
                 except Exception as e:
                     # Log warning but continue with other modules
                     print(f"Warning: Failed to import {module_name}: {e}")
+        
+        # Also import parent tools module to trigger registration
+        try:
+            importlib.import_module("stats_compass_core.parent.tools")
+        except Exception as e:
+            print(f"Warning: Failed to import parent tools: {e}")
+        
+        # Also import workflow tools module to trigger registration
+        try:
+            importlib.import_module("stats_compass_core.workflows")
+        except Exception as e:
+            print(f"Warning: Failed to import workflow tools: {e}")
 
 
 # Global registry instance

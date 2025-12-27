@@ -19,6 +19,7 @@ class ListDataFramesInput(StrictToolInput):
     category="data",
     input_schema=ListDataFramesInput,
     description="List all available DataFrames in the session",
+    tier="util",
 )
 def list_dataframes(state: DataFrameState, params: ListDataFramesInput) -> DataFrameListResult:
     """

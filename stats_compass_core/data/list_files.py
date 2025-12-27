@@ -26,6 +26,7 @@ class ListFilesInput(StrictToolInput):
     category="data",
     input_schema=ListFilesInput,
     description="List files in a local directory. Useful for finding the correct path for load_csv.",
+    tier="util",
 )
 def list_files(state: DataFrameState, params: ListFilesInput) -> FileListResult:
     """

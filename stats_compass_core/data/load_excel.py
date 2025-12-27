@@ -49,6 +49,7 @@ class LoadExcelInput(StrictToolInput):
     category="data",
     input_schema=LoadExcelInput,
     description="Load data from a local Excel file (.xlsx, .xls). You MUST provide an absolute file path. Drag-and-drop uploads are NOT supported.",
+    tier="util",
 )
 def load_excel(state: DataFrameState, params: LoadExcelInput) -> DataFrameLoadResult:
     """

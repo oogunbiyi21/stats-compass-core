@@ -5,7 +5,6 @@ Tool for visualizing feature importance from trained models.
 from __future__ import annotations
 
 import base64
-import os
 from io import BytesIO
 from typing import Literal
 
@@ -16,6 +15,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils import safe_save
 
 
 class FeatureImportanceInput(StrictToolInput):
@@ -167,9 +167,9 @@ def feature_importance(state: DataFrameState, params: FeatureImportanceInput) ->
 
     plt.tight_layout()
 
+    # Save to file if requested (never overwrites, auto-increments)
     if params.save_path:
-        save_path = os.path.expanduser(params.save_path)
-        fig.savefig(save_path, bbox_inches='tight')
+        safe_save(fig, params.save_path, "figure")
 
     # Convert to base64 PNG
     buf = BytesIO()

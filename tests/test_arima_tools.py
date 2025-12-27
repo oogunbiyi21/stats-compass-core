@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from stats_compass_core.ml.arima import (
+from stats_compass_core.ml.timeseries.arima import (
     FindOptimalARIMAInput,
     FitARIMAInput,
     ForecastARIMAInput,
@@ -368,7 +368,7 @@ class TestCheckStationarity:
 
         result = check_stationarity(state, params)
 
-        from stats_compass_core.ml.arima import StationarityResult
+        from stats_compass_core.ml.timeseries.arima import StationarityResult
         assert isinstance(result, StationarityResult)
         assert result.success is True
         assert result.adf_result is not None
@@ -391,7 +391,7 @@ class TestCheckStationarity:
 
         result = check_stationarity(state, params)
 
-        from stats_compass_core.ml.arima import StationarityResult
+        from stats_compass_core.ml.timeseries.arima import StationarityResult
         assert isinstance(result, StationarityResult)
         assert result.success is True
         assert result.adf_result is None
@@ -409,7 +409,7 @@ class TestCheckStationarity:
 
         result = check_stationarity(state, params)
 
-        from stats_compass_core.ml.arima import StationarityResult
+        from stats_compass_core.ml.timeseries.arima import StationarityResult
         assert isinstance(result, StationarityResult)
         assert result.success is True
         assert result.adf_result is not None
@@ -438,7 +438,7 @@ class TestCheckStationarity:
 
         result = check_stationarity(state, params)
 
-        from stats_compass_core.ml.arima import StationarityResult
+        from stats_compass_core.ml.timeseries.arima import StationarityResult
         assert isinstance(result, StationarityResult)
         # Random walk should typically be non-stationary
         assert result.adf_result is not None
@@ -473,7 +473,7 @@ class TestARIMAIntegration:
             test_type="adf",
         )
         stat_result = check_stationarity(state, stat_params)
-        from stats_compass_core.ml.arima import StationarityResult
+        from stats_compass_core.ml.timeseries.arima import StationarityResult
         assert isinstance(stat_result, StationarityResult)
 
         # 2. Fit ARIMA model
@@ -537,7 +537,7 @@ class TestInferFrequency:
 
     def test_infer_daily_frequency(self) -> None:
         """Test inferring daily frequency from data."""
-        from stats_compass_core.ml.arima import (
+        from stats_compass_core.ml.timeseries.arima import (
             InferFrequencyInput,
             InferFrequencyResult,
             infer_frequency,
@@ -562,7 +562,7 @@ class TestInferFrequency:
 
     def test_infer_weekly_frequency(self) -> None:
         """Test inferring weekly frequency from data."""
-        from stats_compass_core.ml.arima import (
+        from stats_compass_core.ml.timeseries.arima import (
             InferFrequencyInput,
             InferFrequencyResult,
             infer_frequency,
@@ -593,7 +593,7 @@ class TestInferFrequency:
 
     def test_infer_frequency_invalid_column(self) -> None:
         """Test error handling for invalid date column."""
-        from stats_compass_core.ml.arima import InferFrequencyInput, infer_frequency
+        from stats_compass_core.ml.timeseries.arima import InferFrequencyInput, infer_frequency
         from stats_compass_core.results import OperationError
 
         state = create_state_with_timeseries()

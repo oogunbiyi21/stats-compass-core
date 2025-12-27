@@ -5,7 +5,6 @@ Tool for creating bar charts from categorical columns.
 from __future__ import annotations
 
 import base64
-import os
 from io import BytesIO
 from typing import Literal
 
@@ -15,6 +14,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils import safe_save
 
 
 class BarChartInput(StrictToolInput):
@@ -135,9 +135,9 @@ def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
 
     plt.tight_layout()
 
+    # Safe file saving (never overwrites, auto-increments filename if exists)
     if params.save_path:
-        save_path = os.path.expanduser(params.save_path)
-        fig.savefig(save_path, bbox_inches='tight')
+        safe_save(fig, params.save_path, "figure")
 
     # Convert to base64 PNG
     buf = BytesIO()

@@ -32,6 +32,7 @@ class GetSchemaInput(StrictToolInput):
     category="data",
     input_schema=GetSchemaInput,
     description="Get the schema and metadata of a DataFrame",
+    tier="util",
 )
 def get_schema(state: DataFrameState, params: GetSchemaInput) -> DataFrameSchemaResult:
     """

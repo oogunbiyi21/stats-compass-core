@@ -41,6 +41,7 @@ class GetSampleInput(StrictToolInput):
     category="data",
     input_schema=GetSampleInput,
     description="Get sample rows from a DataFrame",
+    tier="util",
 )
 def get_sample(state: DataFrameState, params: GetSampleInput) -> DataFrameSampleResult:
     """

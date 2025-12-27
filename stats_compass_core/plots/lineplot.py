@@ -3,7 +3,6 @@ Tool for creating line plots from DataFrame columns.
 """
 
 import base64
-import os
 from io import BytesIO
 from typing import Any, Literal
 
@@ -13,6 +12,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ChartResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils import safe_save
 
 
 class LinePlotInput(StrictToolInput):
@@ -164,9 +164,9 @@ def lineplot(state: DataFrameState, params: LinePlotInput) -> ChartResult:
 
     plt.tight_layout()
 
+    # Save to file if requested (never overwrites, auto-increments)
     if params.save_path:
-        save_path = os.path.expanduser(params.save_path)
-        fig.savefig(save_path, dpi=params.dpi, bbox_inches='tight')
+        safe_save(fig, params.save_path, "figure", dpi=params.dpi)
 
     # Convert figure to base64 PNG
     buf = BytesIO()

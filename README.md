@@ -18,6 +18,13 @@
 
 **stats-compass-core** is a Python package that provides a curated collection of data tools designed for use with LLM agents via the Model Context Protocol (MCP). Unlike traditional pandas libraries, this package manages server-side state, allowing AI agents to work with DataFrames across multiple tool invocations without passing raw data over the wire.
 
+Key features:
+- **Workflow Tools**: Single-call solutions for common multi-step tasks (preprocessing, classification, time series forecasting)
+- **Sub-Tool Functions**: 50+ atomic operations for fine-grained control
+- **Stateful Design**: Server-side state management for DataFrames and trained models
+- **JSON-Serializable**: All results are Pydantic models that serialize to JSON
+- **MCP-Compatible**: Designed for Model Context Protocol integration
+
 This is the **core library** containing the business logic, state management, and tool definitions. If you are looking for the MCP server to use with Claude or other clients, please see [stats-compass-mcp](https://github.com/oogunbiyi21/stats-compass-mcp).
 
 ## ✅ Supported Clients
@@ -56,13 +63,15 @@ print(result.statistics)
 
 ### Key Features
 
+- 🎯 **Workflow Tools**: One-call solutions for preprocessing, classification, regression, EDA, and time series forecasting
 - 🔄 **Stateful Design**: Server-side `DataFrameState` manages multiple DataFrames and trained models
 - 📦 **MCP-Compatible**: All tools return JSON-serializable Pydantic models
-- 🧹 **Clean Architecture**: Organized into logical categories (data, cleaning, transforms, eda, ml, plots)
+- 🧹 **Clean Architecture**: Organized into logical categories (data, cleaning, transforms, eda, ml, plots, workflows)
 - 🔒 **Type-Safe**: Complete type hints with Pydantic schemas for input validation
 - 🎯 **Memory-Managed**: Configurable memory limits prevent runaway state growth
 - 📊 **Base64 Charts**: Visualization tools return PNG images as base64 strings
 - 🤖 **Model Storage**: Trained ML models stored by ID for later use
+- ⚡ **50+ Sub-Tools**: Fine-grained atomic operations for precise control
 
 ## 📂 Data Loading Guide
 
@@ -104,18 +113,42 @@ You can save your processed data and trained models back to your local disk.
 │                              │                                  │
 │              ┌───────────────┼───────────────┐                  │
 │              ▼               ▼               ▼                  │
-│  ┌─────────────────┐ ┌─────────────┐ ┌─────────────────┐        │
-│  │   Tool (state,  │ │   Tool...   │ │   Tool...       │        │
-│  │     params)     │ │             │ │                 │        │
-│  └────────┬────────┘ └─────────────┘ └─────────────────┘        │
-│           │                                                     │
-│           ▼                                                     │
+│  ┌──────────────────┐ ┌──────────────┐ ┌───────────────────┐   │
+│  │ Workflow Tools   │ │  Sub-Tools   │ │  Category Tools   │   │
+│  │  (orchestrate)   │ │  (atomic)    │ │  (dispatch)       │   │
+│  └────────┬─────────┘ └──────┬───────┘ └─────────┬─────────┘   │
+│           │                  │                   │              │
+│           └──────────────────┼───────────────────┘              │
+│                              ▼                                  │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Pydantic Result Model                      │    │
-│  │              (JSON-serializable)                        │    │
+│  │              Pydantic Result Models                     │    │
+│  │         (WorkflowResult, ChartResult, etc.)             │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Four-Tier Tool Architecture
+
+**Tier 1: Workflow Tools** - High-level orchestration (6 tools)
+- `run_preprocessing`, `run_classification`, `run_regression`, `run_eda_report`, `run_timeseries_forecast`
+- Single-call solutions for common multi-step tasks
+- Return `WorkflowResult` with step-by-step execution details
+
+**Tier 2: Category Tools (Optional)** - Dynamic dispatchers (~12 tools)
+- `describe_cleaning`, `execute_cleaning`, `describe_eda`, `execute_eda`, etc.
+- Reduce tool count for LLM clients with limits
+- Used by MCP clients struggling with 50+ tools (Gemini, GPT)
+- Not needed for Claude Desktop or VS Code
+
+**Tier 3: Sub-Tool Functions** - Atomic operations (50+ tools)
+- `load_csv`, `drop_na`, `describe`, `train_random_forest_classifier`, etc.
+- Each does one thing well
+- Backward compatible with existing code
+
+**Tier 4: DataFrameState** - Shared memory layer
+- Multiple named DataFrames
+- Trained model storage by ID
+- Memory limits and cleanup
 
 ### Three-Layer Stack
 
@@ -212,7 +245,49 @@ poetry install --with dev  # Installs all deps including optional ones
 
 ## Quick Start
 
-### Basic Usage Pattern
+### Workflow Example (Recommended)
+
+The fastest way to accomplish common tasks:
+
+```python
+from stats_compass_core import DataFrameState, registry
+import pandas as pd
+
+# Initialize state
+state = DataFrameState()
+
+# Load data
+df = pd.read_csv("sales_data.csv")
+state.set_dataframe(df, name="sales", operation="load")
+
+# Run complete preprocessing in one call
+result = registry.invoke("workflows", "run_preprocessing", state, {
+    "dataframe_name": "sales",
+    "config": {
+        "date_cleaning": {
+            "date_column": "order_date",
+            "fill_method": "ffill",
+            "infer_frequency": True
+        },
+        "imputation": {"strategy": "median"},
+        "outliers": {"method": "iqr", "action": "cap"},
+        "dedupe": True
+    }
+})
+
+# Check execution details
+print(f"Status: {result.status}")
+print(f"Duration: {result.total_duration_ms}ms")
+print(f"Steps completed: {len([s for s in result.steps if s.status == 'success'])}")
+print(f"Final DataFrame: {result.artifacts.final_dataframe}")
+
+# Use the cleaned data
+cleaned_df = state.get_dataframe(result.artifacts.final_dataframe)
+```
+
+### Sub-Tool Usage Pattern (Fine-Grained Control)
+
+For precise control over individual operations:
 
 All tools follow the same pattern:
 1. Create a `DataFrameState` instance (once per session)
@@ -342,6 +417,38 @@ result = registry.invoke(
 ```
 
 ## Available Tools
+
+### Workflow Tools (`stats_compass_core.workflows`) *[Recommended]*
+
+High-level orchestration tools that execute complete multi-step pipelines in a single call:
+
+| Workflow | Description | Use Case |
+|----------|-------------|----------|
+| `run_preprocessing` | Complete data cleaning pipeline | Clean messy data for analysis/ML |
+| `run_classification` | Train + evaluate classification model | Predict categories (churn, sentiment, etc.) |
+| `run_regression` | Train + evaluate regression model | Predict continuous values (price, sales, etc.) |
+| `run_eda_report` | Comprehensive exploratory analysis | Understand dataset characteristics |
+| `run_timeseries_forecast` | ARIMA forecasting with validation | Predict future values from time series |
+
+**Example:**
+```python
+# Single call does: analyze → clean dates → impute → handle outliers → dedupe
+result = registry.invoke("workflows", "run_preprocessing", state, {
+    "config": {
+        "date_cleaning": {"date_column": "Date", "fill_method": "ffill"},
+        "imputation": {"strategy": "median"},
+        "outliers": {"method": "iqr", "action": "cap"}
+    }
+})
+```
+
+Returns `WorkflowResult` with:
+- `steps`: Step-by-step execution details
+- `artifacts`: Created DataFrames, models, charts
+- `status`: "success" | "partial_failure" | "failed"
+- `suggestion`: Recovery hints if failed
+
+---
 
 ### Data Tools (`stats_compass_core.data`)
 
@@ -474,6 +581,129 @@ result = registry.invoke("plots", "bar_chart", state, {
     "column": "region"
 })
 # result.image_base64 contains PNG image
+```
+
+### Workflow Examples (Complete Pipelines)
+
+#### Preprocessing + Classification Pipeline
+
+```python
+from stats_compass_core import DataFrameState, registry
+import pandas as pd
+
+state = DataFrameState()
+
+# Load raw data
+df = pd.read_csv("customer_churn.csv")
+state.set_dataframe(df, name="raw_data", operation="load")
+
+# Step 1: Clean the data
+preprocessing_result = registry.invoke("workflows", "run_preprocessing", state, {
+    "dataframe_name": "raw_data",
+    "config": {
+        "imputation": {"strategy": "mean"},
+        "outliers": {"method": "iqr", "action": "cap"},
+        "dedupe": True
+    },
+    "save_as": "cleaned_data"
+})
+
+print(f"Preprocessing: {preprocessing_result.status}")
+print(f"Steps: {len(preprocessing_result.steps)}")
+print(f"Cleaned DataFrame: {preprocessing_result.artifacts.final_dataframe}")
+
+# Step 2: Train classification model
+classification_result = registry.invoke("workflows", "run_classification", state, {
+    "dataframe_name": "cleaned_data",
+    "target_column": "churn",
+    "feature_columns": ["age", "tenure", "balance", "num_products"],
+    "config": {
+        "model_type": "random_forest",
+        "test_size": 0.2,
+        "generate_plots": True,
+        "plots": ["confusion_matrix", "roc", "feature_importance"]
+    }
+})
+
+print(f"\nModel ID: {classification_result.artifacts.models_created[0]}")
+print(f"Charts generated: {len(classification_result.artifacts.charts)}")
+for step in classification_result.steps:
+    if step.status == "success":
+        print(f"  ✓ {step.step_name}")
+```
+
+#### Time Series Forecasting with Date Cleaning
+
+```python
+from stats_compass_core import DataFrameState, registry
+
+state = DataFrameState()
+
+# Load time series data with missing dates
+df = pd.read_csv("stock_prices.csv")  # Has gaps in date sequence
+state.set_dataframe(df, name="stock_data", operation="load")
+
+# Clean dates first (optional but recommended)
+preprocessing_result = registry.invoke("workflows", "run_preprocessing", state, {
+    "dataframe_name": "stock_data",
+    "config": {
+        "date_cleaning": {
+            "date_column": "Date",
+            "fill_method": "ffill",
+            "infer_frequency": True,
+            "create_missing_dates": False
+        }
+    },
+    "save_as": "stock_data_clean"
+})
+
+# Run time series forecast
+forecast_result = registry.invoke("workflows", "run_timeseries_forecast", state, {
+    "dataframe_name": "stock_data_clean",
+    "date_column": "Date",
+    "target_column": "Close",
+    "config": {
+        "forecast_periods": 30,
+        "auto_find_params": True,
+        "check_stationarity": True,
+        "generate_forecast_plot": True
+    }
+})
+
+print(f"ARIMA model: {forecast_result.artifacts.models_created[0]}")
+print(f"Forecast status: {forecast_result.status}")
+for step in forecast_result.steps:
+    print(f"  {step.step_name}: {step.status}")
+```
+
+#### EDA Report Generation
+
+```python
+# Generate comprehensive EDA report
+eda_result = registry.invoke("workflows", "run_eda_report", state, {
+    "dataframe_name": "my_data",
+    "config": {
+        "include_describe": True,
+        "include_correlations": True,
+        "include_missing_analysis": True,
+        "include_quality_report": True,
+        "generate_histograms": True,
+        "generate_bar_charts": True,
+        "max_categorical_cardinality": 20
+    }
+})
+
+# Access results
+for step in eda_result.steps:
+    if step.result:
+        print(f"{step.step_name}: {step.summary}")
+
+# Save charts
+import base64
+for i, chart in enumerate(eda_result.artifacts.charts):
+    image_bytes = base64.b64decode(chart.image_base64)
+    with open(f"chart_{i}_{chart.chart_type}.png", "wb") as f:
+        f.write(image_bytes)
 ```
 
 ### Working with Charts
