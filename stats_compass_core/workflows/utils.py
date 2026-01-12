@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from stats_compass_core.state import DataFrameState
 
-from .results import ChartArtifact, WorkflowStepResult
+from .results import WorkflowStepResult
 
 
 def run_step(
@@ -66,7 +66,7 @@ def run_step(
         if hasattr(result, "model_dump"):
             result_data = result.model_dump()
         elif isinstance(result, dict):
-            result_data = result
+            result_data = result.copy()
         else:
             result_data = {"result": str(result)}
         
@@ -77,12 +77,14 @@ def run_step(
         elif hasattr(result, "predictions_dataframe"):
             df_produced = result.predictions_dataframe
         
-        # Check for image in result
+        # Check for image in result and remove from result_data to avoid duplication
         image_base64 = None
         if hasattr(result, "image_base64") and result.image_base64:
             image_base64 = result.image_base64
+            result_data.pop("image_base64", None)
         elif hasattr(result, "base64_image") and result.base64_image:
             image_base64 = result.base64_image
+            result_data.pop("base64_image", None)
         
         return WorkflowStepResult(
             step_name=step_name,
@@ -104,66 +106,3 @@ def run_step(
             summary=f"Failed: {str(e)}",
             error=str(e),
         )
-
-
-def run_chart_step(
-    step_name: str,
-    step_index: int,
-    func: Callable,
-    state: DataFrameState,
-    params: Any,
-    chart_type: str,
-    summary_template: str,
-) -> tuple[WorkflowStepResult, ChartArtifact | None]:
-    """
-    Execute a chart generation step with timing and error handling.
-    
-    Args:
-        step_name: Name of the step for reporting
-        step_index: Index of the step in the workflow
-        func: The chart tool function to execute
-        state: DataFrameState to pass to the function
-        params: Parameters to pass to the function
-        chart_type: Type of chart being generated
-        summary_template: Template string for the summary (can use {result})
-    
-    Returns:
-        Tuple of (WorkflowStepResult, ChartArtifact or None if failed)
-    """
-    start = time.time()
-    chart_artifact = None
-    try:
-        result = func(state, params)
-        duration_ms = int((time.time() - start) * 1000)
-        
-        # Create chart artifact
-        # Note: ChartResult uses 'image_base64' but ChartArtifact uses 'base64_image'
-        chart_artifact = ChartArtifact(
-            chart_type=chart_type,
-            title=getattr(result, "title", None) or chart_type,
-            description=getattr(result, "description", None),
-            base64_image=getattr(result, "image_base64", None),
-            format=getattr(result, "image_format", "png"),
-        )
-        
-        step_result = WorkflowStepResult(
-            step_name=step_name,
-            step_index=step_index,
-            status="success",
-            duration_ms=duration_ms,
-            summary=summary_template.format(result=result),
-            result=result.model_dump() if hasattr(result, "model_dump") else {"chart": chart_type},
-        )
-        return step_result, chart_artifact
-        
-    except Exception as e:
-        duration_ms = int((time.time() - start) * 1000)
-        step_result = WorkflowStepResult(
-            step_name=step_name,
-            step_index=step_index,
-            status="failed",
-            duration_ms=duration_ms,
-            summary=f"Failed to generate {chart_type}: {str(e)}",
-            error=str(e),
-        )
-        return step_result, None

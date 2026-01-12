@@ -15,9 +15,8 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import RegressionConfig, FeatureEngineeringConfig
-from .utils import run_step, run_chart_step
+from .utils import run_step
 from .results import (
-    ChartArtifact,
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
@@ -172,7 +171,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
     
     steps: list[WorkflowStepResult] = []
     step_index = 0
-    charts: list[ChartArtifact] = []
+    charts_generated = 0
     dataframes_created: list[str] = []
     models_created: list[str] = []
     
@@ -327,18 +326,17 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 valid_params = {k: v for k, v in plot_params_dict.items() if k in schema_fields}
                 plot_params = PlotInputSchema(**valid_params)
                 
-                step_result, chart = run_chart_step(
+                step_result = run_step(
                     step_name=f"plot_{plot_name}",
                     step_index=step_index,
                     func=plot_func,
                     state=state,
                     params=plot_params,
-                    chart_type=chart_type,
                     summary_template=f"Generated {plot_name.replace('_', ' ')} plot",
                 )
                 steps.append(step_result)
-                if chart:
-                    charts.append(chart)
+                if step_result.status == "success":
+                    charts_generated += 1
                     
             except Exception as e:
                 steps.append(WorkflowStepResult(
@@ -378,7 +376,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
         models_created=models_created,
-        charts=charts,
+        charts_generated=charts_generated,
         final_dataframe=predictions_df_name,
     )
     

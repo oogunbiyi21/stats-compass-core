@@ -17,7 +17,6 @@ from stats_compass_core.workflows.configs import (
     TimeSeriesConfig,
 )
 from stats_compass_core.workflows.results import (
-    ChartArtifact,
     StepStatus,
     WorkflowArtifacts,
     WorkflowResult,
@@ -37,7 +36,6 @@ __all__ = [
     "WorkflowStepResult",
     "WorkflowResult",
     "WorkflowArtifacts",
-    "ChartArtifact",
     "StepStatus",
     "WorkflowStatus",
     # Config types

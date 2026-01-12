@@ -15,9 +15,8 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import ClassificationConfig, FeatureEngineeringConfig
-from .utils import run_step, run_chart_step
+from .utils import run_step
 from .results import (
-    ChartArtifact,
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
@@ -174,7 +173,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     
     steps: list[WorkflowStepResult] = []
     step_index = 0
-    charts: list[ChartArtifact] = []
+    charts_generated = 0
     dataframes_created: list[str] = []
     models_created: list[str] = []
     
@@ -355,18 +354,17 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 else:
                     continue
                 
-                step_result, chart = run_chart_step(
+                step_result = run_step(
                     step_name=chart_type,
                     step_index=step_index,
                     func=plot_func,
                     state=state,
                     params=plot_params,
-                    chart_type=chart_type,
                     summary_template=f"Generated {chart_type.replace('_', ' ')}",
                 )
                 steps.append(step_result)
-                if chart:
-                    charts.append(chart)
+                if step_result.status == "success":
+                    charts_generated += 1
                     
             except Exception as e:
                 steps.append(WorkflowStepResult(
@@ -399,7 +397,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
         models_created=models_created,
-        charts=charts,
+        charts_generated=charts_generated,
     )
     
     # Build summary
@@ -409,8 +407,8 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     if predictions_df_name:
         summary_parts.append(f"Predictions: {predictions_df_name}")
     summary_parts.append(f"Steps: {len(success_steps)} succeeded, {len(failed_steps)} failed")
-    if charts:
-        summary_parts.append(f"Charts: {len(charts)} generated")
+    if charts_generated:
+        summary_parts.append(f"Charts: {charts_generated} generated")
     
     return WorkflowResult(
         workflow_name="run_classification",

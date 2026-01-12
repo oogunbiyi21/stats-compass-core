@@ -128,7 +128,7 @@ class TestRunEDAReport:
         assert result.status in ["success", "partial_failure"]
         # Should have some charts if histograms enabled
         if result.status == "success":
-            assert len(result.artifacts.charts) >= 0
+            assert result.artifacts.charts_generated >= 0
 
 
 # =============================================================================

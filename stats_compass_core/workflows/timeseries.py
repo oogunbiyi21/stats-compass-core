@@ -16,9 +16,8 @@ from stats_compass_core.state import DataFrameState
 from stats_compass_core.cleaning.clean_dates import validate_date_column
 
 from .configs import TimeSeriesConfig
-from .utils import run_step, run_chart_step
+from .utils import run_step
 from .results import (
-    ChartArtifact,
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
@@ -179,7 +178,7 @@ def run_timeseries_forecast(
     
     steps: list[WorkflowStepResult] = []
     step_index = 0
-    charts: list[ChartArtifact] = []
+    charts_generated = 0
     dataframes_created: list[str] = []
     models_created: list[str] = []
     
@@ -596,18 +595,17 @@ def run_timeseries_forecast(
             valid_params = {k: v for k, v in plot_params_dict.items() if k in schema_fields}
             plot_params = PlotInput(**valid_params)
             
-            step_result, chart = run_chart_step(
+            step_result = run_step(
                 step_name="plot_forecast",
                 step_index=step_index,
                 func=plot_func,
                 state=state,
                 params=plot_params,
-                chart_type="forecast",
                 summary_template="Generated forecast plot",
             )
             steps.append(step_result)
-            if chart:
-                charts.append(chart)
+            if step_result.status == "success":
+                charts_generated += 1
                 
         except Exception as e:
             steps.append(WorkflowStepResult(
@@ -647,7 +645,7 @@ def run_timeseries_forecast(
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
         models_created=models_created,
-        charts=charts,
+        charts_generated=charts_generated,
         final_dataframe=None,  # Timeseries doesn't create a predictions DF by default
     )
     

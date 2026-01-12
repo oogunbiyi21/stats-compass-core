@@ -16,16 +16,6 @@ StepStatus = Literal["success", "failed", "skipped"]
 WorkflowStatus = Literal["success", "partial_failure", "failed"]
 
 
-class ChartArtifact(BaseModel):
-    """A chart produced by a workflow step."""
-
-    chart_type: str = Field(description="Type of chart: histogram, scatter, bar, confusion_matrix, etc.")
-    title: str | None = Field(default=None, description="Chart title")
-    description: str | None = Field(default=None, description="Chart description")
-    base64_image: str | None = Field(default=None, description="PNG image encoded as base64")
-    format: str = Field(default="png", description="Image format")
-
-
 class WorkflowStepResult(BaseModel):
     """Result from a single step in a workflow."""
 
@@ -73,10 +63,6 @@ class WorkflowArtifacts(BaseModel):
     charts_generated: int = Field(
         default=0,
         description="Total number of charts generated"
-    )
-    charts: list[ChartArtifact] = Field(
-        default_factory=list,
-        description="All chart artifacts with base64 images"
     )
     final_dataframe: str | None = Field(
         default=None,

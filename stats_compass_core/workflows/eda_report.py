@@ -17,9 +17,8 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import EDAConfig
-from .utils import run_step, run_chart_step
+from .utils import run_step
 from .results import (
-    ChartArtifact,
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
@@ -177,7 +176,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     
     steps: list[WorkflowStepResult] = []
-    charts: list[ChartArtifact] = []
+    charts_generated = 0
     step_index = 0
     
     # =========================================================================
@@ -232,18 +231,17 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
                         dataframe_name=source_name,
                         column=col,
                     )
-                    step_result, chart = run_chart_step(
+                    step_result = run_step(
                         step_name=f"histogram_{col}",
                         step_index=step_index,
                         func=plot_func,
                         state=state,
                         params=plot_params,
-                        chart_type="histogram",
                         summary_template=f"Generated histogram for '{col}'",
                     )
                     steps.append(step_result)
-                    if chart:
-                        charts.append(chart)
+                    if step_result.status == "success":
+                        charts_generated += 1
                 except Exception as e:
                     steps.append(WorkflowStepResult(
                         step_name=f"histogram_{col}",
@@ -283,18 +281,17 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
                         dataframe_name=source_name,
                         column=col,
                     )
-                    step_result, chart = run_chart_step(
+                    step_result = run_step(
                         step_name=f"bar_chart_{col}",
                         step_index=step_index,
                         func=plot_func,
                         state=state,
                         params=plot_params,
-                        chart_type="bar_chart",
                         summary_template=f"Generated bar chart for '{col}'",
                     )
                     steps.append(step_result)
-                    if chart:
-                        charts.append(chart)
+                    if step_result.status == "success":
+                        charts_generated += 1
                 except Exception as e:
                     steps.append(WorkflowStepResult(
                         step_name=f"bar_chart_{col}",
@@ -336,7 +333,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
     artifacts = WorkflowArtifacts(
         dataframes_created=[],
         models_created=[],
-        charts=charts,
+        charts_generated=charts_generated,
     )
     
     return WorkflowResult(
