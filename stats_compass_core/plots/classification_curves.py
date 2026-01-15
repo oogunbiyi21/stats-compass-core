@@ -32,6 +32,10 @@ class ROCCurveInput(StrictToolInput):
     prob_column: str = Field(
         description="Column containing predicted probabilities for positive class"
     )
+    pos_label: str | int | None = Field(
+        default=None,
+        description="The positive class label. Auto-detected if not specified (e.g., 'yes', 1, True).",
+    )
     model_id: str = Field(
         default="model",
         description="Identifier for the model being evaluated",
@@ -66,6 +70,10 @@ class PrecisionRecallCurveInput(StrictToolInput):
     prob_column: str = Field(
         description="Column containing predicted probabilities for positive class"
     )
+    pos_label: str | int | None = Field(
+        default=None,
+        description="The positive class label. Auto-detected if not specified (e.g., 'yes', 1, True).",
+    )
     model_id: str = Field(
         default="model",
         description="Identifier for the model being evaluated",
@@ -87,6 +95,35 @@ class PrecisionRecallCurveInput(StrictToolInput):
     format: Literal["png", "json"] = Field(
         default="png", description="Output format: 'png' for image, 'json' for raw data"
     )
+
+
+def _detect_pos_label(unique_labels: np.ndarray, pos_label: str | int | None = None):
+    """
+    Detect the positive class label for binary classification.
+    
+    Args:
+        unique_labels: Array of unique labels (should have exactly 2 values)
+        pos_label: User-specified positive label, or None for auto-detection
+        
+    Returns:
+        The positive class label to use
+    """
+    if pos_label is not None:
+        return pos_label
+    
+    # Convert to list for easier checking
+    labels = [str(l).lower() for l in unique_labels]
+    
+    # Common positive indicators
+    positive_indicators = ['yes', 'true', '1', 'positive', 'pos', 'y', 't']
+    
+    for i, label in enumerate(labels):
+        if label in positive_indicators:
+            return unique_labels[i]
+    
+    # If no common indicator found, use the larger/later value
+    # This follows scikit-learn's convention (e.g., 1 over 0)
+    return max(unique_labels)
 
 
 def _interpret_auc(auc_score: float) -> str:
@@ -188,8 +225,11 @@ def roc_curve_plot(
             f"ROC curves require binary labels. Found {len(unique_labels)} unique values: {unique_labels}"
         )
 
+    # Detect positive label for string/non-numeric targets
+    pos_label = _detect_pos_label(unique_labels, params.pos_label)
+
     # Calculate ROC curve
-    fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+    fpr, tpr, thresholds = roc_curve(y_true, y_prob, pos_label=pos_label)
     roc_auc = auc(fpr, tpr)
 
     # Generate interpretation
@@ -339,12 +379,17 @@ def precision_recall_curve_plot(
             f"PR curves require binary labels. Found {len(unique_labels)} unique values: {unique_labels}"
         )
 
+    # Detect positive label for string/non-numeric targets
+    pos_label = _detect_pos_label(unique_labels, params.pos_label)
+
     # Calculate PR curve
-    precision, recall, thresholds = precision_recall_curve(y_true, y_prob)
-    ap_score = average_precision_score(y_true, y_prob)
+    precision, recall, thresholds = precision_recall_curve(y_true, y_prob, pos_label=pos_label)
+    ap_score = average_precision_score(y_true, y_prob, pos_label=pos_label)
 
     # Baseline (random classifier for imbalanced data)
-    positive_ratio = float(np.mean(y_true))
+    # Convert to binary for positive ratio calculation
+    y_binary = (y_true == pos_label).astype(int)
+    positive_ratio = float(np.mean(y_binary))
 
     # Generate interpretation
     interpretation = (

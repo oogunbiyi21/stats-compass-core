@@ -221,6 +221,32 @@ class TestClassificationCurves:
         # Perfect classifier should have AUC = 1.0
         assert result.auc_score == 1.0
 
+    def test_roc_curve_string_labels(self):
+        """Test ROC curve with string labels like 'yes'/'no'."""
+        from stats_compass_core.plots.classification_curves import (
+            ROCCurveInput,
+            roc_curve_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": ["no", "no", "no", "no", "no", "yes", "yes", "yes", "yes", "yes"],
+            "y_prob": [0.1, 0.2, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0],
+        })
+
+        state = make_state_with_df(df)
+
+        params = ROCCurveInput(
+            dataframe_name="test",
+            true_column="y_true",
+            prob_column="y_prob",
+        )
+
+        result = roc_curve_plot(state, params)
+
+        # Should auto-detect 'yes' as positive label
+        assert result.auc_score == 1.0
+        assert result.image_base64 is not None
+
     def test_precision_recall_curve_basic(self):
         """Test PR curve generation."""
         from stats_compass_core.plots.classification_curves import (
@@ -250,6 +276,33 @@ class TestClassificationCurves:
         assert len(result.y_values) > 0
         assert 0 <= result.auc_score <= 1
         assert result.image_base64
+
+    def test_precision_recall_curve_string_labels(self):
+        """Test PR curve with string labels like 'yes'/'no'."""
+        from stats_compass_core.plots.classification_curves import (
+            PrecisionRecallCurveInput,
+            precision_recall_curve_plot,
+        )
+
+        df = pd.DataFrame({
+            "y_true": ["no", "no", "no", "no", "no", "yes", "yes", "yes", "yes", "yes"],
+            "y_prob": [0.1, 0.2, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 1.0],
+        })
+
+        state = make_state_with_df(df)
+
+        params = PrecisionRecallCurveInput(
+            dataframe_name="test",
+            true_column="y_true",
+            prob_column="y_prob",
+        )
+
+        result = precision_recall_curve_plot(state, params)
+
+        # Should auto-detect 'yes' as positive label
+        assert result.curve_type == "precision_recall"
+        assert result.auc_score == 1.0  # Perfect classifier
+        assert result.image_base64 is not None
 
     def test_curve_missing_column(self):
         """Test curve tools raise error for missing columns."""
