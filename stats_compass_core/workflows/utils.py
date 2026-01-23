@@ -6,11 +6,36 @@ error handling, and result serialization.
 """
 
 import time
+from datetime import datetime
 from typing import Any, Callable
 
 from stats_compass_core.state import DataFrameState
 
 from .results import WorkflowStepResult
+
+
+def generate_model_save_path(
+    model_type: str,
+    target_column: str,
+    custom_path: str | None = None,
+) -> str | None:
+    """
+    Generate a save path for a trained model.
+    
+    Args:
+        model_type: Type of model (e.g., "random_forest", "logistic")
+        target_column: Name of the target column
+        custom_path: User-provided path (returned as-is if provided)
+    
+    Returns:
+        Path string, or None if saving is disabled
+    """
+    if custom_path:
+        return custom_path
+    
+    # Auto-generate path using model type and target column
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"{model_type}_{target_column}_{timestamp}.joblib"
 
 
 def run_step(

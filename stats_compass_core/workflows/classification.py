@@ -107,6 +107,7 @@ def _build_training_params(
     target_column: str,
     feature_columns: list[str] | None,
     config: ClassificationConfig,
+    model_id_hint: str | None = None,
 ) -> Any:
     """
     Build training parameters dynamically based on the input schema.
@@ -114,6 +115,17 @@ def _build_training_params(
     Common parameters are set explicitly, model-specific hyperparameters
     are passed through from config.hyperparameters.
     """
+    from .utils import generate_model_save_path
+    
+    # Determine save path
+    save_path = None
+    if config.save_model:
+        save_path = generate_model_save_path(
+            model_type=config.model_type,
+            target_column=target_column,
+            custom_path=config.model_save_path,
+        )
+    
     # Common parameters all training tools share
     common_params = {
         "dataframe_name": source_name,
@@ -121,7 +133,7 @@ def _build_training_params(
         "feature_columns": feature_columns,
         "test_size": config.test_size,
         "random_state": config.random_state,
-        "save_path": config.model_save_path if config.save_model else None,
+        "save_path": save_path,
     }
     
     # Merge with model-specific hyperparameters

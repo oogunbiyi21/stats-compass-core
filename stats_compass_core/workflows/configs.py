@@ -233,12 +233,12 @@ class ClassificationConfig(BaseModel):
         description="Which plots to generate"
     )
     save_model: bool = Field(
-        default=False,
+        default=True,
         description="Whether to save the trained model to disk"
     )
     model_save_path: str | None = Field(
         default=None,
-        description="Path to save model (required if save_model=True)"
+        description="Path to save model (auto-generated if not provided)"
     )
 
 
@@ -282,12 +282,12 @@ class RegressionConfig(BaseModel):
         description="Which plots to generate"
     )
     save_model: bool = Field(
-        default=False,
+        default=True,
         description="Whether to save the trained model to disk"
     )
     model_save_path: str | None = Field(
         default=None,
-        description="Path to save model (required if save_model=True)"
+        description="Path to save model (auto-generated if not provided)"
     )
 
 
