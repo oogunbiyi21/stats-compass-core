@@ -323,51 +323,63 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
     # Step 4: Handle Outliers (if enabled)
     # =========================================================================
     if outlier_config.method != "none":
+        step_index += 1
+        import time
+        start_time = time.time()
+        
         # Get numeric columns from current state
         current_df = state.get_dataframe(current_df_name)
         numeric_cols = current_df.select_dtypes(include=["number"]).columns.tolist()
         
         if outlier_config.columns:
-            # Filter to specified columns
             numeric_cols = [c for c in outlier_config.columns if c in numeric_cols]
         
         if numeric_cols:
-            # Map config method/action to tool method
-            method_map = {
-                ("iqr", "cap"): "clip_iqr",
-                ("iqr", "remove"): "remove",
-                ("zscore", "cap"): "cap",
-                ("zscore", "remove"): "remove",
-            }
-            tool_method = method_map.get(
-                (outlier_config.method, outlier_config.action),
-                "clip_iqr"
-            )
+            # Process all columns in memory, save once at the end
+            df = current_df.copy()
+            cols_processed = []
             
-            # Handle outliers for each numeric column
             for col in numeric_cols:
-                step_index += 1
-                intermediate_name = f"{current_df_name}_outliers_{col}"
-                
-                step_result = _run_preprocessing_step(
-                    state=state,
-                    step_name="handle_outliers",
-                    step_index=step_index,
-                    params_dict={
-                        "dataframe_name": current_df_name,
-                        "column": col,
-                        "method": tool_method,
-                        "save_as": intermediate_name,
-                    },
-                    summary_template=f"Handled outliers in column '{col}'",
-                )
-                steps.append(step_result)
-                
-                if step_result.status == "success":
-                    current_df_name = intermediate_name
-                    dataframes_created.append(intermediate_name)
+                try:
+                    if outlier_config.method == "iqr":
+                        q1 = df[col].quantile(0.25)
+                        q3 = df[col].quantile(0.75)
+                        iqr = q3 - q1
+                        lower = q1 - (outlier_config.threshold * iqr)
+                        upper = q3 + (outlier_config.threshold * iqr)
+                    else:  # zscore
+                        mean = df[col].mean()
+                        std = df[col].std()
+                        lower = mean - (outlier_config.threshold * std)
+                        upper = mean + (outlier_config.threshold * std)
+                    
+                    if outlier_config.action == "cap":
+                        df[col] = df[col].clip(lower=lower, upper=upper)
+                    elif outlier_config.action == "remove":
+                        mask = (df[col] >= lower) & (df[col] <= upper)
+                        df = df[mask]
+                    # "flag" action would add a new column, skip for now
+                    
+                    cols_processed.append(col)
+                except Exception:
+                    pass  # Skip columns that fail
+            
+            # Save once
+            outliers_df_name = f"{source_name}_outliers"
+            state.add_dataframe(df, name=outliers_df_name, set_active=True)
+            current_df_name = outliers_df_name
+            dataframes_created.append(outliers_df_name)
+            
+            duration_ms = int((time.time() - start_time) * 1000)
+            steps.append(WorkflowStepResult(
+                step_name="handle_outliers",
+                step_index=step_index,
+                status="success",
+                duration_ms=duration_ms,
+                summary=f"Handled outliers in {len(cols_processed)} columns",
+                result={"columns_processed": cols_processed, "method": outlier_config.method, "action": outlier_config.action},
+            ))
         else:
-            step_index += 1
             steps.append(WorkflowStepResult(
                 step_name="handle_outliers",
                 step_index=step_index,

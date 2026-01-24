@@ -191,7 +191,17 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
     predictions_df_name: str | None = None
     
     # =========================================================================
-    # Step 0: Feature Engineering (optional)
+    # Step 0a: Drop Columns (inline, if specified)
+    # =========================================================================
+    if config.drop_columns:
+        cols_to_drop = [c for c in config.drop_columns if c != params.target_column]
+        if cols_to_drop:
+            df = state.get_dataframe(current_df_name)
+            df = df.drop(columns=cols_to_drop, errors='ignore')
+            state.add_dataframe(df, name=current_df_name, set_active=True)
+    
+    # =========================================================================
+    # Step 0b: Feature Engineering (optional)
     # =========================================================================
     if config.feature_engineering:
         fe_steps, fe_dfs, current_df_name, step_index = run_feature_engineering_steps(

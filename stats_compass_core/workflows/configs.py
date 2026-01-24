@@ -240,6 +240,10 @@ class ClassificationConfig(BaseModel):
         default=None,
         description="Path to save model (auto-generated if not provided)"
     )
+    drop_columns: list[str] | None = Field(
+        default=None,
+        description="Columns to exclude from training (e.g., IDs, names)"
+    )
 
 
 # =============================================================================
@@ -288,6 +292,10 @@ class RegressionConfig(BaseModel):
     model_save_path: str | None = Field(
         default=None,
         description="Path to save model (auto-generated if not provided)"
+    )
+    drop_columns: list[str] | None = Field(
+        default=None,
+        description="Columns to exclude from training (e.g., IDs, names)"
     )
 
 
