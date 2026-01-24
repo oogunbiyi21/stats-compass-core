@@ -75,14 +75,21 @@ def inspect_data(state: DataFrameState, params: InspectDataInput) -> dict[str, A
         "__builtins__": {},  # Restrict builtins
     }
 
-    # Add valid column names to namespace for convenience
+    # Transform bare column names to df['column'] syntax for pd.eval()
+    expr = params.expression
     for col in df.columns:
         if isinstance(col, str) and col.isidentifier():
-            namespace[col] = df[col]
+            # Replace bare column name with df['column'] syntax
+            # Use word boundaries to avoid partial matches
+            expr = re.sub(rf"\b{re.escape(col)}\b", f"df['{col}']", expr)
 
     try:
-        # Evaluate expression
-        result = eval(params.expression, namespace)
+        # Use pandas.eval() for safe expression evaluation
+        result = pd.eval(
+            expr,
+            local_dict={"df": df},
+            engine="python",
+        )
 
         # Format result for output
         if isinstance(result, (pd.DataFrame, pd.Series)):
