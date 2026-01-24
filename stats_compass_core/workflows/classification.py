@@ -204,7 +204,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         if cols_to_drop:
             df = state.get_dataframe(current_df_name)
             df = df.drop(columns=cols_to_drop, errors='ignore')
-            state.add_dataframe(df, name=current_df_name, set_active=True)
+            state.set_dataframe(df, name=current_df_name, operation="drop_columns", set_active=True)
     
     # =========================================================================
     # Step 0b: Feature Engineering (optional)
@@ -420,7 +420,15 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         dataframes_created=dataframes_created,
         models_created=models_created,
         charts_generated=charts_generated,
+        final_dataframe=predictions_df_name,
     )
+    
+    # Build helpful notes
+    notes = []
+    if predictions_df_name and prediction_column:
+        notes.append(f"Predictions are in '{predictions_df_name}' (includes '{prediction_column}' column)")
+    if models_created:
+        notes.append(f"Trained model ID: '{models_created[0]}' - use for feature_importance or predictions")
     
     # Build summary
     summary_parts = [f"Classification workflow completed with status: {overall_status}"]
@@ -441,4 +449,5 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         input_dataframe=source_name,
         steps=steps,
         artifacts=artifacts,
+        notes=notes,
     )

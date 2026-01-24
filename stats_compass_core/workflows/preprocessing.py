@@ -366,7 +366,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
             
             # Save once
             outliers_df_name = f"{source_name}_outliers"
-            state.add_dataframe(df, name=outliers_df_name, set_active=True)
+            state.set_dataframe(df, name=outliers_df_name, operation="handle_outliers", set_active=True)
             current_df_name = outliers_df_name
             dataframes_created.append(outliers_df_name)
             

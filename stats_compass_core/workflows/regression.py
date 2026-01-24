@@ -198,7 +198,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         if cols_to_drop:
             df = state.get_dataframe(current_df_name)
             df = df.drop(columns=cols_to_drop, errors='ignore')
-            state.add_dataframe(df, name=current_df_name, set_active=True)
+            state.set_dataframe(df, name=current_df_name, operation="drop_columns", set_active=True)
     
     # =========================================================================
     # Step 0b: Feature Engineering (optional)
@@ -331,7 +331,8 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
             try:
                 plot_func, PlotInputSchema = _get_tool("plots", tool_name)
                 
-                # Build plot params
+                # Build plot params - prediction column follows pattern: pred_{target_column}
+                prediction_col = f"pred_{params.target_column}"
                 if plot_name == "feature_importance":
                     plot_params_dict = {"model_id": model_id}
                 else:
@@ -339,7 +340,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                     plot_params_dict = {
                         "dataframe_name": predictions_df_name,
                         "true_column": params.target_column,
-                        "pred_column": "predicted",
+                        "pred_column": prediction_col,
                     }
                 
                 # Filter to schema fields
@@ -393,6 +394,13 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         error_summary = None
         suggestion = None
     
+    # Build helpful notes
+    notes = []
+    if predictions_df_name:
+        notes.append(f"Predictions are in '{predictions_df_name}' (includes 'pred_{params.target_column}' column)")
+    if models_created:
+        notes.append(f"Trained model ID: '{models_created[0]}' - use for feature_importance or predictions")
+    
     # Build artifacts
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
@@ -412,5 +420,6 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         artifacts=artifacts,
         error_summary=error_summary,
         suggestion=suggestion,
+        notes=notes,
         recoverable=True,
     )

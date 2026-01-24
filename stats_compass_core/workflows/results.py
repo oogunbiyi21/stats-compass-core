@@ -100,6 +100,10 @@ class WorkflowResult(BaseModel):
         default=None,
         description="Suggested recovery action for agent"
     )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Important notes for the user/agent about workflow outputs"
+    )
     recoverable: bool = Field(
         default=True,
         description="Whether agent can retry with different parameters"

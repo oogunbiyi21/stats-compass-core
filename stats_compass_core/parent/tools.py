@@ -80,8 +80,17 @@ def _execute_sub_tool(
     category: str,
     tool_name: str,
     params: dict[str, Any],
+    dataframe_name: str | None = None,
 ) -> ExecuteResult:
-    """Execute a sub-tool and return the result."""
+    """Execute a sub-tool and return the result.
+    
+    Args:
+        state: DataFrameState for the session
+        category: Tool category (e.g., "plots", "ml")
+        tool_name: Name of the sub-tool to execute
+        params: Parameters for the sub-tool
+        dataframe_name: Optional dataframe override (injected into params if provided)
+    """
     try:
         # Get the tool metadata
         metadata = registry.get_tool_metadata(category, tool_name)
@@ -110,6 +119,10 @@ def _execute_sub_tool(
                 error=f"Tool '{tool_name}' is not a sub-tool (tier={metadata.tier})",
                 error_type="InvalidTier",
             )
+        
+        # Inject dataframe_name into params if provided and not already set
+        if dataframe_name and "dataframe_name" not in params:
+            params = {**params, "dataframe_name": dataframe_name}
         
         # Validate params against schema
         if metadata.input_schema:
@@ -181,7 +194,7 @@ def describe_cleaning(state: DataFrameState, params: DescribeCategoryInput) -> C
 )
 def execute_cleaning(state: DataFrameState, params: ExecuteCategoryInput) -> ExecuteResult:
     """Execute a cleaning sub-tool."""
-    return _execute_sub_tool(state, "cleaning", params.tool_name, params.params)
+    return _execute_sub_tool(state, "cleaning", params.tool_name, params.params, params.dataframe_name)
 
 
 # =============================================================================
@@ -209,7 +222,7 @@ def describe_transforms(state: DataFrameState, params: DescribeCategoryInput) ->
 )
 def execute_transforms(state: DataFrameState, params: ExecuteCategoryInput) -> ExecuteResult:
     """Execute a transform sub-tool."""
-    return _execute_sub_tool(state, "transforms", params.tool_name, params.params)
+    return _execute_sub_tool(state, "transforms", params.tool_name, params.params, params.dataframe_name)
 
 
 # =============================================================================
@@ -237,7 +250,7 @@ def describe_eda(state: DataFrameState, params: DescribeCategoryInput) -> Catego
 )
 def execute_eda(state: DataFrameState, params: ExecuteCategoryInput) -> ExecuteResult:
     """Execute an EDA sub-tool."""
-    return _execute_sub_tool(state, "eda", params.tool_name, params.params)
+    return _execute_sub_tool(state, "eda", params.tool_name, params.params, params.dataframe_name)
 
 
 # =============================================================================
@@ -265,7 +278,7 @@ def describe_plots(state: DataFrameState, params: DescribeCategoryInput) -> Cate
 )
 def execute_plots(state: DataFrameState, params: ExecuteCategoryInput) -> ExecuteResult:
     """Execute a visualization sub-tool."""
-    return _execute_sub_tool(state, "plots", params.tool_name, params.params)
+    return _execute_sub_tool(state, "plots", params.tool_name, params.params, params.dataframe_name)
 
 
 # =============================================================================
@@ -293,7 +306,7 @@ def describe_ml(state: DataFrameState, params: DescribeCategoryInput) -> Categor
 )
 def execute_ml(state: DataFrameState, params: ExecuteCategoryInput) -> ExecuteResult:
     """Execute an ML sub-tool."""
-    return _execute_sub_tool(state, "ml", params.tool_name, params.params)
+    return _execute_sub_tool(state, "ml", params.tool_name, params.params, params.dataframe_name)
 
 
 # =============================================================================
@@ -321,4 +334,4 @@ def describe_data(state: DataFrameState, params: DescribeCategoryInput) -> Categ
 )
 def execute_data(state: DataFrameState, params: ExecuteCategoryInput) -> ExecuteResult:
     """Execute a data manipulation sub-tool."""
-    return _execute_sub_tool(state, "data", params.tool_name, params.params)
+    return _execute_sub_tool(state, "data", params.tool_name, params.params, params.dataframe_name)

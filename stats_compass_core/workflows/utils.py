@@ -30,12 +30,16 @@ def generate_model_save_path(
     Returns:
         Path string, or None if saving is disabled
     """
+    import tempfile
+    import os
+    
     if custom_path:
         return custom_path
     
-    # Auto-generate path using model type and target column
+    # Auto-generate path in temp directory (avoids read-only filesystem issues)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    return f"{model_type}_{target_column}_{timestamp}.joblib"
+    filename = f"{model_type}_{target_column}_{timestamp}.joblib"
+    return os.path.join(tempfile.gettempdir(), filename)
 
 
 def run_step(
