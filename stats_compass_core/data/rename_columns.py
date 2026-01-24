@@ -2,7 +2,7 @@
 Tool for renaming columns in a DataFrame.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput, ToolComponent
 from stats_compass_core.registry import registry

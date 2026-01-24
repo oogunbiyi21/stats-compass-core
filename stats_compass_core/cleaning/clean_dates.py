@@ -82,14 +82,14 @@ def validate_date_column(
         "inferred_frequency": None,
         "gaps_count": 0,
     }
-    
+
     if date_column not in df.columns:
         result["is_valid"] = False
         result["errors"].append(f"Date column '{date_column}' not found in DataFrame")
         return result
-    
+
     date_series = df[date_column]
-    
+
     # Check nulls
     if check_nulls:
         null_count = int(date_series.isna().sum())
@@ -97,15 +97,15 @@ def validate_date_column(
         if null_count > 0:
             result["is_valid"] = False
             result["errors"].append(f"Found {null_count} null values in date column ({null_count/len(df)*100:.2f}%)")
-    
+
     # Get non-null dates for further checks
     valid_dates = date_series.dropna()
-    
+
     if len(valid_dates) == 0:
         result["is_valid"] = False
         result["errors"].append("No valid dates found in column")
         return result
-    
+
     # Convert to datetime if not already
     if not pd.api.types.is_datetime64_any_dtype(valid_dates):
         try:
@@ -114,28 +114,28 @@ def validate_date_column(
             result["is_valid"] = False
             result["errors"].append(f"Failed to parse dates: {str(e)}")
             return result
-    
+
     # Check duplicates
     if check_duplicates:
         duplicate_count = int(valid_dates.duplicated().sum())
         result["duplicate_count"] = duplicate_count
         if duplicate_count > 0:
             result["warnings"].append(f"Found {duplicate_count} duplicate dates")
-    
+
     # Check chronological order
     if check_chronological and len(valid_dates) > 1:
         is_sorted = valid_dates.is_monotonic_increasing
         result["is_chronological"] = is_sorted
         if not is_sorted:
             result["warnings"].append("Dates are not in chronological order")
-    
+
     # Infer frequency and check gaps
     if check_gaps and len(valid_dates) > 2:
         try:
             sorted_dates = valid_dates.sort_values()
             freq = pd.infer_freq(sorted_dates)
             result["inferred_frequency"] = freq
-            
+
             if freq:
                 # Create expected date range
                 expected_range = pd.date_range(
@@ -145,12 +145,12 @@ def validate_date_column(
                 )
                 gaps_count = len(expected_range) - len(sorted_dates)
                 result["gaps_count"] = gaps_count
-                
+
                 if gaps_count > 0:
                     result["warnings"].append(f"Found {gaps_count} gaps in date sequence (expected {freq} frequency)")
         except Exception:
             result["warnings"].append("Could not infer date frequency")
-    
+
     return result
 
 
@@ -183,18 +183,18 @@ def clean_dates(
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     rows_before = len(df)
-    
+
     date_column = params.date_column
-    
+
     if date_column not in df.columns:
         raise ValueError(f"Date column '{date_column}' not found in DataFrame")
-    
+
     cleaned_df = df.copy()
     changes_made = []
     rows_dropped = 0
     dates_filled = 0
     dates_created = 0
-    
+
     # Convert to datetime if not already
     if not pd.api.types.is_datetime64_any_dtype(cleaned_df[date_column]):
         try:
@@ -202,10 +202,10 @@ def clean_dates(
             changes_made.append("Converted to datetime format")
         except Exception as e:
             raise ValueError(f"Failed to parse date column: {str(e)}")
-    
+
     # Count initial nulls
     initial_nulls = int(cleaned_df[date_column].isna().sum())
-    
+
     # Handle missing dates
     if initial_nulls > 0:
         if params.fill_method == "drop":
@@ -227,17 +227,17 @@ def clean_dates(
             )
             dates_filled = initial_nulls - int(cleaned_df[date_column].isna().sum())
             changes_made.append(f"Interpolated {dates_filled} missing dates")
-    
+
     # Create missing dates in sequence if requested
     if params.create_missing_dates and params.infer_frequency:
         valid_dates = cleaned_df[date_column].dropna()
-        
+
         if len(valid_dates) > 2:
             try:
                 # Sort by date and infer frequency
                 cleaned_df = cleaned_df.sort_values(by=date_column)
                 freq = pd.infer_freq(valid_dates)
-                
+
                 if freq:
                     # Create complete date range
                     full_date_range = pd.date_range(
@@ -245,38 +245,38 @@ def clean_dates(
                         end=valid_dates.max(),
                         freq=freq
                     )
-                    
+
                     # Create DataFrame with full date range
                     full_df = pd.DataFrame({date_column: full_date_range})
-                    
+
                     # Merge with original data
                     cleaned_df = full_df.merge(
                         cleaned_df,
                         on=date_column,
                         how='left'
                     )
-                    
+
                     dates_created = len(cleaned_df) - rows_before
                     if dates_created > 0:
                         changes_made.append(f"Created {dates_created} missing dates to complete {freq} sequence")
             except Exception as e:
                 changes_made.append(f"Could not create missing dates: {str(e)}")
-    
+
     # Sort by date for chronological order
     cleaned_df = cleaned_df.sort_values(by=date_column).reset_index(drop=True)
-    
+
     # Determine result name
     result_name = params.save_as if params.save_as else source_name
-    
+
     # Save DataFrame to state
     state.set_dataframe(cleaned_df, name=result_name, operation="clean_dates")
-    
+
     # Build summary message
     if not changes_made:
         message = f"Date column '{date_column}' is already clean (no changes needed)"
     else:
         message = f"Cleaned date column '{date_column}': " + "; ".join(changes_made)
-    
+
     return DataFrameMutationResult(
         success=True,
         rows_before=rows_before,

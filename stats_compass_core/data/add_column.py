@@ -3,7 +3,6 @@ Tool for adding or transforming columns in a DataFrame.
 """
 
 import re
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -142,7 +141,7 @@ def add_column(
                     val = int(val)
             except ValueError:
                 pass  # Keep as string
-        
+
         result_df[params.column_name] = val
 
     # Determine result name

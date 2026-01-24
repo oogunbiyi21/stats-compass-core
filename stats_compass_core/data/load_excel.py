@@ -99,7 +99,7 @@ def load_excel(state: DataFrameState, params: LoadExcelInput) -> DataFrameLoadRe
             ) from e
 
         df = pd.read_excel(file_path, **read_kwargs)
-        
+
     except Exception as e:
         raise ValueError(f"Failed to parse Excel file: {str(e)}") from e
 

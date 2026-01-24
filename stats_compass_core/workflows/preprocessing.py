@@ -8,21 +8,23 @@ or machine learning using registry-based dispatch.
 from datetime import datetime
 from typing import Any
 
-import pandas as pd
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
-from .configs import PreprocessingConfig, ImputationConfig, OutlierConfig, DateCleaningConfig
-from .utils import run_step
+from .configs import (
+    ImputationConfig,
+    OutlierConfig,
+    PreprocessingConfig,
+)
 from .results import (
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
 )
-
+from .utils import run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -81,13 +83,13 @@ def _get_tool(step_name: str) -> tuple[Any, type]:
     """
     if step_name not in CLEANING_TOOLS:
         raise ValueError(f"Unknown step: {step_name}")
-    
+
     category, tool_name = CLEANING_TOOLS[step_name]
     metadata = registry.get_tool_metadata(category, tool_name)
-    
+
     if metadata is None:
         raise ValueError(f"Tool not found in registry: {category}.{tool_name}")
-    
+
     return metadata.function, metadata.input_schema
 
 
@@ -113,13 +115,13 @@ def _run_preprocessing_step(
     """
     try:
         tool_func, InputSchema = _get_tool(step_name)
-        
+
         # Filter params to only those the schema accepts
         schema_fields = set(InputSchema.model_fields.keys())
         filtered_params = {k: v for k, v in params_dict.items() if k in schema_fields}
-        
+
         params = InputSchema(**filtered_params)
-        
+
         return run_step(
             step_name=step_name,
             step_index=step_index,
@@ -168,25 +170,25 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
     The workflow creates a new DataFrame with the cleaned data.
     """
     started_at = datetime.now()
-    
+
     # Get config with defaults
     config = params.config or PreprocessingConfig()
     imputation_config = config.imputation or ImputationConfig()
     outlier_config = config.outliers or OutlierConfig()
     date_cleaning_config = config.date_cleaning
-    
+
     # Resolve DataFrame
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     # Determine output name
     output_name = params.save_as or f"{source_name}_preprocessed"
-    
+
     steps: list[WorkflowStepResult] = []
     step_index = 0
     current_df_name = source_name
     dataframes_created: list[str] = []
-    
+
     # =========================================================================
     # Step 1: Analyze Missing Data (informational - doesn't modify data)
     # =========================================================================
@@ -199,27 +201,27 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         summary_template="Analyzed missing data patterns",
     )
     steps.append(step_result)
-    
+
     # Extract missing columns info for imputation
     columns_with_missing = []
     if step_result.status == "success" and step_result.result:
         missing_summary = step_result.result.get("missing_summary", {})
         missing_by_col = missing_summary.get("missing_by_column", {})
         columns_with_missing = list(missing_by_col.keys())
-    
+
     # =========================================================================
     # Step 2: Clean Date Columns (if configured)
     # =========================================================================
     if date_cleaning_config and date_cleaning_config.date_column:
         # Find date columns - use specified column or detect datetime columns
         date_col = date_cleaning_config.date_column
-        
+
         current_df = state.get_dataframe(current_df_name)
-        
+
         if date_col in current_df.columns:
             step_index += 1
             intermediate_name = f"{current_df_name}_dates_cleaned"
-            
+
             params_dict = {
                 "dataframe_name": current_df_name,
                 "date_column": date_col,
@@ -228,7 +230,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
                 "create_missing_dates": date_cleaning_config.create_missing_dates,
                 "save_as": intermediate_name,
             }
-            
+
             step_result = _run_preprocessing_step(
                 state=state,
                 step_name="clean_dates",
@@ -237,7 +239,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
                 summary_template=f"Cleaned date column '{date_col}'",
             )
             steps.append(step_result)
-            
+
             if step_result.status == "success":
                 current_df_name = intermediate_name
                 dataframes_created.append(intermediate_name)
@@ -259,16 +261,16 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
             summary="No date column specified",
             skip_reason="date_cleaning.date_column not set in config",
         ))
-    
+
     # =========================================================================
     # Step 3: Apply Imputation (if there are missing values)
     # =========================================================================
     if columns_with_missing:
         step_index += 1
         intermediate_name = f"{source_name}_imputed"
-        
+
         strategy = imputation_config.strategy
-        
+
         if strategy == "drop":
             # Use drop_na tool
             step_result = _run_preprocessing_step(
@@ -285,17 +287,17 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         else:
             # Map our config strategy to tool strategy
             tool_strategy = "most_frequent" if strategy == "mode" else strategy
-            
+
             params_dict = {
                 "dataframe_name": current_df_name,
                 "strategy": tool_strategy,
                 "columns": imputation_config.columns,
                 "save_as": intermediate_name,
             }
-            
+
             if strategy == "constant" and imputation_config.constant_value is not None:
                 params_dict["fill_value"] = str(imputation_config.constant_value)
-            
+
             step_result = _run_preprocessing_step(
                 state=state,
                 step_name="apply_imputation",
@@ -303,9 +305,9 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
                 params_dict=params_dict,
                 summary_template="Applied imputation for missing values",
             )
-        
+
         steps.append(step_result)
-        
+
         if step_result.status == "success":
             current_df_name = intermediate_name
             dataframes_created.append(intermediate_name)
@@ -318,7 +320,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
             summary="No missing values found",
             skip_reason="No columns had missing values",
         ))
-    
+
     # =========================================================================
     # Step 4: Handle Outliers (if enabled)
     # =========================================================================
@@ -326,19 +328,19 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         step_index += 1
         import time
         start_time = time.time()
-        
+
         # Get numeric columns from current state
         current_df = state.get_dataframe(current_df_name)
         numeric_cols = current_df.select_dtypes(include=["number"]).columns.tolist()
-        
+
         if outlier_config.columns:
             numeric_cols = [c for c in outlier_config.columns if c in numeric_cols]
-        
+
         if numeric_cols:
             # Process all columns in memory, save once at the end
             df = current_df.copy()
             cols_processed = []
-            
+
             for col in numeric_cols:
                 try:
                     if outlier_config.method == "iqr":
@@ -352,24 +354,24 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
                         std = df[col].std()
                         lower = mean - (outlier_config.threshold * std)
                         upper = mean + (outlier_config.threshold * std)
-                    
+
                     if outlier_config.action == "cap":
                         df[col] = df[col].clip(lower=lower, upper=upper)
                     elif outlier_config.action == "remove":
                         mask = (df[col] >= lower) & (df[col] <= upper)
                         df = df[mask]
                     # "flag" action would add a new column, skip for now
-                    
+
                     cols_processed.append(col)
                 except Exception:
                     pass  # Skip columns that fail
-            
+
             # Save once
             outliers_df_name = f"{source_name}_outliers"
             state.set_dataframe(df, name=outliers_df_name, operation="handle_outliers", set_active=True)
             current_df_name = outliers_df_name
             dataframes_created.append(outliers_df_name)
-            
+
             duration_ms = int((time.time() - start_time) * 1000)
             steps.append(WorkflowStepResult(
                 step_name="handle_outliers",
@@ -396,13 +398,13 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
             summary="Outlier handling disabled",
             skip_reason="method='none' in config",
         ))
-    
+
     # =========================================================================
     # Step 5: Remove Duplicates (if enabled)
     # =========================================================================
     if config.dedupe:
         step_index += 1
-        
+
         step_result = _run_preprocessing_step(
             state=state,
             step_name="dedupe",
@@ -414,7 +416,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
             summary_template="Removed duplicate rows",
         )
         steps.append(step_result)
-        
+
         if step_result.status == "success":
             current_df_name = output_name
             if output_name not in dataframes_created:
@@ -428,7 +430,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
             summary="Deduplication disabled",
             skip_reason="dedupe=False in config",
         ))
-    
+
     # =========================================================================
     # Final Cleanup: Ensure output DataFrame exists
     # =========================================================================
@@ -438,16 +440,16 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         state.set_dataframe(current_df.copy(), name=output_name, operation="preprocessing_copy")
         dataframes_created.append(output_name)
         current_df_name = output_name
-    
+
     # =========================================================================
     # Build Final Result
     # =========================================================================
     completed_at = datetime.now()
     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-    
+
     failed_steps = [s for s in steps if s.status == "failed"]
     success_steps = [s for s in steps if s.status == "success"]
-    
+
     if not failed_steps:
         status = "success"
         error_summary = None
@@ -461,7 +463,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         status = "failed"
         error_summary = "All steps failed"
         suggestion = "Check that the DataFrame exists and has valid data."
-    
+
     # Build artifacts
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
@@ -469,7 +471,7 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         charts=[],
         final_dataframe=current_df_name,
     )
-    
+
     return WorkflowResult(
         workflow_name="run_preprocessing",
         status=status,

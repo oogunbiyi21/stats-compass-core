@@ -129,7 +129,7 @@ def feature_importance(state: DataFrameState, params: FeatureImportanceInput) ->
             "values": importance_df["importance"].tolist(),
             "orientation": params.orientation
         }
-        
+
         return ChartResult(
             image_base64=None,
             image_format="json",

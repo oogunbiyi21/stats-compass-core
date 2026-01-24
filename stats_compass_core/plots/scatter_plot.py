@@ -98,10 +98,10 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
         plot_df = df[[params.x, params.y]].copy()
         if params.hue:
             plot_df[params.hue] = df[params.hue]
-            
+
         if len(plot_df) > MAX_POINTS:
             plot_df = plot_df.sample(MAX_POINTS)
-            
+
         chart_data = {
             "type": "scatter",
             "title": chart_title,
@@ -110,7 +110,7 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
             "data": plot_df.to_dict(orient="records"),
             "hue": params.hue
         }
-        
+
         return ChartResult(
             image_base64=None,
             image_format="json",

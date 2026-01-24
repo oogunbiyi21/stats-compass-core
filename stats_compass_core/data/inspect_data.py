@@ -50,7 +50,7 @@ def inspect_data(state: DataFrameState, params: InspectDataInput) -> dict[str, A
         Dictionary containing the result of the evaluation
     """
     df = state.get_dataframe(params.dataframe_name)
-    
+
     # Security check for dangerous patterns
     dangerous_patterns = [
         r"\bimport\b",
@@ -83,7 +83,7 @@ def inspect_data(state: DataFrameState, params: InspectDataInput) -> dict[str, A
     try:
         # Evaluate expression
         result = eval(params.expression, namespace)
-        
+
         # Format result for output
         if isinstance(result, (pd.DataFrame, pd.Series)):
             # For large results, truncate
@@ -91,7 +91,7 @@ def inspect_data(state: DataFrameState, params: InspectDataInput) -> dict[str, A
                 result_str = result.head(20).to_string() + f"\n\n... ({len(result) - 20} more rows)"
             else:
                 result_str = result.to_string()
-            
+
             return {
                 "result_type": type(result).__name__,
                 "result_text": result_str,

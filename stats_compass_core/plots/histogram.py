@@ -94,12 +94,12 @@ def histogram(state: DataFrameState, params: HistogramInput) -> ChartResult:
     # Handle JSON format
     if params.format == "json":
         counts, bin_edges = np.histogram(data, bins=params.bins)
-        
+
         # Create bin labels (e.g., "10-20")
         bin_labels = []
         for i in range(len(bin_edges) - 1):
             bin_labels.append(f"{bin_edges[i]:.2f}-{bin_edges[i+1]:.2f}")
-            
+
         chart_data = {
             "type": "histogram",
             "title": title,
@@ -109,7 +109,7 @@ def histogram(state: DataFrameState, params: HistogramInput) -> ChartResult:
             "counts": counts.tolist(),
             "bin_edges": bin_edges.tolist(),
         }
-        
+
         return ChartResult(
             image_base64=None,
             image_format="json",

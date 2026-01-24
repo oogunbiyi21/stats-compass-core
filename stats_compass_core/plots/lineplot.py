@@ -130,7 +130,7 @@ def lineplot(state: DataFrameState, params: LinePlotInput) -> ChartResult:
             "x": x_list,
             "y": y_data_json.tolist(),
         }
-        
+
         return ChartResult(
             image_base64=None,
             image_format="json",

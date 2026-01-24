@@ -8,8 +8,6 @@ These tools provide:
 
 from typing import Any
 
-from pydantic import Field
-
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.parent.schemas import (
     CategoryDescription,
@@ -19,7 +17,6 @@ from stats_compass_core.parent.schemas import (
 )
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
-
 
 # =============================================================================
 # Category Descriptions (for describe_* tools)
@@ -42,7 +39,7 @@ CATEGORY_DESCRIPTIONS = {
 def _get_sub_tools_for_category(category: str) -> list[SubToolSchema]:
     """Get all sub-tools for a category with their schemas."""
     tools = registry.list_tools_by_tier(tiers=["sub"], category=category)
-    
+
     sub_tool_schemas = []
     for tool in tools:
         # Get the JSON schema for the input
@@ -53,14 +50,14 @@ def _get_sub_tools_for_category(category: str) -> list[SubToolSchema]:
         else:
             properties = {}
             required = []
-        
+
         sub_tool_schemas.append(SubToolSchema(
             name=tool.name,
             description=tool.description,
             parameters=properties,
             required_params=required,
         ))
-    
+
     return sub_tool_schemas
 
 
@@ -109,7 +106,7 @@ def _execute_sub_tool(
                 ),
                 error_type="ToolNotFound",
             )
-        
+
         # Validate that this is a sub-tool
         if metadata.tier != "sub":
             return ExecuteResult(
@@ -119,20 +116,20 @@ def _execute_sub_tool(
                 error=f"Tool '{tool_name}' is not a sub-tool (tier={metadata.tier})",
                 error_type="InvalidTier",
             )
-        
+
         # Inject dataframe_name into params if provided and not already set
         if dataframe_name and "dataframe_name" not in params:
             params = {**params, "dataframe_name": dataframe_name}
-        
+
         # Validate params against schema
         if metadata.input_schema:
             validated_params = metadata.input_schema(**params)
         else:
             validated_params = params
-        
+
         # Execute the tool
         result = metadata.function(state, validated_params)
-        
+
         # Serialize the result
         if hasattr(result, "model_dump"):
             result_data = result.model_dump()
@@ -142,14 +139,14 @@ def _execute_sub_tool(
             result_data = result
         else:
             result_data = {"result": str(result)}
-        
+
         return ExecuteResult(
             success=True,
             tool_name=tool_name,
             category=category,
             result=result_data,
         )
-        
+
     except Exception as e:
         return ExecuteResult(
             success=False,

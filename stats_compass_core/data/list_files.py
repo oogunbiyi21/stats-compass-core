@@ -2,7 +2,6 @@
 Tool for listing files in a local directory.
 """
 
-import os
 from pathlib import Path
 
 from pydantic import Field
@@ -42,10 +41,10 @@ def list_files(state: DataFrameState, params: ListFilesInput) -> FileListResult:
     try:
         # Resolve directory path (handle ~ for home directory)
         directory = Path(params.directory).expanduser().resolve()
-        
+
         if not directory.exists():
             raise FileNotFoundError(f"Directory not found: {directory}")
-        
+
         if not directory.is_dir():
             raise NotADirectoryError(f"Path is not a directory: {directory}")
 
@@ -54,16 +53,16 @@ def list_files(state: DataFrameState, params: ListFilesInput) -> FileListResult:
         for item in directory.iterdir():
             if item.is_file() and not item.name.startswith("."):
                 files.append(item.name)
-        
+
         # Sort files
         files.sort()
-        
+
         return FileListResult(
             directory=str(directory),
             files=files,
             count=len(files),
             message=f"Found {len(files)} files in {directory}",
         )
-        
+
     except Exception as e:
         raise RuntimeError(f"Failed to list files in '{params.directory}': {str(e)}")

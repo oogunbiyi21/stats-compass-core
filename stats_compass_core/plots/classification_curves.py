@@ -110,17 +110,17 @@ def _detect_pos_label(unique_labels: np.ndarray, pos_label: str | int | None = N
     """
     if pos_label is not None:
         return pos_label
-    
+
     # Convert to list for easier checking
     labels = [str(l).lower() for l in unique_labels]
-    
+
     # Common positive indicators
     positive_indicators = ['yes', 'true', '1', 'positive', 'pos', 'y', 't']
-    
+
     for i, label in enumerate(labels):
         if label in positive_indicators:
             return unique_labels[i]
-    
+
     # If no common indicator found, use the larger/later value
     # This follows scikit-learn's convention (e.g., 1 over 0)
     return max(unique_labels)

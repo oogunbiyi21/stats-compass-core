@@ -9,7 +9,6 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-
 # Tool tier determines MCP exposure level
 ToolTier = Literal["util", "parent", "workflow", "sub"]
 
@@ -155,7 +154,7 @@ class ToolRegistry:
         return list(self._tools.values())
 
     def list_tools_by_tier(
-        self, 
+        self,
         tiers: list[ToolTier] | None = None,
         category: str | None = None
     ) -> list[ToolMetadata]:
@@ -234,13 +233,13 @@ class ToolRegistry:
                 except Exception as e:
                     # Log warning but continue with other modules
                     print(f"Warning: Failed to import {module_name}: {e}")
-        
+
         # Also import parent tools module to trigger registration
         try:
             importlib.import_module("stats_compass_core.parent.tools")
         except Exception as e:
             print(f"Warning: Failed to import parent tools: {e}")
-        
+
         # Also import workflow tools module to trigger registration
         try:
             importlib.import_module("stats_compass_core.workflows")

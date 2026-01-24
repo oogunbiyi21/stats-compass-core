@@ -14,15 +14,14 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
-from .configs import ClassificationConfig, FeatureEngineeringConfig
-from .utils import run_step
+from .configs import ClassificationConfig
+from .feature_engineering import run_feature_engineering_steps
 from .results import (
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
 )
-from .feature_engineering import run_feature_engineering_steps
-
+from .utils import run_step
 
 # =============================================================================
 # Model Registry Mappings
@@ -116,7 +115,7 @@ def _build_training_params(
     are passed through from config.hyperparameters.
     """
     from .utils import generate_model_save_path
-    
+
     # Determine save path
     save_path = None
     if config.save_model:
@@ -125,7 +124,7 @@ def _build_training_params(
             target_column=target_column,
             custom_path=config.model_save_path,
         )
-    
+
     # Common parameters all training tools share
     common_params = {
         "dataframe_name": source_name,
@@ -135,15 +134,15 @@ def _build_training_params(
         "random_state": config.random_state,
         "save_path": save_path,
     }
-    
+
     # Merge with model-specific hyperparameters
     hyperparams = config.hyperparameters or {}
     all_params = {**common_params, **hyperparams}
-    
+
     # Filter to only params the schema accepts
     schema_fields = set(input_schema.model_fields.keys())
     valid_params = {k: v for k, v in all_params.items() if k in schema_fields}
-    
+
     return input_schema(**valid_params)
 
 
@@ -175,27 +174,27 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     The workflow creates a predictions DataFrame and stores the trained model.
     """
     started_at = datetime.now()
-    
+
     # Get config with defaults
     config = params.config or ClassificationConfig()
-    
+
     # Resolve DataFrame
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     current_df_name = source_name  # Track which DataFrame to use (may change after FE)
-    
+
     steps: list[WorkflowStepResult] = []
     step_index = 0
     charts_generated = 0
     dataframes_created: list[str] = []
     models_created: list[str] = []
-    
+
     # Track training result for downstream steps
     model_id: str | None = None
     predictions_df_name: str | None = None
     prediction_column: str | None = None
     probability_columns: list[str] | None = None
     class_labels: list[Any] | None = None
-    
+
     # =========================================================================
     # Step 0a: Drop Columns (inline, if specified)
     # =========================================================================
@@ -205,7 +204,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
             df = state.get_dataframe(current_df_name)
             df = df.drop(columns=cols_to_drop, errors='ignore')
             state.set_dataframe(df, name=current_df_name, operation="drop_columns", set_active=True)
-    
+
     # =========================================================================
     # Step 0b: Feature Engineering (optional)
     # =========================================================================
@@ -219,12 +218,12 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         )
         steps.extend(fe_steps)
         dataframes_created.extend(fe_dfs)
-    
+
     # =========================================================================
     # Step 1: Train Model (registry-based dispatch)
     # =========================================================================
     step_index += 1
-    
+
     # Look up the training tool
     tool_name = CLASSIFIER_TOOLS.get(config.model_type)
     if tool_name is None:
@@ -247,7 +246,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 feature_columns=params.feature_columns,
                 config=config,
             )
-            
+
             model_label = MODEL_LABELS.get(config.model_type, config.model_type)
             step_result = run_step(
                 step_name="train_model",
@@ -258,7 +257,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 summary_template=f"Trained {model_label} model",
             )
             steps.append(step_result)
-            
+
             # Extract training info for downstream steps
             if step_result.status == "success" and step_result.result:
                 result_data = step_result.result
@@ -267,12 +266,12 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 prediction_column = result_data.get("prediction_column")
                 probability_columns = result_data.get("probability_columns")
                 class_labels = result_data.get("class_labels")
-                
+
                 if model_id:
                     models_created.append(model_id)
                 if predictions_df_name:
                     dataframes_created.append(predictions_df_name)
-                    
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="train_model",
@@ -282,13 +281,13 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 summary=f"Failed to train model: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 2: Evaluate Model
     # =========================================================================
     if predictions_df_name and prediction_column:
         step_index += 1
-        
+
         try:
             eval_func, EvalInputSchema = _get_tool("ml", "evaluate_classification_model")
             eval_params = EvalInputSchema(
@@ -296,7 +295,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 target_column=params.target_column,
                 prediction_column=prediction_column,
             )
-            
+
             step_result = run_step(
                 step_name="evaluate_model",
                 step_index=step_index,
@@ -315,22 +314,22 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 summary=f"Failed to evaluate model: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 3+: Generate Plots (registry-based dispatch)
     # =========================================================================
     if config.generate_plots and predictions_df_name and prediction_column:
-        
+
         for plot_name in config.plots:
             if plot_name not in PLOT_TOOLS:
                 continue
-                
+
             tool_name, chart_type = PLOT_TOOLS[plot_name]
             step_index += 1
-            
+
             try:
                 plot_func, PlotInputSchema = _get_tool("plots", tool_name)
-                
+
                 # Build plot-specific parameters
                 if plot_name == "confusion_matrix":
                     plot_params = PlotInputSchema(
@@ -338,10 +337,10 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                         true_column=params.target_column,
                         pred_column=prediction_column,
                     )
-                    
+
                 elif plot_name in ("roc", "precision_recall"):
                     # These require probability columns - binary classification only
-                    if not (probability_columns and len(probability_columns) == 2 
+                    if not (probability_columns and len(probability_columns) == 2
                             and class_labels and len(class_labels) == 2):
                         steps.append(WorkflowStepResult(
                             step_name=chart_type,
@@ -351,7 +350,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                             summary=f"{chart_type} skipped: only supported for binary classification",
                         ))
                         continue
-                    
+
                     # Use probability of positive class (second class)
                     pos_prob_col = probability_columns[1]
                     plot_params = PlotInputSchema(
@@ -360,7 +359,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                         prob_column=pos_prob_col,
                         model_id=model_id or "model",
                     )
-                    
+
                 elif plot_name == "feature_importance":
                     if not model_id:
                         steps.append(WorkflowStepResult(
@@ -372,10 +371,10 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                         ))
                         continue
                     plot_params = PlotInputSchema(model_id=model_id)
-                    
+
                 else:
                     continue
-                
+
                 step_result = run_step(
                     step_name=chart_type,
                     step_index=step_index,
@@ -387,7 +386,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 steps.append(step_result)
                 if step_result.status == "success":
                     charts_generated += 1
-                    
+
             except Exception as e:
                 steps.append(WorkflowStepResult(
                     step_name=chart_type,
@@ -397,24 +396,24 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                     summary=f"Failed to generate {chart_type}: {str(e)}",
                     error=str(e),
                 ))
-    
+
     # =========================================================================
     # Build Final Result
     # =========================================================================
     completed_at = datetime.now()
     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-    
+
     # Determine overall status
     failed_steps = [s for s in steps if s.status == "failed"]
     success_steps = [s for s in steps if s.status == "success"]
-    
+
     if not success_steps:
         overall_status = "failed"
     elif failed_steps:
         overall_status = "partial_failure"
     else:
         overall_status = "success"
-    
+
     # Build artifacts
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
@@ -422,14 +421,14 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         charts_generated=charts_generated,
         final_dataframe=predictions_df_name,
     )
-    
+
     # Build helpful notes
     notes = []
     if predictions_df_name and prediction_column:
         notes.append(f"Predictions are in '{predictions_df_name}' (includes '{prediction_column}' column)")
     if models_created:
         notes.append(f"Trained model ID: '{models_created[0]}' - use for feature_importance or predictions")
-    
+
     # Build summary
     summary_parts = [f"Classification workflow completed with status: {overall_status}"]
     if model_id:
@@ -439,7 +438,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     summary_parts.append(f"Steps: {len(success_steps)} succeeded, {len(failed_steps)} failed")
     if charts_generated:
         summary_parts.append(f"Charts: {charts_generated} generated")
-    
+
     return WorkflowResult(
         workflow_name="run_classification",
         status=overall_status,

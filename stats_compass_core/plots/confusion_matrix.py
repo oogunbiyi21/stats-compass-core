@@ -12,7 +12,6 @@ from io import BytesIO
 from typing import Any, Literal
 
 import numpy as np
-import pandas as pd
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
@@ -69,7 +68,7 @@ def _calculate_metrics_from_cm(
 ) -> dict[str, Any]:
     """Calculate per-class and overall metrics from confusion matrix."""
     n_classes = len(labels)
-    
+
     # Calculate per-class metrics
     per_class_metrics = {}
     for i, label in enumerate(labels):
@@ -77,28 +76,28 @@ def _calculate_metrics_from_cm(
         fp = cm[:, i].sum() - tp
         fn = cm[i, :].sum() - tp
         tn = cm.sum() - tp - fp - fn
-        
+
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
         f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
-        
+
         per_class_metrics[str(label)] = {
             "precision": float(precision),
             "recall": float(recall),
             "f1": float(f1),
             "support": int(cm[i, :].sum()),
         }
-    
+
     # Calculate overall metrics
     total = cm.sum()
     correct = np.diag(cm).sum()
     accuracy = correct / total if total > 0 else 0.0
-    
+
     # Macro averages
     macro_precision = np.mean([m["precision"] for m in per_class_metrics.values()])
     macro_recall = np.mean([m["recall"] for m in per_class_metrics.values()])
     macro_f1 = np.mean([m["f1"] for m in per_class_metrics.values()])
-    
+
     # Weighted averages
     supports = np.array([m["support"] for m in per_class_metrics.values()])
     total_support = supports.sum()
@@ -114,7 +113,7 @@ def _calculate_metrics_from_cm(
         ) / total_support
     else:
         weighted_precision = weighted_recall = weighted_f1 = 0.0
-    
+
     return {
         "per_class": per_class_metrics,
         "overall": {
@@ -135,7 +134,7 @@ def _interpret_accuracy(accuracy: float, n_classes: int) -> str:
     """Interpret accuracy based on number of classes."""
     # Random baseline for multi-class
     baseline = 1.0 / n_classes
-    
+
     if accuracy >= 0.95:
         return "Excellent"
     elif accuracy >= 0.90:

@@ -19,6 +19,26 @@ Note: Requires scikit-learn. Install with: pip install stats-compass-core[ml]
 """
 
 # Re-export all tools for convenience
+from stats_compass_core.ml.supervised.evaluate_classification_model import (
+    EvaluateClassificationInput,
+    evaluate_classification_model,
+)
+from stats_compass_core.ml.supervised.evaluate_regression_model import (
+    EvaluateRegressionInput,
+    evaluate_regression_model,
+)
+from stats_compass_core.ml.supervised.train_gradient_boosting_classifier import (
+    TrainGradientBoostingClassifierInput,
+    train_gradient_boosting_classifier,
+)
+from stats_compass_core.ml.supervised.train_gradient_boosting_regressor import (
+    TrainGradientBoostingRegressorInput,
+    train_gradient_boosting_regressor,
+)
+from stats_compass_core.ml.supervised.train_linear_regression import (
+    TrainLinearRegressionInput,
+    train_linear_regression,
+)
 from stats_compass_core.ml.supervised.train_logistic_regression import (
     TrainLogisticRegressionInput,
     train_logistic_regression,
@@ -27,29 +47,9 @@ from stats_compass_core.ml.supervised.train_random_forest_classifier import (
     TrainRandomForestClassifierInput,
     train_random_forest_classifier,
 )
-from stats_compass_core.ml.supervised.train_gradient_boosting_classifier import (
-    TrainGradientBoostingClassifierInput,
-    train_gradient_boosting_classifier,
-)
-from stats_compass_core.ml.supervised.train_linear_regression import (
-    TrainLinearRegressionInput,
-    train_linear_regression,
-)
 from stats_compass_core.ml.supervised.train_random_forest_regressor import (
     TrainRandomForestRegressorInput,
     train_random_forest_regressor,
-)
-from stats_compass_core.ml.supervised.train_gradient_boosting_regressor import (
-    TrainGradientBoostingRegressorInput,
-    train_gradient_boosting_regressor,
-)
-from stats_compass_core.ml.supervised.evaluate_classification_model import (
-    EvaluateClassificationInput,
-    evaluate_classification_model,
-)
-from stats_compass_core.ml.supervised.evaluate_regression_model import (
-    EvaluateRegressionInput,
-    evaluate_regression_model,
 )
 
 __all__ = [

@@ -79,7 +79,7 @@ def train_gradient_boosting_classifier(
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=params.test_size, random_state=params.random_state
         )
-        
+
         # Capture indices for predictions DataFrame
         train_indices = X_train.index
         test_indices = X_test.index

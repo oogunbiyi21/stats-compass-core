@@ -9,7 +9,6 @@ and visualizations using registry-based dispatch.
 from datetime import datetime
 from typing import Any
 
-import pandas as pd
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
@@ -17,13 +16,12 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import EDAConfig
-from .utils import run_step
 from .results import (
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
 )
-
+from .utils import run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -101,12 +99,12 @@ def _run_eda_step(
             summary=f"Unknown EDA step: {step_name}",
             error=f"Step '{step_name}' not found in EDA_TOOLS mapping",
         )
-    
+
     category, tool_name = EDA_TOOLS[step_name]
-    
+
     try:
         tool_func, InputSchema = _get_tool(category, tool_name)
-        
+
         # Build params - all EDA tools take dataframe_name
         params_dict = {"dataframe_name": source_name}
         if extra_params:
@@ -115,9 +113,9 @@ def _run_eda_step(
             for k, v in extra_params.items():
                 if k in schema_fields:
                     params_dict[k] = v
-        
+
         params = InputSchema(**params_dict)
-        
+
         return run_step(
             step_name=step_name,
             step_index=step_index,
@@ -167,18 +165,18 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
     All steps are independent and will continue even if some fail.
     """
     started_at = datetime.now()
-    
+
     # Get config with defaults
     config = params.config or EDAConfig()
-    
+
     # Resolve DataFrame
     df = state.get_dataframe(params.dataframe_name)
     source_name = params.dataframe_name or state.get_active_dataframe_name()
-    
+
     steps: list[WorkflowStepResult] = []
     charts_generated = 0
     step_index = 0
-    
+
     # =========================================================================
     # Step 1: Descriptive Statistics
     # =========================================================================
@@ -186,7 +184,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
         step_index += 1
         step_result = _run_eda_step(state, "describe", step_index, source_name)
         steps.append(step_result)
-    
+
     # =========================================================================
     # Step 2: Correlations
     # =========================================================================
@@ -197,7 +195,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
             extra_params={"method": config.correlation_method}
         )
         steps.append(step_result)
-    
+
     # =========================================================================
     # Step 3: Missing Data Analysis
     # =========================================================================
@@ -205,7 +203,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
         step_index += 1
         step_result = _run_eda_step(state, "analyze_missing_data", step_index, source_name)
         steps.append(step_result)
-    
+
     # =========================================================================
     # Step 4: Data Quality Report
     # =========================================================================
@@ -213,7 +211,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
         step_index += 1
         step_result = _run_eda_step(state, "data_quality_report", step_index, source_name)
         steps.append(step_result)
-    
+
     # =========================================================================
     # Step 5: Histograms for Numeric Columns
     # =========================================================================
@@ -221,9 +219,9 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
         try:
             category, tool_name = PLOT_TOOLS["histogram"]
             plot_func, PlotInputSchema = _get_tool(category, tool_name)
-            
+
             numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-            
+
             for col in numeric_cols[:config.max_histograms]:
                 step_index += 1
                 try:
@@ -261,7 +259,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
                 summary="Failed to load histogram tool",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 6: Bar Charts for Categorical Columns
     # =========================================================================
@@ -269,11 +267,11 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
         try:
             category, tool_name = PLOT_TOOLS["bar_chart"]
             plot_func, PlotInputSchema = _get_tool(category, tool_name)
-            
+
             categorical_cols = df.select_dtypes(
                 include=["object", "category", "bool"]
             ).columns.tolist()
-            
+
             for col in categorical_cols[:config.max_bar_charts]:
                 step_index += 1
                 try:
@@ -311,31 +309,31 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
                 summary="Failed to load bar chart tool",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Build Final Result
     # =========================================================================
     completed_at = datetime.now()
     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-    
+
     # Determine overall status
     failed_steps = [s for s in steps if s.status == "failed"]
     success_steps = [s for s in steps if s.status == "success"]
-    
+
     if not success_steps:
         overall_status = "failed"
     elif failed_steps:
         overall_status = "partial_failure"
     else:
         overall_status = "success"
-    
+
     # Build artifacts
     artifacts = WorkflowArtifacts(
         dataframes_created=[],
         models_created=[],
         charts_generated=charts_generated,
     )
-    
+
     return WorkflowResult(
         workflow_name="run_eda_report",
         status=overall_status,

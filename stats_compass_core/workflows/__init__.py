@@ -5,6 +5,7 @@ Workflows are high-level pipelines that orchestrate multiple sub-tools
 to accomplish common data science tasks.
 """
 
+from stats_compass_core.workflows.classification import run_classification
 from stats_compass_core.workflows.configs import (
     ClassificationConfig,
     CompareModelsConfig,
@@ -16,6 +17,11 @@ from stats_compass_core.workflows.configs import (
     RegressionConfig,
     TimeSeriesConfig,
 )
+
+# Import workflow tools to ensure they get registered
+from stats_compass_core.workflows.eda_report import run_eda_report
+from stats_compass_core.workflows.preprocessing import run_preprocessing
+from stats_compass_core.workflows.regression import run_regression
 from stats_compass_core.workflows.results import (
     StepStatus,
     WorkflowArtifacts,
@@ -23,12 +29,6 @@ from stats_compass_core.workflows.results import (
     WorkflowStatus,
     WorkflowStepResult,
 )
-
-# Import workflow tools to ensure they get registered
-from stats_compass_core.workflows.eda_report import run_eda_report
-from stats_compass_core.workflows.preprocessing import run_preprocessing
-from stats_compass_core.workflows.classification import run_classification
-from stats_compass_core.workflows.regression import run_regression
 from stats_compass_core.workflows.timeseries import run_timeseries_forecast
 
 __all__ = [

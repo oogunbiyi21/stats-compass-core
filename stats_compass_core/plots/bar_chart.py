@@ -101,7 +101,7 @@ def bar_chart(state: DataFrameState, params: BarChartInput) -> ChartResult:
             "values": counts.values.tolist(),
             "orientation": params.orientation
         }
-        
+
         return ChartResult(
             image_base64=None,
             image_format="json",

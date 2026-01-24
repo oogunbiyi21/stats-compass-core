@@ -67,7 +67,7 @@ def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult
     """
     # Resolve path (handle ~ for home directory)
     file_path = os.path.expanduser(params.file_path)
-    
+
     # Validate file exists
     if not os.path.isfile(file_path):
         raise FileNotFoundError(f"File not found: {params.file_path}")

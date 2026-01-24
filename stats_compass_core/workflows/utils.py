@@ -30,12 +30,12 @@ def generate_model_save_path(
     Returns:
         Path string, or None if saving is disabled
     """
-    import tempfile
     import os
-    
+    import tempfile
+
     if custom_path:
         return custom_path
-    
+
     # Auto-generate path in temp directory (avoids read-only filesystem issues)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{model_type}_{target_column}_{timestamp}.joblib"
@@ -68,7 +68,7 @@ def run_step(
     try:
         result = func(state, params)
         duration_ms = int((time.time() - start) * 1000)
-        
+
         # Check if result indicates failure (OperationError or success=False)
         is_error = False
         error_message = None
@@ -78,7 +78,7 @@ def run_step(
         elif hasattr(result, "error_type") and result.error_type:
             is_error = True
             error_message = getattr(result, "error_message", result.error_type)
-        
+
         if is_error:
             result_data = result.model_dump() if hasattr(result, "model_dump") else {"error": error_message}
             return WorkflowStepResult(
@@ -90,7 +90,7 @@ def run_step(
                 error=error_message,
                 result=result_data,
             )
-        
+
         # Serialize result
         if hasattr(result, "model_dump"):
             result_data = result.model_dump()
@@ -98,14 +98,14 @@ def run_step(
             result_data = result.copy()
         else:
             result_data = {"result": str(result)}
-        
+
         # Extract dataframe_name if present
         df_produced = None
         if hasattr(result, "dataframe_name"):
             df_produced = result.dataframe_name
         elif hasattr(result, "predictions_dataframe"):
             df_produced = result.predictions_dataframe
-        
+
         # Check for image in result and remove from result_data to avoid duplication
         image_base64 = None
         if hasattr(result, "image_base64") and result.image_base64:
@@ -114,7 +114,7 @@ def run_step(
         elif hasattr(result, "base64_image") and result.base64_image:
             image_base64 = result.base64_image
             result_data.pop("base64_image", None)
-        
+
         return WorkflowStepResult(
             step_name=step_name,
             step_index=step_index,

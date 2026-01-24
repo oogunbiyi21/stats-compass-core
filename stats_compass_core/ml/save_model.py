@@ -3,7 +3,7 @@ from pydantic import Field
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.utils import safe_save, UnsafePathError
+from stats_compass_core.utils import safe_save
 
 
 class SaveModelInput(StrictToolInput):

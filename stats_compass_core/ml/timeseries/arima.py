@@ -359,7 +359,7 @@ def _create_forecast_plot(
     # So we show 3x the forecast period of historical data
     n_forecast = len(forecast)
     history_to_show = n_forecast * 3
-    
+
     # Take the last N periods of historical data
     if len(historical) > history_to_show:
         historical_display = historical.iloc[-history_to_show:]

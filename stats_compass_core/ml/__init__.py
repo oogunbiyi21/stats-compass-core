@@ -36,13 +36,13 @@ Install extras: pip install stats-compass-core[ml,timeseries]
 # Re-export timeseries tools for backward compatibility
 try:
     from stats_compass_core.ml.timeseries import (
+        StationarityResult,
+        StationarityTestResult,
         check_stationarity,
         find_optimal_arima,
         fit_arima,
         forecast_arima,
         infer_frequency,
-        StationarityResult,
-        StationarityTestResult,
     )
 
     __all__ = [

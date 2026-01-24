@@ -10,7 +10,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # Status types
 StepStatus = Literal["success", "failed", "skipped"]
 WorkflowStatus = Literal["success", "partial_failure", "failed"]

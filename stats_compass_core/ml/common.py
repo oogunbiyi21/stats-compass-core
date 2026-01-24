@@ -97,59 +97,59 @@ def create_predictions_dataframe(
     """
     # Get original DataFrame to preserve all columns
     original_df = state.get_dataframe(source_name)
-    
+
     # Create predictions DataFrame starting with original data
     predictions_df = original_df.copy()
-    
+
     # Generate prediction column name
     pred_col_name = f"pred_{target_column}"
-    
+
     # Initialize prediction column with NaN
     predictions_df[pred_col_name] = np.nan
-    
+
     # Generate predictions for train data
     y_train_pred = model.predict(X_train)
     predictions_df.loc[train_indices, pred_col_name] = y_train_pred
-    
+
     # Generate predictions for test data if available
     if X_test is not None and test_indices is not None:
         y_test_pred = model.predict(X_test)
         predictions_df.loc[test_indices, pred_col_name] = y_test_pred
-    
+
     # Add split indicator column
     split_col = f"{target_column}_split"
     predictions_df[split_col] = "unknown"
     predictions_df.loc[train_indices, split_col] = "train"
     if test_indices is not None:
         predictions_df.loc[test_indices, split_col] = "test"
-    
+
     # Handle classification-specific outputs
     probability_columns: list[str] | None = None
     class_labels: list[Any] | None = None
-    
+
     if is_classifier and hasattr(model, "predict_proba"):
         # Get class labels from model (convert numpy types to Python native for JSON serialization)
         class_labels = [label.item() if hasattr(label, 'item') else label for label in model.classes_]
         probability_columns = []
-        
+
         # Generate probability columns for each class
         y_train_proba = model.predict_proba(X_train)
         if X_test is not None:
             y_test_proba = model.predict_proba(X_test)
-        
+
         for i, class_label in enumerate(class_labels):
             # Create column name: prob_<target>_<class_label>
             prob_col_name = f"prob_{target_column}_{class_label}"
             probability_columns.append(prob_col_name)
-            
+
             # Initialize with NaN
             predictions_df[prob_col_name] = np.nan
-            
+
             # Fill in probabilities
             predictions_df.loc[train_indices, prob_col_name] = y_train_proba[:, i]
             if X_test is not None and test_indices is not None:
                 predictions_df.loc[test_indices, prob_col_name] = y_test_proba[:, i]
-    
+
     # Store predictions DataFrame with descriptive name
     predictions_df_name = f"{source_name}_predictions"
     state.set_dataframe(
@@ -158,7 +158,7 @@ def create_predictions_dataframe(
         operation=f"predictions_{model.__class__.__name__}",
         set_active=False,
     )
-    
+
     return predictions_df_name, pred_col_name, probability_columns, class_labels
 
 
@@ -260,7 +260,7 @@ def create_training_result(
     prediction_column: str | None = None
     probability_columns: list[str] | None = None
     class_labels: list[Any] | None = None
-    
+
     if X_train is not None and y_train is not None and train_indices is not None:
         (
             predictions_dataframe,

@@ -103,7 +103,7 @@ def apply_imputation(
         else:  # constant
             if params.fill_value is None:
                 raise ValueError("fill_value is required when strategy='constant'")
-            
+
             fill_value = params.fill_value
             # Try to convert string to number if it looks like one
             if isinstance(fill_value, str):

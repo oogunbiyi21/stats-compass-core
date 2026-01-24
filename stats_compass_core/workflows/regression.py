@@ -14,15 +14,14 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
-from .configs import RegressionConfig, FeatureEngineeringConfig
-from .utils import run_step
+from .configs import RegressionConfig
+from .feature_engineering import run_feature_engineering_steps
 from .results import (
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
 )
-from .feature_engineering import run_feature_engineering_steps
-
+from .utils import run_step
 
 # =============================================================================
 # Model Registry Mappings
@@ -113,7 +112,7 @@ def _build_training_params(
     are passed through from config.hyperparameters.
     """
     from .utils import generate_model_save_path
-    
+
     # Determine save path
     save_path = None
     if config.save_model:
@@ -122,7 +121,7 @@ def _build_training_params(
             target_column=target_column,
             custom_path=config.model_save_path,
         )
-    
+
     # Common parameters all training tools share
     common_params = {
         "dataframe_name": source_name,
@@ -132,15 +131,15 @@ def _build_training_params(
         "random_state": config.random_state,
         "save_path": save_path,
     }
-    
+
     # Merge with model-specific hyperparameters
     hyperparams = config.hyperparameters or {}
     all_params = {**common_params, **hyperparams}
-    
+
     # Filter to only params the schema accepts
     schema_fields = set(input_schema.model_fields.keys())
     valid_params = {k: v for k, v in all_params.items() if k in schema_fields}
-    
+
     return input_schema(**valid_params)
 
 
@@ -172,24 +171,24 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
     The workflow creates a predictions DataFrame and stores the trained model.
     """
     started_at = datetime.now()
-    
+
     # Get config with defaults
     config = params.config or RegressionConfig()
-    
+
     # Resolve DataFrame
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     current_df_name = source_name  # Track which DataFrame to use (may change after FE)
-    
+
     steps: list[WorkflowStepResult] = []
     step_index = 0
     charts_generated = 0
     dataframes_created: list[str] = []
     models_created: list[str] = []
-    
+
     # Track training result for downstream steps
     model_id: str | None = None
     predictions_df_name: str | None = None
-    
+
     # =========================================================================
     # Step 0a: Drop Columns (inline, if specified)
     # =========================================================================
@@ -199,7 +198,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
             df = state.get_dataframe(current_df_name)
             df = df.drop(columns=cols_to_drop, errors='ignore')
             state.set_dataframe(df, name=current_df_name, operation="drop_columns", set_active=True)
-    
+
     # =========================================================================
     # Step 0b: Feature Engineering (optional)
     # =========================================================================
@@ -213,12 +212,12 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         )
         steps.extend(fe_steps)
         dataframes_created.extend(fe_dfs)
-    
+
     # =========================================================================
     # Step 1: Train Model (registry-based dispatch)
     # =========================================================================
     step_index += 1
-    
+
     # Look up the training tool
     tool_name = REGRESSOR_TOOLS.get(config.model_type)
     if tool_name is None:
@@ -241,7 +240,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 params.feature_columns,
                 config,
             )
-            
+
             model_label = MODEL_LABELS.get(config.model_type, config.model_type)
             step_result = run_step(
                 step_name="train_model",
@@ -252,17 +251,17 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 summary_template=f"Trained {model_label}",
             )
             steps.append(step_result)
-            
+
             # Extract model info for downstream steps
             if step_result.status == "success" and step_result.result:
                 model_id = step_result.result.get("model_id")
                 predictions_df_name = step_result.result.get("predictions_dataframe")
-                
+
                 if model_id:
                     models_created.append(model_id)
                 if predictions_df_name:
                     dataframes_created.append(predictions_df_name)
-                    
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="train_model",
@@ -272,16 +271,16 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 summary=f"Failed to train model: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 2: Evaluate Model
     # =========================================================================
     if model_id and predictions_df_name:
         step_index += 1
-        
+
         try:
             eval_func, EvalInputSchema = _get_tool("ml", "evaluate_regression_model")
-            
+
             # Build evaluation params
             # Prediction column follows pattern: pred_{target_column}
             prediction_col = f"pred_{params.target_column}"
@@ -290,12 +289,12 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 "target_column": params.target_column,
                 "prediction_column": prediction_col,
             }
-            
+
             # Filter to schema fields
             schema_fields = set(EvalInputSchema.model_fields.keys())
             valid_params = {k: v for k, v in eval_params_dict.items() if k in schema_fields}
             eval_params = EvalInputSchema(**valid_params)
-            
+
             step_result = run_step(
                 step_name="evaluate_model",
                 step_index=step_index,
@@ -305,7 +304,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 summary_template="Evaluated regression model performance",
             )
             steps.append(step_result)
-            
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="evaluate_model",
@@ -315,7 +314,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 summary=f"Failed to evaluate model: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 3: Generate Plots (if enabled)
     # =========================================================================
@@ -324,13 +323,13 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
             if plot_name not in PLOT_TOOLS:
                 # Skip unknown plot types silently (may not be implemented yet)
                 continue
-            
+
             tool_name, chart_type = PLOT_TOOLS[plot_name]
             step_index += 1
-            
+
             try:
                 plot_func, PlotInputSchema = _get_tool("plots", tool_name)
-                
+
                 # Build plot params - prediction column follows pattern: pred_{target_column}
                 prediction_col = f"pred_{params.target_column}"
                 if plot_name == "feature_importance":
@@ -342,12 +341,12 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                         "true_column": params.target_column,
                         "pred_column": prediction_col,
                     }
-                
+
                 # Filter to schema fields
                 schema_fields = set(PlotInputSchema.model_fields.keys())
                 valid_params = {k: v for k, v in plot_params_dict.items() if k in schema_fields}
                 plot_params = PlotInputSchema(**valid_params)
-                
+
                 step_result = run_step(
                     step_name=f"plot_{plot_name}",
                     step_index=step_index,
@@ -359,7 +358,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 steps.append(step_result)
                 if step_result.status == "success":
                     charts_generated += 1
-                    
+
             except Exception as e:
                 steps.append(WorkflowStepResult(
                     step_name=f"plot_{plot_name}",
@@ -369,17 +368,17 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                     summary=f"Failed to generate {plot_name} plot",
                     error=str(e),
                 ))
-    
+
     # =========================================================================
     # Build Final Result
     # =========================================================================
     completed_at = datetime.now()
     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-    
+
     # Determine overall status
     failed_steps = [s for s in steps if s.status == "failed"]
     success_steps = [s for s in steps if s.status == "success"]
-    
+
     if not success_steps:
         overall_status = "failed"
         error_summary = "All steps failed"
@@ -393,14 +392,14 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         overall_status = "success"
         error_summary = None
         suggestion = None
-    
+
     # Build helpful notes
     notes = []
     if predictions_df_name:
         notes.append(f"Predictions are in '{predictions_df_name}' (includes 'pred_{params.target_column}' column)")
     if models_created:
         notes.append(f"Trained model ID: '{models_created[0]}' - use for feature_importance or predictions")
-    
+
     # Build artifacts
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
@@ -408,7 +407,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         charts_generated=charts_generated,
         final_dataframe=predictions_df_name,
     )
-    
+
     return WorkflowResult(
         workflow_name="run_regression",
         status=overall_status,

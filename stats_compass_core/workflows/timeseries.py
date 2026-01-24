@@ -11,18 +11,17 @@ from typing import Any
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
+from stats_compass_core.cleaning.clean_dates import validate_date_column
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
-from stats_compass_core.cleaning.clean_dates import validate_date_column
 
 from .configs import TimeSeriesConfig
-from .utils import run_step
 from .results import (
     WorkflowArtifacts,
     WorkflowResult,
     WorkflowStepResult,
 )
-
+from .utils import run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -99,17 +98,17 @@ def _parse_forecast_periods(
     """
     if isinstance(forecast_periods, int):
         return forecast_periods, None, None
-    
+
     # Parse natural language like "30 days", "1 month", "2 weeks"
     text = str(forecast_periods).lower().strip()
-    
+
     # Extract number and unit
     import re
     match = re.match(r"(\d+)\s*(day|week|month|quarter|year)s?", text)
     if match:
         number = int(match.group(1))
         unit = match.group(2)
-        
+
         # Map to valid forecast_unit values
         unit_map = {
             "day": "days",
@@ -119,7 +118,7 @@ def _parse_forecast_periods(
             "year": "years",
         }
         return None, number, unit_map.get(unit, "days")
-    
+
     # Fallback - try to parse as int
     try:
         return int(text), None, None
@@ -159,7 +158,7 @@ def run_timeseries_forecast(
     The workflow stores the fitted model and returns forecast values.
     """
     started_at = datetime.now()
-    
+
     # Get config with defaults
     # If no config provided, create a minimal one
     if params.config is None:
@@ -171,31 +170,31 @@ def run_timeseries_forecast(
         )
     else:
         config = params.config
-    
+
     # Resolve DataFrame
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     df = state.get_dataframe(source_name)
-    
+
     steps: list[WorkflowStepResult] = []
     step_index = 0
     charts_generated = 0
     dataframes_created: list[str] = []
     models_created: list[str] = []
-    
+
     # Track state across steps
     model_id: str | None = None
     recommended_d: int = 1  # Default differencing order
     optimal_order: tuple[int, int, int] | None = None
-    
+
     # Current dataframe name (may change if we clean dates)
     current_df_name = source_name
-    
+
     # =========================================================================
     # Step 0: Validate Date Column (if enabled)
     # =========================================================================
     if config.validate_dates and params.date_column:
         step_index += 1
-        
+
         try:
             validation = validate_date_column(
                 df=df,
@@ -205,10 +204,10 @@ def run_timeseries_forecast(
                 check_chronological=True,
                 check_gaps=True,
             )
-            
+
             has_errors = not validation["is_valid"]
             error_msg = "; ".join(validation["errors"]) if validation["errors"] else None
-            
+
             if has_errors:
                 if config.handle_missing_dates == "error":
                     # Fail immediately with clear error
@@ -220,11 +219,11 @@ def run_timeseries_forecast(
                         summary=f"Date validation failed: {error_msg}",
                         error=error_msg,
                     ))
-                    
+
                     # Build and return early failure result
                     completed_at = datetime.now()
                     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-                    
+
                     return WorkflowResult(
                         workflow_name="run_timeseries_forecast",
                         status="failed",
@@ -243,14 +242,14 @@ def run_timeseries_forecast(
                         suggestion="Clean the date column using preprocessing workflow with date_cleaning config, or set handle_missing_dates='ffill' to auto-fix.",
                         recoverable=True,
                     )
-                
+
                 elif config.handle_missing_dates in ["ffill", "bfill", "drop"]:
                     # Attempt to fix automatically using clean_dates tool
                     try:
                         clean_func, CleanInput = _get_tool("cleaning", "clean_dates")
-                        
+
                         cleaned_df_name = f"{source_name}_dates_fixed"
-                        
+
                         clean_params_dict = {
                             "dataframe_name": source_name,
                             "date_column": params.date_column,
@@ -259,12 +258,12 @@ def run_timeseries_forecast(
                             "create_missing_dates": False,
                             "save_as": cleaned_df_name,
                         }
-                        
+
                         # Filter to schema fields
                         schema_fields = set(CleanInput.model_fields.keys())
                         valid_params = {k: v for k, v in clean_params_dict.items() if k in schema_fields}
                         clean_params = CleanInput(**valid_params)
-                        
+
                         step_result = run_step(
                             step_name="clean_dates",
                             step_index=step_index,
@@ -273,11 +272,11 @@ def run_timeseries_forecast(
                             params=clean_params,
                             summary_template=f"Cleaned date column '{params.date_column}'",
                         )
-                        
+
                         if step_result.status == "success":
                             current_df_name = cleaned_df_name
                             dataframes_created.append(cleaned_df_name)
-                            
+
                             # Update the step to show it was validation + cleaning
                             step_result.step_name = "validate_dates"
                             step_result.summary = f"Fixed date issues: {step_result.summary}"
@@ -287,9 +286,9 @@ def run_timeseries_forecast(
                         else:
                             step_result.step_name = "validate_dates"
                             step_result.summary = f"Failed to fix dates: {error_msg}"
-                            
+
                         steps.append(step_result)
-                        
+
                     except Exception as e:
                         steps.append(WorkflowStepResult(
                             step_name="validate_dates",
@@ -309,11 +308,11 @@ def run_timeseries_forecast(
                         summary=f"Invalid handle_missing_dates value: {config.handle_missing_dates}",
                         error=f"Invalid config value: {config.handle_missing_dates}",
                     ))
-                    
+
                     # Build and return early failure result
                     completed_at = datetime.now()
                     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-                    
+
                     return WorkflowResult(
                         workflow_name="run_timeseries_forecast",
                         status="failed",
@@ -343,7 +342,7 @@ def run_timeseries_forecast(
                     summary=f"Date column validated: {warning_msg}",
                     result={"validation": validation},
                 ))
-                
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="validate_dates",
@@ -353,27 +352,27 @@ def run_timeseries_forecast(
                 summary=f"Date validation error: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 1: Check Stationarity (optional)
     # =========================================================================
     if config.check_stationarity:
         step_index += 1
-        
+
         try:
             stationarity_func, StationarityInput = _get_tool("ml", ARIMA_TOOLS["stationarity"])
-            
+
             stationarity_params_dict = {
                 "dataframe_name": current_df_name,
                 "target_column": params.target_column,
                 "test_type": "both",
             }
-            
+
             # Filter to schema fields
             schema_fields = set(StationarityInput.model_fields.keys())
             valid_params = {k: v for k, v in stationarity_params_dict.items() if k in schema_fields}
             stationarity_params = StationarityInput(**valid_params)
-            
+
             step_result = run_step(
                 step_name="check_stationarity",
                 step_index=step_index,
@@ -383,7 +382,7 @@ def run_timeseries_forecast(
                 summary_template="Checked time series stationarity",
             )
             steps.append(step_result)
-            
+
             # Extract stationarity info for ARIMA fitting
             if step_result.status == "success" and step_result.result:
                 is_stationary = step_result.result.get("is_stationary", False)
@@ -391,7 +390,7 @@ def run_timeseries_forecast(
                     recommended_d = 0
                 else:
                     recommended_d = 1
-                    
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="check_stationarity",
@@ -401,16 +400,16 @@ def run_timeseries_forecast(
                 summary=f"Failed to check stationarity: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 2: Find Optimal ARIMA Parameters (optional)
     # =========================================================================
     if config.auto_find_params:
         step_index += 1
-        
+
         try:
             find_func, FindInput = _get_tool("ml", ARIMA_TOOLS["find_optimal"])
-            
+
             find_params_dict = {
                 "dataframe_name": current_df_name,
                 "target_column": params.target_column,
@@ -421,12 +420,12 @@ def run_timeseries_forecast(
                 "criterion": "aic",
                 "top_n": 3,
             }
-            
+
             # Filter to schema fields
             schema_fields = set(FindInput.model_fields.keys())
             valid_params = {k: v for k, v in find_params_dict.items() if k in schema_fields}
             find_params = FindInput(**valid_params)
-            
+
             step_result = run_step(
                 step_name="find_optimal_params",
                 step_index=step_index,
@@ -436,13 +435,13 @@ def run_timeseries_forecast(
                 summary_template="Found optimal ARIMA parameters",
             )
             steps.append(step_result)
-            
+
             # Extract optimal order
             if step_result.status == "success" and step_result.result:
                 best_order = step_result.result.get("best_order")
                 if best_order and len(best_order) == 3:
                     optimal_order = tuple(best_order)
-                    
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="find_optimal_params",
@@ -452,15 +451,15 @@ def run_timeseries_forecast(
                 summary=f"Failed to find optimal parameters: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 3: Fit ARIMA Model
     # =========================================================================
     step_index += 1
-    
+
     try:
         fit_func, FitInput = _get_tool("ml", ARIMA_TOOLS["fit"])
-        
+
         # Determine ARIMA order
         if optimal_order:
             p, d, q = optimal_order
@@ -469,7 +468,7 @@ def run_timeseries_forecast(
         else:
             # Use default order with recommended_d from stationarity test
             p, d, q = 1, recommended_d, 1
-        
+
         fit_params_dict = {
             "dataframe_name": current_df_name,
             "target_column": params.target_column,
@@ -478,17 +477,17 @@ def run_timeseries_forecast(
             "d": d,
             "q": q,
         }
-        
+
         # Add seasonal parameters if provided
         if config.seasonal_order:
             fit_params_dict["seasonal"] = True
             fit_params_dict["seasonal_order"] = list(config.seasonal_order)
-        
+
         # Filter to schema fields
         schema_fields = set(FitInput.model_fields.keys())
         valid_params = {k: v for k, v in fit_params_dict.items() if k in schema_fields}
         fit_params = FitInput(**valid_params)
-        
+
         step_result = run_step(
             step_name="fit_arima",
             step_index=step_index,
@@ -498,13 +497,13 @@ def run_timeseries_forecast(
             summary_template=f"Fitted ARIMA({p},{d},{q}) model",
         )
         steps.append(step_result)
-        
+
         # Extract model ID
         if step_result.status == "success" and step_result.result:
             model_id = step_result.result.get("model_id")
             if model_id:
                 models_created.append(model_id)
-                
+
     except Exception as e:
         steps.append(WorkflowStepResult(
             step_name="fit_arima",
@@ -514,40 +513,40 @@ def run_timeseries_forecast(
             summary=f"Failed to fit ARIMA model: {str(e)}",
             error=str(e),
         ))
-    
+
     # =========================================================================
     # Step 4: Generate Forecast
     # =========================================================================
     forecast_result_data: dict | None = None
-    
+
     if model_id:
         step_index += 1
-        
+
         try:
             forecast_func, ForecastInput = _get_tool("ml", ARIMA_TOOLS["forecast"])
-            
+
             # Parse forecast periods
             n_periods, forecast_number, forecast_unit = _parse_forecast_periods(
                 config.forecast_periods
             )
-            
+
             forecast_params_dict = {
                 "model_id": model_id,
                 "include_plot": False,  # We'll use the dedicated plot tool instead
             }
-            
+
             if n_periods is not None:
                 forecast_params_dict["n_periods"] = n_periods
             if forecast_number is not None:
                 forecast_params_dict["forecast_number"] = forecast_number
             if forecast_unit is not None:
                 forecast_params_dict["forecast_unit"] = forecast_unit
-            
+
             # Filter to schema fields
             schema_fields = set(ForecastInput.model_fields.keys())
             valid_params = {k: v for k, v in forecast_params_dict.items() if k in schema_fields}
             forecast_params = ForecastInput(**valid_params)
-            
+
             step_result = run_step(
                 step_name="forecast",
                 step_index=step_index,
@@ -557,10 +556,10 @@ def run_timeseries_forecast(
                 summary_template="Generated forecast",
             )
             steps.append(step_result)
-            
+
             if step_result.status == "success" and step_result.result:
                 forecast_result_data = step_result.result
-                
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="forecast",
@@ -570,31 +569,31 @@ def run_timeseries_forecast(
                 summary=f"Failed to generate forecast: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Step 5: Generate Forecast Plot (optional)
     # =========================================================================
     if config.generate_forecast_plot and model_id:
         step_index += 1
-        
+
         try:
             plot_func, PlotInput = _get_tool("plots", PLOT_TOOLS["forecast_plot"][0])
-            
+
             # Determine n_periods for plot
             n_periods, forecast_number, forecast_unit = _parse_forecast_periods(
                 config.forecast_periods
             )
-            
+
             plot_params_dict = {
                 "model_id": model_id,
                 "n_periods": n_periods or 30,  # Default to 30 if using natural language
             }
-            
+
             # Filter to schema fields
             schema_fields = set(PlotInput.model_fields.keys())
             valid_params = {k: v for k, v in plot_params_dict.items() if k in schema_fields}
             plot_params = PlotInput(**valid_params)
-            
+
             step_result = run_step(
                 step_name="plot_forecast",
                 step_index=step_index,
@@ -606,7 +605,7 @@ def run_timeseries_forecast(
             steps.append(step_result)
             if step_result.status == "success":
                 charts_generated += 1
-                
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="plot_forecast",
@@ -616,17 +615,17 @@ def run_timeseries_forecast(
                 summary=f"Failed to generate forecast plot: {str(e)}",
                 error=str(e),
             ))
-    
+
     # =========================================================================
     # Build Final Result
     # =========================================================================
     completed_at = datetime.now()
     total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-    
+
     # Determine overall status
     failed_steps = [s for s in steps if s.status == "failed"]
     success_steps = [s for s in steps if s.status == "success"]
-    
+
     if not success_steps:
         overall_status = "failed"
         error_summary = "All steps failed"
@@ -640,7 +639,7 @@ def run_timeseries_forecast(
         overall_status = "success"
         error_summary = None
         suggestion = None
-    
+
     # Build artifacts
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
@@ -648,7 +647,7 @@ def run_timeseries_forecast(
         charts_generated=charts_generated,
         final_dataframe=None,  # Timeseries doesn't create a predictions DF by default
     )
-    
+
     # Add forecast data to artifacts if available
     if forecast_result_data:
         artifacts_dict = artifacts.model_dump()
@@ -660,7 +659,7 @@ def run_timeseries_forecast(
             "n_periods": forecast_result_data.get("n_periods"),
         }
         # We'll just include forecast info in the result message instead
-    
+
     return WorkflowResult(
         workflow_name="run_timeseries_forecast",
         status=overall_status,

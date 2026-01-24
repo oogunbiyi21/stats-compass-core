@@ -60,16 +60,16 @@ def load_dataset(state: DataFrameState, params: LoadDatasetInput) -> DataFrameLo
             name = name[:-4]
 
         file_path = _DATASETS_DIR / f"{name}.csv"
-        
+
         if not file_path.exists():
             raise FileNotFoundError(f"Dataset file not found: {file_path}")
 
         # Load the dataset
         df = pd.read_csv(file_path)
-        
+
         # Add to state
         state.set_dataframe(df, name=name, operation="load_dataset", set_active=params.set_active)
-        
+
         return DataFrameLoadResult(
             success=True,
             dataframe_name=name,
@@ -79,7 +79,7 @@ def load_dataset(state: DataFrameState, params: LoadDatasetInput) -> DataFrameLo
             dtypes={col: str(dtype) for col, dtype in df.dtypes.items()},
             message=f"Loaded dataset '{name}' with {len(df)} rows and {len(df.columns)} columns.",
         )
-        
+
     except FileNotFoundError:
         available = ", ".join(_list_available_datasets())
         raise ValueError(f"Dataset '{params.name}' not found. Available datasets: {available}")

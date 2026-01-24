@@ -112,7 +112,7 @@ def is_path_safe(filepath: str) -> tuple[bool, str | None]:
     expanded = os.path.expanduser(filepath)
     resolved = os.path.abspath(expanded)
     path = Path(resolved)
-    
+
     # Check for forbidden parent directories
     for forbidden in FORBIDDEN_PATHS:
         forbidden_path = Path(forbidden)
@@ -126,20 +126,20 @@ def is_path_safe(filepath: str) -> tuple[bool, str | None]:
                     return False, f"Cannot write to system directory: {forbidden}"
         except (ValueError, OSError):
             pass
-    
+
     # Check file extension
     suffix = path.suffix.lower()
     name = path.name.lower()
-    
+
     # Check if it's a protected file by extension or name
     if suffix in PROTECTED_EXTENSIONS or name in PROTECTED_EXTENSIONS:
         return False, f"Cannot overwrite source/config files ({suffix or name}). Use a different extension like .csv, .joblib, .png"
-    
+
     # Warn if not a typical data output extension
     if suffix and suffix not in SAFE_OUTPUT_EXTENSIONS:
         # Allow but warn (caller can decide)
         pass
-    
+
     return True, None
 
 
@@ -159,14 +159,14 @@ def get_unique_filepath(filepath: str) -> str:
         A filepath that doesn't exist (either original or with _N suffix)
     """
     path = Path(filepath)
-    
+
     if not path.exists():
         return filepath
-    
+
     base = path.stem
     ext = path.suffix
     parent = path.parent
-    
+
     counter = 1
     while True:
         candidate = parent / f"{base}_{counter}{ext}"
@@ -198,21 +198,21 @@ def safe_write_path(
     # Expand and resolve
     expanded = os.path.expanduser(filepath)
     resolved = os.path.abspath(expanded)
-    
+
     # Check safety
     is_safe, error = is_path_safe(resolved)
     if not is_safe:
         raise UnsafePathError(error)
-    
+
     # Get unique path (auto-increment if exists)
     resolved = get_unique_filepath(resolved)
-    
+
     # Create directories if needed
     if create_dirs:
         parent = os.path.dirname(resolved)
         if parent:
             os.makedirs(parent, exist_ok=True)
-    
+
     return resolved
 
 
@@ -239,15 +239,15 @@ def safe_save_figure(
     """
     if save_path is None:
         return None
-    
+
     # Validate and prepare path (auto-increments if exists)
     filepath = safe_write_path(save_path, create_dirs=True)
-    
+
     # Save with sensible defaults
     defaults = {"bbox_inches": "tight"}
     defaults.update(savefig_kwargs)
     fig.savefig(filepath, **defaults)
-    
+
     return filepath
 
 
@@ -304,36 +304,36 @@ def safe_save(
         >>> result = safe_save(fig, "plot.png", "figure", dpi=300)
     """
     import pandas as pd
-    
+
     original_filepath = filepath
-    
+
     # Validate and get safe path (auto-increments if exists)
     safe_path = safe_write_path(filepath, create_dirs=True)
     was_renamed = safe_path != os.path.abspath(os.path.expanduser(original_filepath))
-    
+
     # Save based on file type
     if file_type == "csv":
         if not isinstance(data, pd.DataFrame):
             raise TypeError(f"Expected DataFrame for 'csv', got {type(data).__name__}")
         index = kwargs.pop("index", False)
         data.to_csv(safe_path, index=index, **kwargs)
-        
+
     elif file_type == "model":
         import joblib
         compress = kwargs.pop("compress", 0)
         joblib.dump(data, safe_path, compress=compress, **kwargs)
-        
+
     elif file_type == "figure":
         # Expect matplotlib Figure
         defaults = {"bbox_inches": "tight"}
         defaults.update(kwargs)
         data.savefig(safe_path, **defaults)
-        
+
     else:
         raise ValueError(
             f"Unknown file_type: '{file_type}'. Must be 'csv', 'model', or 'figure'"
         )
-    
+
     return {
         "filepath": safe_path,
         "original_filepath": original_filepath,
