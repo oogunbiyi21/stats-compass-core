@@ -12,7 +12,7 @@
 
 ## What is this?
 
-A Python library that turns pandas operations into JSON-serializable tools for LLM agents. Unlike raw pandas, it manages server-side state—DataFrames and trained models persist across tool calls.
+A Python library that turns pandas operations into JSON-serializable tools for LLM agents. Unlike raw pandas, it manages server-side state. DataFrames and trained models persist across tool calls.
 
 **Looking for the MCP server?** See [stats-compass-mcp](https://github.com/oogunbiyi21/stats-compass-mcp).
 
