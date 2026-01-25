@@ -106,6 +106,10 @@ class ForecastARIMAInput(StrictToolInput):
     include_plot: bool = Field(
         default=True, description="Whether to generate a forecast plot"
     )
+    save_as: str | None = Field(
+        default=None,
+        description="Save forecast as a DataFrame with this name. Includes date, forecast, lower_ci, upper_ci columns.",
+    )
 
 
 class FindOptimalARIMAInput(StrictToolInput):
@@ -739,6 +743,19 @@ def forecast_arima(
                 f"Forecast range: {forecast_values[0]:.2f} to {forecast_values[-1]:.2f}"
             )
 
+        # Save forecast as DataFrame if save_as is specified
+        saved_dataframe_name = None
+        if params.save_as:
+            forecast_df = pd.DataFrame({
+                "date": forecast_index,
+                "forecast": forecast_values,
+                "lower_ci": lower_ci,
+                "upper_ci": upper_ci,
+            })
+            state.set_dataframe(forecast_df, params.save_as, operation="forecast_arima")
+            saved_dataframe_name = params.save_as
+            msg += f" Saved as DataFrame '{params.save_as}'."
+
         return ARIMAForecastResult(
             success=True,
             forecast_values=forecast_values,
@@ -750,6 +767,7 @@ def forecast_arima(
             model_id=params.model_id,
             image_base64=image_base64,
             message=msg,
+            saved_dataframe=saved_dataframe_name,
         )
 
     except Exception as e:

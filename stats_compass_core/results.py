@@ -554,6 +554,12 @@ class ARIMAForecastResult(BaseModel):
         description="Base64-encoded PNG image of the forecast plot"
     )
 
+    # Saved DataFrame (optional)
+    saved_dataframe: str | None = Field(
+        default=None,
+        description="Name of saved DataFrame containing forecast values (if save_as was specified)"
+    )
+
     # Interpretation
     message: str = Field(description="Human-readable forecast summary")
 
