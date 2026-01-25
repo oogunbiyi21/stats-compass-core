@@ -560,6 +560,33 @@ def run_timeseries_forecast(
             if step_result.status == "success" and step_result.result:
                 forecast_result_data = step_result.result
 
+                # Save forecast as DataFrame for export
+                import pandas as pd
+                forecast_df_data = {
+                    "forecast": forecast_result_data.get("forecast_values"),
+                }
+                # Add date/index column
+                forecast_index = forecast_result_data.get("forecast_index")
+                if forecast_index:
+                    forecast_df_data["date"] = forecast_index
+                # Add confidence intervals if available
+                lower_ci = forecast_result_data.get("lower_ci")
+                upper_ci = forecast_result_data.get("upper_ci")
+                if lower_ci:
+                    forecast_df_data["lower_ci"] = lower_ci
+                if upper_ci:
+                    forecast_df_data["upper_ci"] = upper_ci
+
+                forecast_df = pd.DataFrame(forecast_df_data)
+                # Reorder columns to put date first if present
+                if "date" in forecast_df.columns:
+                    cols = ["date", "forecast"] + [c for c in forecast_df.columns if c not in ["date", "forecast"]]
+                    forecast_df = forecast_df[cols]
+
+                forecast_df_name = f"{source_name}_forecast"
+                state.set_dataframe(forecast_df, forecast_df_name, operation="timeseries_forecast")
+                dataframes_created.append(forecast_df_name)
+
         except Exception as e:
             steps.append(WorkflowStepResult(
                 step_name="forecast",
@@ -641,11 +668,14 @@ def run_timeseries_forecast(
         suggestion = None
 
     # Build artifacts
+    # Set final_dataframe to forecast if it was created
+    final_df_name = f"{source_name}_forecast" if f"{source_name}_forecast" in dataframes_created else None
+
     artifacts = WorkflowArtifacts(
         dataframes_created=dataframes_created,
         models_created=models_created,
         charts_generated=charts_generated,
-        final_dataframe=None,  # Timeseries doesn't create a predictions DF by default
+        final_dataframe=final_df_name,
     )
 
     # Add forecast data to artifacts if available
