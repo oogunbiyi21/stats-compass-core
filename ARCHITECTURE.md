@@ -2,13 +2,15 @@
 
 This document explains the architectural decisions in stats-compass-core, particularly the stateful design pattern and workflow-based orchestration that may seem unconventional for a Python library.
 
-## Why Server-Side State?
+## Why Stateful Design?
 
-stats-compass-core is designed as a **Model Context Protocol (MCP) server**, not a traditional Python library. This distinction is crucial for understanding our design decisions.
+stats-compass-core is a **tool library** designed to work with AI agent protocols (MCP, OpenAI function calling, etc.) where LLMs orchestrate tool calls. While [stats-compass-mcp](https://github.com/oogunbiyi21/stats-compass-mcp) wraps this library as an MCP server, the core library itself is protocol-agnostic.
 
-### The MCP Constraint
+This distinction matters because the design patterns here address constraints common to **all** LLM-to-tool communication, not just MCP.
 
-In the MCP protocol, **LLMs cannot pass complex Python objects between tool calls**. All communication happens via JSON-serializable messages. This means:
+### The LLM-Tool Communication Constraint
+
+In protocols where LLMs call tools, **LLMs cannot pass complex Python objects between calls**. All communication happens via JSON-serializable messages. This means:
 
 - ❌ Cannot pass DataFrames directly between tools
 - ❌ Cannot pass trained models between tools  
@@ -21,7 +23,7 @@ In the MCP protocol, **LLMs cannot pass complex Python objects between tool call
 A traditional functional approach might look like:
 
 ```python
-# This CANNOT work in MCP - LLM cannot pass df between calls
+# This CANNOT work with LLM tool calling - LLM cannot pass df between calls
 df = load_csv("data.csv")
 df = drop_na(df, columns=["age"])
 result = describe(df)
@@ -37,7 +39,7 @@ The LLM would need to serialize the entire DataFrame in each message, which is:
 Instead, we use a **named reference pattern**:
 
 ```python
-# Tool calls via MCP
+# Tool calls via any LLM protocol (MCP, function calling, etc.)
 load_csv(path="data.csv")                    # → stores as "data"
 drop_na(dataframe_name="data", columns=["age"])  # → updates in place
 describe(dataframe_name="data")              # → returns JSON stats
@@ -126,7 +128,7 @@ Every tool function follows this signature:
 def tool_name(state: DataFrameState, params: InputModel) -> ResultModel
 ```
 
-This is intentional - it allows the MCP server to inject the shared state instance into each tool call.
+This is intentional - it allows the hosting server (e.g., stats-compass-mcp) to inject the shared state instance into each tool call.
 
 ### 2. Workflow Tools Return Step-by-Step Results
 
@@ -405,10 +407,10 @@ When the limit is exceeded:
 
 | Concern | Our Approach | Traditional Approach | Why We Chose Ours |
 |---------|--------------|---------------------|-------------------|
-| State persistence | Server-side `DataFrameState` | Return values | MCP can't pass DataFrames |
+| State persistence | Host-side `DataFrameState` | Return values | LLM protocols can't pass DataFrames |
 | Model storage | ID-based lookup | Return model object | Models aren't JSON-serializable |
 | Charts | Base64 PNG strings | matplotlib Figure | Figures aren't JSON-serializable |
-| Memory | Explicit limits | Unbounded | Prevent runaway server memory |
+| Memory | Explicit limits | Unbounded | Prevent runaway host memory |
 
 ## Testing Considerations
 
