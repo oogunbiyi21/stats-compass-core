@@ -304,6 +304,8 @@ def safe_save(
         >>> result = safe_save(fig, "plot.png", "figure", dpi=300)
     """
     import pandas as pd
+    
+    from .spreadsheet_safety import sanitize_dataframe
 
     original_filepath = filepath
 
@@ -316,7 +318,9 @@ def safe_save(
         if not isinstance(data, pd.DataFrame):
             raise TypeError(f"Expected DataFrame for 'csv', got {type(data).__name__}")
         index = kwargs.pop("index", False)
-        data.to_csv(safe_path, index=index, **kwargs)
+        # Sanitize to prevent CSV injection attacks (formula injection)
+        safe_data = sanitize_dataframe(data)
+        safe_data.to_csv(safe_path, index=index, **kwargs)
 
     elif file_type == "model":
         import joblib
