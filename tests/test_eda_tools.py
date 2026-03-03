@@ -282,3 +282,119 @@ class TestDataQuality:
 
         assert result.outlier_summary is None
         assert result.missing_summary is not None
+
+
+class TestSplitColumnByGroup:
+    """Tests for the split_column_by_group transform."""
+
+    def test_split_equal_groups(self):
+        """Two groups of equal size produce a clean wide DataFrame."""
+        from stats_compass_core.transforms.split_column_by_group import (
+            SplitColumnByGroupInput,
+            split_column_by_group,
+        )
+
+        df = pd.DataFrame({
+            "score": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "group": ["A", "A", "A", "B", "B", "B"],
+        })
+        state = make_state_with_df(df)
+
+        params = SplitColumnByGroupInput(
+            dataframe_name="test",
+            value_column="score",
+            group_column="group",
+        )
+        result = split_column_by_group(state, params)
+
+        assert set(result.columns) == {"A", "B"}
+        assert result.shape == (3, 2)
+
+    def test_split_unequal_groups(self):
+        """Unequal group sizes are NaN-padded to the length of the longest group."""
+        from stats_compass_core.transforms.split_column_by_group import (
+            SplitColumnByGroupInput,
+            split_column_by_group,
+        )
+
+        df = pd.DataFrame({
+            "score": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "group": ["A", "A", "A", "B", "B"],
+        })
+        state = make_state_with_df(df)
+
+        params = SplitColumnByGroupInput(
+            dataframe_name="test",
+            value_column="score",
+            group_column="group",
+        )
+        result = split_column_by_group(state, params)
+
+        assert result.shape == (3, 2)
+        # The shorter group should have a NaN in the last row
+        saved_df = state.get_dataframe(result.dataframe_name)
+        assert saved_df["B"].isna().sum() == 1
+
+    def test_split_subset_groups(self):
+        """The groups parameter restricts which groups appear in the output."""
+        from stats_compass_core.transforms.split_column_by_group import (
+            SplitColumnByGroupInput,
+            split_column_by_group,
+        )
+
+        df = pd.DataFrame({
+            "score": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            "lang": ["en", "en", "es", "es", "fr", "fr"],
+        })
+        state = make_state_with_df(df)
+
+        params = SplitColumnByGroupInput(
+            dataframe_name="test",
+            value_column="score",
+            group_column="lang",
+            groups=["en", "es"],
+        )
+        result = split_column_by_group(state, params)
+
+        assert set(result.columns) == {"en", "es"}
+        assert "fr" not in result.columns
+
+    def test_split_missing_value_column(self):
+        """Raises ValueError when the value column does not exist."""
+        from stats_compass_core.transforms.split_column_by_group import (
+            SplitColumnByGroupInput,
+            split_column_by_group,
+        )
+
+        df = pd.DataFrame({"group": ["A", "B"]})
+        state = make_state_with_df(df)
+
+        params = SplitColumnByGroupInput(
+            dataframe_name="test",
+            value_column="nonexistent",
+            group_column="group",
+        )
+        with pytest.raises(ValueError, match="not found"):
+            split_column_by_group(state, params)
+
+    def test_split_missing_group_label(self):
+        """Raises ValueError when a requested group label is not in the data."""
+        from stats_compass_core.transforms.split_column_by_group import (
+            SplitColumnByGroupInput,
+            split_column_by_group,
+        )
+
+        df = pd.DataFrame({
+            "score": [1.0, 2.0, 3.0],
+            "group": ["A", "A", "B"],
+        })
+        state = make_state_with_df(df)
+
+        params = SplitColumnByGroupInput(
+            dataframe_name="test",
+            value_column="score",
+            group_column="group",
+            groups=["A", "C"],
+        )
+        with pytest.raises(ValueError, match="not found"):
+            split_column_by_group(state, params)

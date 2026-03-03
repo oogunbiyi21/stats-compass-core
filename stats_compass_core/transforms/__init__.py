@@ -4,6 +4,7 @@ from stats_compass_core.transforms.bin_rare_categories import bin_rare_categorie
 from stats_compass_core.transforms.filter_dataframe import filter_dataframe
 from stats_compass_core.transforms.groupby_aggregate import groupby_aggregate
 from stats_compass_core.transforms.pivot import pivot
+from stats_compass_core.transforms.split_column_by_group import split_column_by_group
 
 # Conditional import for mean_target_encoding (requires sklearn)
 try:
@@ -17,4 +18,5 @@ __all__ = [
     "filter_dataframe",
     "bin_rare_categories",
     "mean_target_encoding",
+    "split_column_by_group",
 ]
