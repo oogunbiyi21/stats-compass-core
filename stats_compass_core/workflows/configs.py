@@ -318,11 +318,11 @@ class TimeSeriesConfig(BaseModel):
         description="Number of periods to forecast, or natural language like '1 month'"
     )
     auto_find_params: bool = Field(
-        default=True,
+        default=False,
         description="Use grid search to find optimal ARIMA parameters"
     )
     arima_order: tuple[int, int, int] | None = Field(
-        default=None,
+        default=(1, 1, 1),
         description="Manual ARIMA (p, d, q) order. Ignored if auto_find_params=True."
     )
     seasonal_order: tuple[int, int, int, int] | None = Field(
@@ -330,7 +330,7 @@ class TimeSeriesConfig(BaseModel):
         description="Seasonal ARIMA (P, D, Q, s) order for SARIMA models"
     )
     check_stationarity: bool = Field(
-        default=True,
+        default=False,
         description="Run stationarity tests before fitting"
     )
     validate_dates: bool = Field(
