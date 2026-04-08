@@ -49,7 +49,7 @@ from stats_compass_core.workflows.results import (
     WorkflowStepResult,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.28"
 __all__ = [
     # Core classes
     "ToolRegistry",

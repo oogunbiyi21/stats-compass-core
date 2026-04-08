@@ -129,6 +129,7 @@ class FindOptimalARIMAInput(StrictToolInput):
     max_p: int = Field(default=3, ge=0, le=5, description="Maximum AR order to try")
     max_d: int = Field(default=2, ge=0, le=2, description="Maximum differencing order")
     max_q: int = Field(default=3, ge=0, le=5, description="Maximum MA order to try")
+    fixed_d: int | None = Field(default=None, ge=0, le=2, description="Fix d to this value instead of searching. When set, max_d is ignored.")
     criterion: Literal["aic", "bic"] = Field(
         default="aic", description="Information criterion for model selection"
     )
@@ -820,7 +821,7 @@ def find_optimal_arima(
 
     # Generate parameter combinations
     p_range = range(0, params.max_p + 1)
-    d_range = range(0, params.max_d + 1)
+    d_range = [params.fixed_d] if params.fixed_d is not None else range(0, params.max_d + 1)
     q_range = range(0, params.max_q + 1)
 
     combinations = list(itertools.product(p_range, d_range, q_range))

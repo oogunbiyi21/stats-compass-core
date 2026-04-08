@@ -420,6 +420,8 @@ def run_timeseries_forecast(
                 "criterion": "aic",
                 "top_n": 3,
             }
+            if recommended_d is not None:
+                find_params_dict["fixed_d"] = recommended_d
 
             # Filter to schema fields
             schema_fields = set(FindInput.model_fields.keys())
