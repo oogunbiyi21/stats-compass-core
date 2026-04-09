@@ -108,7 +108,7 @@ class TestRunEDAReport:
             ),
         )
         result = run_eda_report(state_with_numeric_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         assert result.workflow_name == "run_eda_report"
         assert len(result.steps) > 0
@@ -124,7 +124,7 @@ class TestRunEDAReport:
             ),
         )
         result = run_eda_report(state_with_numeric_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         # Should have some charts if histograms enabled
         if result.status == "success":
@@ -147,7 +147,7 @@ class TestRunPreprocessing:
             ),
         )
         result = run_preprocessing(state_with_dirty_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         assert result.workflow_name == "run_preprocessing"
 
@@ -157,7 +157,7 @@ class TestRunPreprocessing:
             dataframe_name="dirty_data",
         )
         result = run_preprocessing(state_with_dirty_df, params)
-        
+
         # Should have created output DataFrame
         assert result.artifacts.final_dataframe is not None or len(result.artifacts.dataframes_created) > 0
 
@@ -180,7 +180,7 @@ class TestRunClassification:
             ),
         )
         result = run_classification(state_with_classification_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         assert result.workflow_name == "run_classification"
         # Should have trained a model
@@ -197,7 +197,7 @@ class TestRunClassification:
             ),
         )
         result = run_classification(state_with_classification_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
 
     def test_classification_with_plots(self, state_with_classification_df):
@@ -212,7 +212,7 @@ class TestRunClassification:
             ),
         )
         result = run_classification(state_with_classification_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
 
 
@@ -234,7 +234,7 @@ class TestRunRegression:
             ),
         )
         result = run_regression(state_with_numeric_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         assert result.workflow_name == "run_regression"
         assert len(result.artifacts.models_created) > 0
@@ -250,7 +250,7 @@ class TestRunRegression:
             ),
         )
         result = run_regression(state_with_numeric_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         assert len(result.artifacts.models_created) > 0
 
@@ -266,7 +266,7 @@ class TestRunRegression:
             ),
         )
         result = run_regression(state_with_numeric_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
 
 
@@ -284,8 +284,6 @@ class TestRunTimeseriesForecast:
             target_column="value",
             date_column="date",
             config=TimeSeriesConfig(
-                date_column="date",
-                target_column="value",
                 forecast_periods=10,
                 auto_find_params=False,
                 check_stationarity=False,
@@ -293,7 +291,7 @@ class TestRunTimeseriesForecast:
             ),
         )
         result = run_timeseries_forecast(state_with_timeseries_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         assert result.workflow_name == "run_timeseries_forecast"
 
@@ -304,8 +302,6 @@ class TestRunTimeseriesForecast:
             target_column="value",
             date_column="date",
             config=TimeSeriesConfig(
-                date_column="date",
-                target_column="value",
                 forecast_periods=10,
                 auto_find_params=False,
                 check_stationarity=True,
@@ -313,7 +309,7 @@ class TestRunTimeseriesForecast:
             ),
         )
         result = run_timeseries_forecast(state_with_timeseries_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         # Should have stationarity check step
         step_names = [s.step_name for s in result.steps]
@@ -326,8 +322,6 @@ class TestRunTimeseriesForecast:
             target_column="value",
             date_column="date",
             config=TimeSeriesConfig(
-                date_column="date",
-                target_column="value",
                 forecast_periods=10,
                 auto_find_params=False,
                 check_stationarity=False,
@@ -335,7 +329,7 @@ class TestRunTimeseriesForecast:
             ),
         )
         result = run_timeseries_forecast(state_with_timeseries_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
         # Should have model created
         if result.status == "success":
@@ -348,8 +342,6 @@ class TestRunTimeseriesForecast:
             target_column="value",
             date_column="date",
             config=TimeSeriesConfig(
-                date_column="date",
-                target_column="value",
                 forecast_periods="2 weeks",
                 auto_find_params=False,
                 check_stationarity=False,
@@ -357,8 +349,28 @@ class TestRunTimeseriesForecast:
             ),
         )
         result = run_timeseries_forecast(state_with_timeseries_df, params)
-        
+
         assert result.status in ["success", "partial_failure"]
+
+    def test_arima_auto_find_params_uses_fixed_d(self, state_with_timeseries_df):
+        """Test that auto_find_params with stationarity constrains d search."""
+        params = RunTimeseriesForecastInput(
+            dataframe_name="timeseries_data",
+            target_column="value",
+            date_column="date",
+            config=TimeSeriesConfig(
+                forecast_periods=10,
+                auto_find_params=True,
+                check_stationarity=True,
+                generate_forecast_plot=False,
+            ),
+        )
+        result = run_timeseries_forecast(state_with_timeseries_df, params)
+
+        assert result.status in ["success", "partial_failure"]
+        step_names = [s.step_name for s in result.steps]
+        assert "check_stationarity" in step_names
+        assert "find_optimal_params" in step_names
 
 
 # =============================================================================
@@ -376,7 +388,7 @@ class TestWorkflowErrorHandling:
             config=ClassificationConfig(generate_plots=False),
         )
         result = run_classification(state_with_classification_df, params)
-        
+
         # Should fail gracefully
         assert result.status in ["failed", "partial_failure"]
 
@@ -388,7 +400,7 @@ class TestWorkflowErrorHandling:
             target_column="target",
             config=RegressionConfig(generate_plots=False),
         )
-        
+
         # Should raise or return failed status
         try:
             result = run_regression(state, params)
@@ -403,8 +415,6 @@ class TestWorkflowErrorHandling:
             target_column="value",
             date_column="wrong_date_column",
             config=TimeSeriesConfig(
-                date_column="wrong_date_column",
-                target_column="value",
                 forecast_periods=10,
                 auto_find_params=False,
                 check_stationarity=False,
@@ -412,6 +422,6 @@ class TestWorkflowErrorHandling:
             ),
         )
         result = run_timeseries_forecast(state_with_timeseries_df, params)
-        
+
         # fit_arima should fail, but workflow should handle gracefully
         assert result.status in ["failed", "partial_failure"]

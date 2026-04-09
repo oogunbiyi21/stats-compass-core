@@ -353,6 +353,41 @@ class TestFindOptimalARIMA:
             scores = [m["score"] for m in result.top_models]
             assert scores == sorted(scores)
 
+    def test_find_optimal_fixed_d(self) -> None:
+        """Test that fixed_d restricts the d search space."""
+        state = create_state_with_timeseries(n=50)
+
+        # Search with fixed_d=1: only d=1 tested, so models = (max_p+1) * (max_q+1) = 3*3 = 9
+        params_fixed = FindOptimalARIMAInput(
+            dataframe_name="timeseries",
+            target_column="value",
+            max_p=2,
+            max_d=2,  # ignored when fixed_d is set
+            max_q=2,
+            fixed_d=1,
+        )
+        result_fixed = find_optimal_arima(state, params_fixed)
+
+        assert isinstance(result_fixed, ARIMAParameterSearchResult)
+        assert result_fixed.success is True
+        # All best_order entries should have d=1
+        assert result_fixed.best_order[1] == 1
+        for model in result_fixed.top_models:
+            assert model["order"][1] == 1
+
+        # Search without fixed_d: d in [0,1,2] so up to 3x as many models
+        params_free = FindOptimalARIMAInput(
+            dataframe_name="timeseries",
+            target_column="value",
+            max_p=2,
+            max_d=2,
+            max_q=2,
+        )
+        result_free = find_optimal_arima(state, params_free)
+
+        assert isinstance(result_free, ARIMAParameterSearchResult)
+        assert result_free.models_evaluated > result_fixed.models_evaluated
+
 
 class TestCheckStationarity:
     """Tests for check_stationarity function."""
