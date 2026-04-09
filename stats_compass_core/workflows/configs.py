@@ -307,12 +307,6 @@ class TimeSeriesConfig(BaseModel):
     Configuration for the run_timeseries_forecast workflow.
     """
 
-    date_column: str = Field(
-        description="Name of the date/time column"
-    )
-    target_column: str = Field(
-        description="Name of the column to forecast"
-    )
     forecast_periods: int | str = Field(
         default=30,
         description="Number of periods to forecast, or natural language like '1 month'"
