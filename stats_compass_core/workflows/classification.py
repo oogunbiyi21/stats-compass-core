@@ -21,7 +21,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import run_step
+from .utils import build_holdout_predictions, run_step
 
 # =============================================================================
 # Model Registry Mappings
@@ -322,6 +322,12 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     # Step 3+: Generate Plots (registry-based dispatch)
     # =========================================================================
     if config.generate_plots and predictions_df_name and prediction_column:
+        # Plot the holdout, not everything: a confusion matrix over rows the
+        # model memorised contradicts the accuracy printed beside it.
+        plot_df_name, plotted_on = build_holdout_predictions(
+            state, predictions_df_name, params.target_column
+        )
+
 
         for plot_name in config.plots:
             if plot_name not in PLOT_TOOLS:
@@ -336,7 +342,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 # Build plot-specific parameters
                 if plot_name == "confusion_matrix":
                     plot_params = PlotInputSchema(
-                        dataframe_name=predictions_df_name,
+                        dataframe_name=plot_df_name,
                         true_column=params.target_column,
                         pred_column=prediction_column,
                     )
@@ -357,7 +363,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                     # Use probability of positive class (second class)
                     pos_prob_col = probability_columns[1]
                     plot_params = PlotInputSchema(
-                        dataframe_name=predictions_df_name,
+                        dataframe_name=plot_df_name,
                         true_column=params.target_column,
                         prob_column=pos_prob_col,
                         model_id=model_id or "model",

@@ -21,7 +21,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import run_step
+from .utils import build_holdout_predictions, run_step
 
 # =============================================================================
 # Model Registry Mappings
@@ -340,7 +340,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 else:
                     # For other plots that need predictions DataFrame
                     plot_params_dict = {
-                        "dataframe_name": predictions_df_name,
+                        "dataframe_name": plot_df_name,
                         "true_column": params.target_column,
                         "pred_column": prediction_col,
                     }

@@ -270,3 +270,59 @@ class TestTargetEncodingUsesCrossFitting:
         assert not np.allclose(cross_fitted.ravel(), naive.to_numpy()), (
             "encodings identical to raw group means indicate no cross-fitting"
         )
+
+
+class TestChartsDescribeTheSameRowsAsTheMetrics:
+    """Fixing the metric while leaving the charts on the full dataset was worse
+    than fixing neither: a confusion matrix over memorised rows sat next to a
+    correctly held-out accuracy, and the chart is what gets screenshotted.
+
+    In the reported case the matrix summed to 494 rows and implied 93.7%
+    accuracy, while the honest figure was 68.7% on 99 rows.
+    """
+
+    def test_plots_receive_only_holdout_rows(self, unlearnable_classification):
+        result = run_classification(
+            state=unlearnable_classification,
+            params=RunClassificationInput(
+                dataframe_name="noise",
+                target_column="label",
+                config=ClassificationConfig(
+                    model_type="random_forest",
+                    generate_plots=True,
+                    plots=["confusion_matrix"],
+                ),
+            ),
+        )
+        state = unlearnable_classification
+        full = state.get_dataframe("noise_predictions")
+        holdout = state.get_dataframe("noise_predictions_holdout")
+        assert len(holdout) < len(full), "the plotted frame must exclude training rows"
+
+        # The matrix itself is the evidence: summing to the full row count means
+        # the chart described training data whatever frame name it reported.
+        plot = _step(result, "confusion_matrix").result
+        plotted_rows = sum(sum(row) for row in plot["data"]["confusion_matrix"])
+        assert plotted_rows == len(holdout), (
+            f"confusion matrix covers {plotted_rows} rows but the holdout is "
+            f"{len(holdout)}; the chart is describing memorised data"
+        )
+
+        evaluation = _step(result, "evaluate_model").result
+        assert evaluation["n_samples"] == plotted_rows, (
+            "charts and metrics must describe the same rows, or they contradict "
+            "each other in the same response"
+        )
+
+    def test_holdout_frame_is_not_built_without_a_split(self, unlearnable_classification):
+        """With nothing to filter on, plotting the whole frame is correct — but
+        the metric must then also say it covered everything."""
+        from stats_compass_core.workflows.utils import build_holdout_predictions
+
+        state = unlearnable_classification
+        df = pd.DataFrame({"y": [0, 1, 0], "pred_y": [0, 1, 1]})
+        state.set_dataframe(df, "no_split", operation="test_fixture")
+
+        name, evaluated_on = build_holdout_predictions(state, "no_split", "y")
+        assert name == "no_split"
+        assert evaluated_on == "all"

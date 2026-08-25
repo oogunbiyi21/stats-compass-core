@@ -135,3 +135,37 @@ def run_step(
             summary=f"Failed: {str(e)}",
             error=str(e),
         )
+
+
+def build_holdout_predictions(
+    state, predictions_df_name: str, target_column: str
+) -> tuple[str, str]:
+    """Create a test-only view of a predictions frame, for charts.
+
+    Diagnostic plots were handed the full predictions frame, so a confusion
+    matrix, ROC curve and PR curve all described the training data alongside a
+    correctly held-out accuracy figure. The chart is the thing people screenshot,
+    so leaving it inflated while fixing the number would have been worse than
+    fixing neither.
+
+    Returns (dataframe_name, evaluated_on) — falling back to the original frame
+    when there is no split to filter on.
+    """
+    split_col = f"{target_column}_split"
+    df = state.get_dataframe(predictions_df_name)
+
+    if split_col not in df.columns:
+        return predictions_df_name, "all"
+
+    test_rows = df[df[split_col] == "test"]
+    if test_rows.empty:
+        return predictions_df_name, "all"
+
+    holdout_name = f"{predictions_df_name}_holdout"
+    state.set_dataframe(
+        df=test_rows,
+        name=holdout_name,
+        operation="holdout_predictions",
+        set_active=False,
+    )
+    return holdout_name, "test"
