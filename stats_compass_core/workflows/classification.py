@@ -15,7 +15,7 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import ClassificationConfig
-from .feature_engineering import run_feature_engineering_steps
+from .feature_engineering import map_feature_columns, run_feature_engineering_steps
 from .results import (
     WorkflowArtifacts,
     WorkflowResult,
@@ -181,6 +181,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     # Resolve DataFrame
     source_name = params.dataframe_name or state.get_active_dataframe_name()
     current_df_name = source_name  # Track which DataFrame to use (may change after FE)
+    feature_columns = params.feature_columns  # May be renamed by encoding
 
     steps: list[WorkflowStepResult] = []
     step_index = 0
@@ -209,7 +210,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     # Step 0b: Feature Engineering (optional)
     # =========================================================================
     if config.feature_engineering:
-        fe_steps, fe_dfs, current_df_name, step_index = run_feature_engineering_steps(
+        fe_steps, fe_dfs, current_df_name, step_index, fe_mapping = run_feature_engineering_steps(
             state=state,
             config=config.feature_engineering,
             source_name=source_name,
@@ -218,6 +219,8 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         )
         steps.extend(fe_steps)
         dataframes_created.extend(fe_dfs)
+        # Encoding renamed the columns it replaced.
+        feature_columns = map_feature_columns(feature_columns, fe_mapping)
 
     # =========================================================================
     # Step 1: Train Model (registry-based dispatch)
@@ -243,7 +246,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
                 input_schema=InputSchema,
                 source_name=current_df_name,  # Use FE'd DataFrame if available
                 target_column=params.target_column,
-                feature_columns=params.feature_columns,
+                feature_columns=feature_columns,
                 config=config,
             )
 

@@ -11,6 +11,7 @@ from pydantic import Field
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import RegressionEvaluationResult
+from stats_compass_core.ml.evaluation_split import select_rows, train_rows
 from stats_compass_core.state import DataFrameState
 
 
@@ -25,6 +26,21 @@ class EvaluateRegressionInput(StrictToolInput):
     prediction_column: str = Field(description="Name of the prediction column")
     drop_na: bool = Field(
         default=True, description="Drop rows with missing target or prediction"
+    )
+    split_column: str | None = Field(
+        default=None,
+        description=(
+            "Column recording which rows were training vs test data. Defaults to "
+            "'<target_column>_split', which the training tools create."
+        ),
+    )
+    evaluate_on: str = Field(
+        default="test",
+        pattern="^(test|train|all)$",
+        description=(
+            "Which rows to score. Defaults to 'test': scoring 'all' includes rows "
+            "the model trained on, which inflates every metric."
+        ),
     )
 
 
@@ -56,7 +72,13 @@ def evaluate_regression_model(
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in DataFrame")
 
-    data = df[[params.target_column, params.prediction_column]]
+    # Scoring rows the model trained on is what made every metric optimistic;
+    # the holdout is the default and the result records which was used.
+    scored, evaluated_on = select_rows(
+        df, params.target_column, params.split_column, params.evaluate_on
+    )
+
+    data = scored[[params.target_column, params.prediction_column]]
     if params.drop_na:
         data = data.dropna()
 
@@ -76,6 +98,19 @@ def evaluate_regression_model(
     ss_tot = float(((y_true - y_true.mean()) ** 2).sum())
     r2 = 1 - ss_res / ss_tot if ss_tot != 0 else 0.0
 
+    # The train/test gap is what makes memorisation visible; reporting only one
+    # of the two numbers is how an overfitted model passes for a good one.
+    train_metrics = None
+    if evaluated_on == "test":
+        train = train_rows(df, params.target_column, params.split_column)
+        if train is not None:
+            train_data = train[[params.target_column, params.prediction_column]].dropna()
+            if not train_data.empty:
+                train_metrics = _regression_scores(
+                    train_data[params.target_column].to_numpy(),
+                    train_data[params.prediction_column].to_numpy(),
+                )
+
     return RegressionEvaluationResult(
         rmse=rmse,
         mae=mae,
@@ -84,4 +119,18 @@ def evaluate_regression_model(
         dataframe_name=source_name,
         target_column=params.target_column,
         prediction_column=params.prediction_column,
+        evaluated_on=evaluated_on,
+        train_metrics=train_metrics,
     )
+
+
+def _regression_scores(y_true, y_pred) -> dict:
+    errors = y_pred - y_true
+    ss_res = float(((y_true - y_pred) ** 2).sum())
+    ss_tot = float(((y_true - y_true.mean()) ** 2).sum())
+    return {
+        "rmse": math.sqrt(float((errors ** 2).mean())),
+        "mae": float(abs(errors).mean()),
+        "r2": 1 - ss_res / ss_tot if ss_tot != 0 else 0.0,
+        "n_samples": len(y_true),
+    }

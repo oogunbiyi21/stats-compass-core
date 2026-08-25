@@ -305,6 +305,22 @@ class ClassificationEvaluationResult(BaseModel):
     dataframe_name: str = Field(description="Name of the DataFrame evaluated")
     target_column: str = Field(description="Name of the target column")
     prediction_column: str = Field(description="Name of the prediction column")
+    evaluated_on: str = Field(
+        default="all",
+        description=(
+            "Which rows these metrics describe: 'test' (held out), 'train', or "
+            "'all'. A metric that does not say what it describes invites being "
+            "read as held-out performance when it is not."
+        ),
+    )
+    train_metrics: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "The same headline scores on the training rows, when a split exists. "
+            "A large gap between these and the held-out scores means the model "
+            "has memorised rather than generalised."
+        ),
+    )
 
 
 class RegressionEvaluationResult(BaseModel):
@@ -317,6 +333,21 @@ class RegressionEvaluationResult(BaseModel):
     dataframe_name: str = Field(description="Name of the DataFrame evaluated")
     target_column: str = Field(description="Name of the target column")
     prediction_column: str = Field(description="Name of the prediction column")
+    evaluated_on: str = Field(
+        default="all",
+        description=(
+            "Which rows these metrics describe: 'test' (held out), 'train', or "
+            "'all'. A metric that does not say what it describes invites being "
+            "read as held-out performance when it is not."
+        ),
+    )
+    train_metrics: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "The same scores on the training rows, when a split exists. A large "
+            "gap means the model has memorised rather than generalised."
+        ),
+    )
 
 
 class ModelListResult(BaseModel):

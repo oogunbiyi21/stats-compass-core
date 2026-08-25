@@ -9,6 +9,7 @@ from pydantic import Field
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import ClassificationEvaluationResult
+from stats_compass_core.ml.evaluation_split import select_rows, train_rows
 from stats_compass_core.state import DataFrameState
 
 
@@ -28,6 +29,21 @@ class EvaluateClassificationInput(StrictToolInput):
         default="weighted",
         pattern="^(micro|macro|weighted|binary)$",
         description="Averaging strategy for precision/recall/f1",
+    )
+    split_column: str | None = Field(
+        default=None,
+        description=(
+            "Column recording which rows were training vs test data. Defaults to "
+            "'<target_column>_split', which the training tools create."
+        ),
+    )
+    evaluate_on: str = Field(
+        default="test",
+        pattern="^(test|train|all)$",
+        description=(
+            "Which rows to score. Defaults to 'test': scoring 'all' includes rows "
+            "the model trained on, which inflates every metric."
+        ),
     )
 
 
@@ -70,7 +86,13 @@ def evaluate_classification_model(
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in DataFrame")
 
-    data = df[[params.target_column, params.prediction_column]]
+    # Scoring rows the model trained on is what made every metric optimistic;
+    # the holdout is the default and the result records which was used.
+    scored, evaluated_on = select_rows(
+        df, params.target_column, params.split_column, params.evaluate_on
+    )
+
+    data = scored[[params.target_column, params.prediction_column]]
     if params.drop_na:
         data = data.dropna()
 
@@ -121,6 +143,24 @@ def evaluate_classification_model(
 
     cm = metrics.confusion_matrix(y_true, y_pred, labels=labels)
 
+    # The train/test gap is what makes memorisation visible. A model scoring
+    # 1.00 on train and 0.47 on test has learned nothing, and reporting only one
+    # of those numbers is how that goes unnoticed.
+    train_metrics = None
+    if evaluated_on == "test":
+        train = train_rows(df, params.target_column, params.split_column)
+        if train is not None:
+            train_data = train[[params.target_column, params.prediction_column]].dropna()
+            if not train_data.empty:
+                train_metrics = _basic_scores(
+                    metrics,
+                    train_data[params.target_column],
+                    train_data[params.prediction_column],
+                    average,
+                    labels,
+                    pos_label,
+                )
+
     return ClassificationEvaluationResult(
         accuracy=accuracy,
         precision=precision,
@@ -133,4 +173,22 @@ def evaluate_classification_model(
         dataframe_name=source_name,
         target_column=params.target_column,
         prediction_column=params.prediction_column,
+        evaluated_on=evaluated_on,
+        train_metrics=train_metrics,
     )
+
+
+def _basic_scores(metrics, y_true, y_pred, average, labels, pos_label) -> dict:
+    """Headline scores only — the confusion matrix is not repeated for train."""
+    kwargs = (
+        {"average": average, "pos_label": pos_label, "zero_division": 0}
+        if average == "binary"
+        else {"average": average, "labels": labels, "zero_division": 0}
+    )
+    return {
+        "accuracy": float(metrics.accuracy_score(y_true, y_pred)),
+        "precision": float(metrics.precision_score(y_true, y_pred, **kwargs)),
+        "recall": float(metrics.recall_score(y_true, y_pred, **kwargs)),
+        "f1": float(metrics.f1_score(y_true, y_pred, **kwargs)),
+        "n_samples": len(y_true),
+    }

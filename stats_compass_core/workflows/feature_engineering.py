@@ -145,7 +145,7 @@ def run_feature_engineering_steps(
     source_name: str,
     target_column: str,
     start_step_index: int = 0,
-) -> tuple[list[WorkflowStepResult], list[str], str, int]:
+) -> tuple[list[WorkflowStepResult], list[str], str, int, dict[str, str]]:
     """
     Run feature engineering steps before model training.
     
@@ -167,9 +167,14 @@ def run_feature_engineering_steps(
         - List of created DataFrame names
         - Final DataFrame name to use for training
         - Final step index
+        - Mapping of original column name -> encoded column name. Encoding
+          replaces the originals, so a caller holding user-supplied feature
+          names must translate them or ask the trainer for columns that no
+          longer exist.
     """
     steps: list[WorkflowStepResult] = []
     dataframes_created: list[str] = []
+    column_mapping: dict[str, str] = {}
     current_df_name = source_name
     step_index = start_step_index
 
@@ -192,7 +197,7 @@ def run_feature_engineering_steps(
             summary="No categorical columns found for feature engineering",
             skip_reason="No object/category dtype columns detected (excluding target)",
         ))
-        return steps, dataframes_created, current_df_name, step_index
+        return steps, dataframes_created, current_df_name, step_index, column_mapping
 
     # =========================================================================
     # Step 1: Bin Rare Categories (if enabled)
@@ -250,6 +255,10 @@ def run_feature_engineering_steps(
         if step_result.status == "success":
             current_df_name = encoded_name
             dataframes_created.append(encoded_name)
+            # Encoding renames the columns it replaces; without this the caller
+            # asks the trainer for names the DataFrame no longer has.
+            mapping = (step_result.result or {}).get("column_mapping") or {}
+            column_mapping.update(mapping)
     elif config.encode_categoricals and not categorical_columns:
         step_index += 1
         steps.append(WorkflowStepResult(
@@ -260,4 +269,20 @@ def run_feature_engineering_steps(
             skip_reason="No valid categorical columns after binning",
         ))
 
-    return steps, dataframes_created, current_df_name, step_index
+    return steps, dataframes_created, current_df_name, step_index, column_mapping
+
+
+def map_feature_columns(
+    feature_columns: list[str] | None, column_mapping: dict[str, str]
+) -> list[str] | None:
+    """Translate user-supplied feature names through feature engineering.
+
+    Target encoding replaces a categorical column with an encoded one and drops
+    the original, so feature names captured before that step no longer exist by
+    the time training runs. Passing them through unchanged fails with "Feature
+    columns not found" after the encoding step has already reported success,
+    which reads as a bug in the encoding rather than in the plumbing.
+    """
+    if not feature_columns or not column_mapping:
+        return feature_columns
+    return [column_mapping.get(col, col) for col in feature_columns]
