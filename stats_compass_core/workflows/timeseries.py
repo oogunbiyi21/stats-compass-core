@@ -6,7 +6,6 @@ using registry-based dispatch.
 """
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import Field
 
@@ -21,7 +20,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import run_step
+from .utils import get_tool, run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -69,22 +68,6 @@ class RunTimeseriesForecastInput(StrictToolInput):
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-def _get_tool(category: str, name: str) -> tuple[Any, type]:
-    """
-    Get a tool function and its input schema from the registry.
-    
-    Returns:
-        Tuple of (tool_function, InputSchemaClass)
-    
-    Raises:
-        ValueError: If tool not found in registry
-    """
-    metadata = registry.get_tool_metadata(category, name)
-    if metadata is None:
-        raise ValueError(f"Tool not found: {category}.{name}")
-    return metadata.function, metadata.input_schema
-
 
 def _parse_forecast_periods(
     forecast_periods: int | str,
@@ -246,7 +229,7 @@ def run_timeseries_forecast(
                 elif config.handle_missing_dates in ["ffill", "bfill", "drop"]:
                     # Attempt to fix automatically using clean_dates tool
                     try:
-                        clean_func, CleanInput = _get_tool("cleaning", "clean_dates")
+                        clean_func, CleanInput = get_tool("cleaning", "clean_dates")
 
                         cleaned_df_name = f"{source_name}_dates_fixed"
 
@@ -360,7 +343,7 @@ def run_timeseries_forecast(
         step_index += 1
 
         try:
-            stationarity_func, StationarityInput = _get_tool("ml", ARIMA_TOOLS["stationarity"])
+            stationarity_func, StationarityInput = get_tool("ml", ARIMA_TOOLS["stationarity"])
 
             stationarity_params_dict = {
                 "dataframe_name": current_df_name,
@@ -408,7 +391,7 @@ def run_timeseries_forecast(
         step_index += 1
 
         try:
-            find_func, FindInput = _get_tool("ml", ARIMA_TOOLS["find_optimal"])
+            find_func, FindInput = get_tool("ml", ARIMA_TOOLS["find_optimal"])
 
             find_params_dict = {
                 "dataframe_name": current_df_name,
@@ -460,7 +443,7 @@ def run_timeseries_forecast(
     step_index += 1
 
     try:
-        fit_func, FitInput = _get_tool("ml", ARIMA_TOOLS["fit"])
+        fit_func, FitInput = get_tool("ml", ARIMA_TOOLS["fit"])
 
         # Determine ARIMA order
         if optimal_order:
@@ -525,7 +508,7 @@ def run_timeseries_forecast(
         step_index += 1
 
         try:
-            forecast_func, ForecastInput = _get_tool("ml", ARIMA_TOOLS["forecast"])
+            forecast_func, ForecastInput = get_tool("ml", ARIMA_TOOLS["forecast"])
 
             # Parse forecast periods
             n_periods, forecast_number, forecast_unit = _parse_forecast_periods(
@@ -606,7 +589,7 @@ def run_timeseries_forecast(
         step_index += 1
 
         try:
-            plot_func, PlotInput = _get_tool("plots", PLOT_TOOLS["forecast_plot"][0])
+            plot_func, PlotInput = get_tool("plots", PLOT_TOOLS["forecast_plot"][0])
 
             # Determine n_periods for plot
             n_periods, forecast_number, forecast_unit = _parse_forecast_periods(

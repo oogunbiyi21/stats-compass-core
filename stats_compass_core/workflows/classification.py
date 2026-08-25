@@ -21,7 +21,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import build_holdout_predictions, run_step
+from .utils import build_holdout_predictions, get_tool, run_step
 
 # =============================================================================
 # Model Registry Mappings
@@ -83,22 +83,6 @@ class RunClassificationInput(StrictToolInput):
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-def _get_tool(category: str, name: str) -> tuple[Any, type]:
-    """
-    Get a tool function and its input schema from the registry.
-    
-    Returns:
-        Tuple of (tool_function, InputSchemaClass)
-    
-    Raises:
-        ValueError: If tool not found in registry
-    """
-    metadata = registry.get_tool_metadata(category, name)
-    if metadata is None:
-        raise ValueError(f"Tool not found: {category}.{name}")
-    return metadata.function, metadata.input_schema
-
 
 def _build_training_params(
     input_schema: type,
@@ -241,7 +225,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         ))
     else:
         try:
-            train_func, InputSchema = _get_tool("ml", tool_name)
+            train_func, InputSchema = get_tool("ml", tool_name)
             train_params = _build_training_params(
                 input_schema=InputSchema,
                 source_name=current_df_name,  # Use FE'd DataFrame if available
@@ -292,7 +276,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
         step_index += 1
 
         try:
-            eval_func, EvalInputSchema = _get_tool("ml", "evaluate_classification_model")
+            eval_func, EvalInputSchema = get_tool("ml", "evaluate_classification_model")
             eval_params = EvalInputSchema(
                 dataframe_name=predictions_df_name,
                 target_column=params.target_column,
@@ -337,7 +321,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
             step_index += 1
 
             try:
-                plot_func, PlotInputSchema = _get_tool("plots", tool_name)
+                plot_func, PlotInputSchema = get_tool("plots", tool_name)
 
                 # Build plot-specific parameters
                 if plot_name == "confusion_matrix":

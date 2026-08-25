@@ -68,7 +68,7 @@ class RunPreprocessingInput(StrictToolInput):
 # Helper Functions
 # =============================================================================
 
-def _get_tool(step_name: str) -> tuple[Any, type]:
+def _resolve_cleaning_step(step_name: str) -> tuple[Any, type]:
     """
     Get a tool function and its input schema from the registry.
     
@@ -114,7 +114,7 @@ def _run_preprocessing_step(
         WorkflowStepResult
     """
     try:
-        tool_func, InputSchema = _get_tool(step_name)
+        tool_func, InputSchema = _resolve_cleaning_step(step_name)
 
         # Filter params to only those the schema accepts
         schema_fields = set(InputSchema.model_fields.keys())

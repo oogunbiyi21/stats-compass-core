@@ -21,7 +21,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import build_holdout_predictions, run_step
+from .utils import build_holdout_predictions, get_tool, run_step
 
 # =============================================================================
 # Model Registry Mappings
@@ -81,22 +81,6 @@ class RunRegressionInput(StrictToolInput):
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-def _get_tool(category: str, name: str) -> tuple[Any, type]:
-    """
-    Get a tool function and its input schema from the registry.
-    
-    Returns:
-        Tuple of (tool_function, InputSchemaClass)
-    
-    Raises:
-        ValueError: If tool not found in registry
-    """
-    metadata = registry.get_tool_metadata(category, name)
-    if metadata is None:
-        raise ValueError(f"Tool not found: {category}.{name}")
-    return metadata.function, metadata.input_schema
-
 
 def _build_training_params(
     input_schema: type,
@@ -235,7 +219,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         ))
     else:
         try:
-            train_func, TrainInputSchema = _get_tool("ml", tool_name)
+            train_func, TrainInputSchema = get_tool("ml", tool_name)
             train_params = _build_training_params(
                 TrainInputSchema,
                 current_df_name,  # Use FE'd DataFrame if available
@@ -282,7 +266,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
         step_index += 1
 
         try:
-            eval_func, EvalInputSchema = _get_tool("ml", "evaluate_regression_model")
+            eval_func, EvalInputSchema = get_tool("ml", "evaluate_regression_model")
 
             # Build evaluation params
             # Prediction column follows pattern: pred_{target_column}
@@ -341,7 +325,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
             step_index += 1
 
             try:
-                plot_func, PlotInputSchema = _get_tool("plots", tool_name)
+                plot_func, PlotInputSchema = get_tool("plots", tool_name)
 
                 # Build plot params - prediction column follows pattern: pred_{target_column}
                 prediction_col = f"pred_{params.target_column}"

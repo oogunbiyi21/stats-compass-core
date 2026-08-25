@@ -9,9 +9,33 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
+from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .results import WorkflowStepResult
+
+
+def get_tool(category: str, name: str) -> tuple[Any, type]:
+    """
+    Get a tool function and its input schema from the registry.
+
+    This lived as four byte-identical private copies across classification,
+    regression, eda_report and timeseries. Two *other* modules
+    (feature_engineering, preprocessing) defined a different function under the
+    same name, taking a step name rather than a category — those are now
+    _resolve_feature_step and _resolve_cleaning_step, because one name for two
+    contracts is how a call ends up in the wrong place.
+
+    Returns:
+        Tuple of (tool_function, InputSchemaClass)
+
+    Raises:
+        ValueError: If tool not found in registry
+    """
+    metadata = registry.get_tool_metadata(category, name)
+    if metadata is None:
+        raise ValueError(f"Tool not found: {category}.{name}")
+    return metadata.function, metadata.input_schema
 
 
 def generate_model_save_path(

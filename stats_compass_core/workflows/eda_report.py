@@ -21,7 +21,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import run_step
+from .utils import get_tool, run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -66,22 +66,6 @@ class RunEDAReportInput(StrictToolInput):
 # Helper Functions
 # =============================================================================
 
-def _get_tool(category: str, name: str) -> tuple[Any, type]:
-    """
-    Get a tool function and its input schema from the registry.
-    
-    Returns:
-        Tuple of (tool_function, InputSchemaClass)
-    
-    Raises:
-        ValueError: If tool not found in registry
-    """
-    metadata = registry.get_tool_metadata(category, name)
-    if metadata is None:
-        raise ValueError(f"Tool not found: {category}.{name}")
-    return metadata.function, metadata.input_schema
-
-
 def _run_eda_step(
     state: DataFrameState,
     step_name: str,
@@ -103,7 +87,7 @@ def _run_eda_step(
     category, tool_name = EDA_TOOLS[step_name]
 
     try:
-        tool_func, InputSchema = _get_tool(category, tool_name)
+        tool_func, InputSchema = get_tool(category, tool_name)
 
         # Build params - all EDA tools take dataframe_name
         params_dict = {"dataframe_name": source_name}
@@ -218,7 +202,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
     if config.generate_histograms and "histogram" in PLOT_TOOLS:
         try:
             category, tool_name = PLOT_TOOLS["histogram"]
-            plot_func, PlotInputSchema = _get_tool(category, tool_name)
+            plot_func, PlotInputSchema = get_tool(category, tool_name)
 
             numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
 
@@ -266,7 +250,7 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
     if config.generate_bar_charts and "bar_chart" in PLOT_TOOLS:
         try:
             category, tool_name = PLOT_TOOLS["bar_chart"]
-            plot_func, PlotInputSchema = _get_tool(category, tool_name)
+            plot_func, PlotInputSchema = get_tool(category, tool_name)
 
             categorical_cols = df.select_dtypes(
                 include=["object", "category", "bool"]
