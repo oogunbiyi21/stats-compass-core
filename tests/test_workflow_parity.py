@@ -48,19 +48,21 @@ def _frame(target_is_categorical: bool, n: int = 300) -> pd.DataFrame:
     })
 
 
-def _run(kind: str, *, features=None, plots=False):
+def _run(kind: str, *, features=None, plots=False, **config_overrides):
     state = DataFrameState()
     state.set_dataframe(_frame(kind == "classification"), "df", operation="parity")
+
+    settings = {"model_type": "random_forest", "generate_plots": plots, **config_overrides}
 
     if kind == "classification":
         result = run_classification(state, RunClassificationInput(
             dataframe_name="df", target_column="target", feature_columns=features,
-            config=ClassificationConfig(model_type="random_forest", generate_plots=plots),
+            config=ClassificationConfig(**settings),
         ))
     else:
         result = run_regression(state, RunRegressionInput(
             dataframe_name="df", target_column="target", feature_columns=features,
-            config=RegressionConfig(model_type="random_forest", generate_plots=plots),
+            config=RegressionConfig(**settings),
         ))
     return state, result
 
@@ -69,7 +71,43 @@ def _step(result, name):
     return next((s for s in result.steps if s.step_name == name), None)
 
 
+# Everything a supervised workflow emits that is not a chart. Anything else in
+# the step list is a chart step, under either naming convention — classification
+# names them for the chart type, regression prefixes them "plot_" (D6).
+NON_CHART_STEPS = {
+    "bin_rare_categories", "target_encode", "train_model", "evaluate_model",
+}
+
+
+def _chart_steps(result):
+    return [s for s in result.steps if s.step_name not in NON_CHART_STEPS]
+
+
+def _shared_prefix(result):
+    """(index, name) pairs up to and including evaluate_model.
+
+    The plot block legitimately differs in length between the two workflows, so
+    parity on step numbering is asserted over the part that should not differ.
+    """
+    prefix = []
+    for step in result.steps:
+        prefix.append((step.step_index, step.step_name))
+        if step.step_name == "evaluate_model":
+            break
+    return prefix
+
+
 BOTH = pytest.mark.parametrize("kind", ["classification", "regression"])
+
+# Scenarios both workflows must handle identically. Named so a failure report
+# says which configuration broke.
+SCENARIOS = {
+    "defaults": {},
+    "gradient_boosting": {"model_type": "gradient_boosting"},
+    "no_feature_engineering": {"feature_engineering": None},
+    "drop_columns": {"drop_columns": ["category_b"]},
+}
+EVERY_SCENARIO = pytest.mark.parametrize("scenario", list(SCENARIOS))
 
 
 class TestBothWorkflowsTranslateFeatureColumns:
@@ -144,4 +182,179 @@ class TestBothWorkflowsPlotWithoutBlowingUp:
         assert not offenders, (
             f"{kind} plotted {offenders}, which include training rows — the "
             "chart would contradict the accuracy printed beside it"
+        )
+
+
+# =============================================================================
+# Below here: added to cover what the refactor can break.
+#
+# The suite above asserts behaviour that three shipped defects violated. It did
+# not assert step numbering, artifact ordering, or result shape — which are
+# exactly the three things merging the two workflows behind one skeleton, and
+# handing step numbering to an accumulator, are most likely to disturb. Without
+# these, "the parity suite still passes" would have meant very little.
+# =============================================================================
+
+
+class TestStepNumbering:
+    """step_index is 1-based and contiguous. An accumulator that owns the
+    counter must not skip, repeat or reorder — users read these numbers, and
+    ARCHITECTURE.md documents them as 1-indexed."""
+
+    @BOTH
+    @EVERY_SCENARIO
+    def test_indices_are_contiguous_from_one(self, kind, scenario):
+        _, result = _run(kind, **SCENARIOS[scenario])
+        indices = [s.step_index for s in result.steps]
+        assert indices == list(range(1, len(indices) + 1)), (
+            f"{kind}/{scenario} numbered its steps {indices}"
+        )
+
+    @BOTH
+    def test_plot_steps_continue_the_sequence(self, kind):
+        """Plots are numbered by the same counter, not restarted."""
+        _, result = _run(kind, plots=True)
+        indices = [s.step_index for s in result.steps]
+        assert indices == list(range(1, len(indices) + 1))
+
+    @EVERY_SCENARIO
+    def test_both_workflows_number_the_shared_steps_identically(self, scenario):
+        _, classification = _run("classification", **SCENARIOS[scenario])
+        _, regression = _run("regression", **SCENARIOS[scenario])
+        assert _shared_prefix(classification) == _shared_prefix(regression)
+
+
+class TestArtifactOrdering:
+    """dataframes_created and models_created feed the result the assistant
+    reads. Order is meaningful: the predictions frame is the one to carry
+    forward, and it is identified by position."""
+
+    @BOTH
+    @EVERY_SCENARIO
+    def test_predictions_frame_is_recorded_last(self, kind, scenario):
+        _, result = _run(kind, **SCENARIOS[scenario])
+        created = result.artifacts.dataframes_created
+        assert created, f"{kind}/{scenario} recorded no dataframes"
+        assert created[-1] == result.artifacts.final_dataframe
+
+    @BOTH
+    @EVERY_SCENARIO
+    def test_created_frames_all_exist_in_state(self, kind, scenario):
+        state, result = _run(kind, **SCENARIOS[scenario])
+        missing = [
+            name for name in result.artifacts.dataframes_created
+            if state.get_dataframe(name) is None
+        ]
+        assert not missing, f"{kind}/{scenario} claims frames that do not exist: {missing}"
+
+    @EVERY_SCENARIO
+    def test_both_workflows_create_the_same_frames_in_the_same_order(self, scenario):
+        _, classification = _run("classification", **SCENARIOS[scenario])
+        _, regression = _run("regression", **SCENARIOS[scenario])
+        assert (
+            classification.artifacts.dataframes_created
+            == regression.artifacts.dataframes_created
+        )
+
+    @BOTH
+    def test_the_recorded_model_is_the_one_that_was_trained(self, kind):
+        _, result = _run(kind)
+        assert result.artifacts.models_created == [
+            _step(result, "train_model").result["model_id"]
+        ]
+
+    @BOTH
+    def test_feature_engineering_frames_precede_the_predictions_frame(self, kind):
+        _, result = _run(kind)
+        created = result.artifacts.dataframes_created
+        assert created == ["df_binned", "df_encoded", "df_encoded_predictions"], created
+
+
+class TestResultShape:
+    """The fields the MCP summariser forwards."""
+
+    @BOTH
+    @EVERY_SCENARIO
+    def test_workflow_reports_its_own_name(self, kind, scenario):
+        _, result = _run(kind, **SCENARIOS[scenario])
+        assert result.workflow_name == f"run_{kind}"
+
+    @BOTH
+    @EVERY_SCENARIO
+    def test_a_clean_run_reports_success(self, kind, scenario):
+        _, result = _run(kind, **SCENARIOS[scenario])
+        assert result.status == "success", [
+            (s.step_name, s.error) for s in result.steps if s.status == "failed"
+        ]
+
+    @BOTH
+    def test_notes_point_at_the_predictions_frame(self, kind):
+        _, result = _run(kind)
+        assert any(
+            result.artifacts.final_dataframe in note for note in result.notes
+        ), result.notes
+
+    @BOTH
+    def test_chart_count_matches_the_chart_steps_that_succeeded(self, kind):
+        _, result = _run(kind, plots=True)
+        succeeded = [s for s in _chart_steps(result) if s.status == "success"]
+        assert result.artifacts.charts_generated == len(succeeded)
+
+
+class TestFailuresExplainThemselves:
+    """D1. A workflow that fails outright should say why and what to try.
+
+    Regression populates error_summary and suggestion; classification leaves
+    both None, so an assistant handed a failed classification has nothing to
+    relay. The summariser forwards both fields, so this is user-visible.
+
+    Classification is xfailed rather than deleted: it marks the divergence, and
+    strict=True turns the suite red the moment phase 3 fixes it and this stops
+    being a known failure.
+    """
+
+    @pytest.mark.parametrize("kind", [
+        pytest.param("classification", marks=pytest.mark.xfail(
+            strict=True,
+            reason="D1: classification sets neither field; phase 3 adopts "
+                   "regression's behaviour",
+        )),
+        "regression",
+    ])
+    def test_a_failed_run_carries_a_diagnosis(self, kind):
+        _, result = _run(kind, features=["no_such_column"], feature_engineering=None)
+        assert result.status == "failed", "scenario stopped reproducing a failure"
+        assert result.error_summary, f"{kind} failed without an error_summary"
+        assert result.suggestion, f"{kind} failed without a suggestion"
+
+
+class TestConfiguredPlotsAreAccountedFor:
+    """D2. RegressionConfig.plots defaults to residuals, predicted_vs_actual and
+    feature_importance, but only feature_importance is registered. The other two
+    are dropped by a bare `continue` — no step, no skip, no note. The config
+    advertises charts the workflow cannot produce and says nothing when they do
+    not arrive.
+
+    Classification records status="skipped" in the equivalent situation.
+    """
+
+    @pytest.mark.parametrize("kind", [
+        "classification",
+        pytest.param("regression", marks=pytest.mark.xfail(
+            strict=True,
+            reason="D2: regression drops unregistered plots silently; phase 3 "
+                   "records a skipped step instead",
+        )),
+    ])
+    def test_every_configured_plot_produces_a_step(self, kind):
+        _, result = _run(kind, plots=True)
+        configured = (
+            ["confusion_matrix", "roc", "precision_recall", "feature_importance"]
+            if kind == "classification"
+            else ["residuals", "predicted_vs_actual", "feature_importance"]
+        )
+        assert len(_chart_steps(result)) == len(configured), (
+            f"{kind} configured {len(configured)} plots but recorded "
+            f"{len(_chart_steps(result))} steps: "
+            f"{[s.step_name for s in _chart_steps(result)]}"
         )
