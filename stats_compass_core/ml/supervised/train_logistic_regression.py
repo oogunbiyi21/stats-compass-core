@@ -34,6 +34,19 @@ class TrainLogisticRegressionInput(StrictToolInput):
     max_iter: int = Field(
         default=1000, ge=100, description="Maximum iterations for solver convergence"
     )
+    class_weight: str | None = Field(
+        default=None,
+        description=(
+            "Set to 'balanced' when classes are imbalanced. Without it a model "
+            "trained on, say, 20% positives can score well by predicting the "
+            "majority class for everyone and never catching the cases you care about."
+        ),
+    )
+    C: float = Field(
+        default=1.0,
+        gt=0,
+        description="Inverse regularisation strength. Lower values regularise more.",
+    )
     save_path: str | None = Field(
         default=None, description="Path to save the trained model (e.g., 'model.joblib')"
     )
@@ -81,7 +94,12 @@ def train_logistic_regression(
         train_indices = X_train.index
         test_indices = X_test.index
 
-        model = LogisticRegression(random_state=params.random_state, max_iter=params.max_iter)
+        model = LogisticRegression(
+            random_state=params.random_state,
+            max_iter=params.max_iter,
+            class_weight=params.class_weight,
+            C=params.C,
+        )
         model.fit(X_train, y_train)
         train_score = model.score(X_train, y_train)
         test_score = model.score(X_test, y_test) if len(X_test) > 0 else None

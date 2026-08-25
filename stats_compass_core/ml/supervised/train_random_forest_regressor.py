@@ -34,6 +34,26 @@ class TrainRandomForestRegressorInput(StrictToolInput):
     n_estimators: int = Field(
         default=100, ge=1, description="Number of trees in the forest"
     )
+    max_depth: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Maximum depth of each tree. Unlimited by default, which lets the "
+            "forest memorise the training set — a train score of 1.00 alongside a "
+            "far lower test score is the sign. Values around 4-8 usually help."
+        ),
+    )
+    min_samples_leaf: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "Minimum samples required at a leaf. Raising it (5-20) is the other "
+            "main lever against memorising small datasets."
+        ),
+    )
+    min_samples_split: int = Field(
+        default=2, ge=2, description="Minimum samples required to split a node"
+    )
     save_path: str | None = Field(
         default=None, description="Path to save the trained model (e.g., 'model.joblib')"
     )
@@ -83,7 +103,10 @@ def train_random_forest_regressor(
 
         model = RandomForestRegressor(
             n_estimators=params.n_estimators,
-            random_state=params.random_state
+            random_state=params.random_state,
+            max_depth=params.max_depth,
+            min_samples_leaf=params.min_samples_leaf,
+            min_samples_split=params.min_samples_split,
         )
         model.fit(X_train, y_train)
         train_score = model.score(X_train, y_train)
