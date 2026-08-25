@@ -326,3 +326,39 @@ class TestChartsDescribeTheSameRowsAsTheMetrics:
         name, evaluated_on = build_holdout_predictions(state, "no_split", "y")
         assert name == "no_split"
         assert evaluated_on == "all"
+
+
+class TestRegressionFeatureColumnsSurviveEncoding:
+    """The same fix had to be applied twice and nearly wasn't.
+
+    Classification passes feature_columns to the trainer by keyword and
+    regression passes it positionally, so an edit matching the keyword form
+    silently missed regression entirely — the workflow encoded the columns,
+    then asked the trainer for names that no longer existed.
+    """
+
+    def test_named_categorical_features_still_train(self):
+        state = DataFrameState()
+        rng = np.random.default_rng(0)
+        n = 300
+        state.set_dataframe(pd.DataFrame({
+            "mainroad": rng.choice(["yes", "no"], size=n),
+            "furnishingstatus": rng.choice(["furnished", "semi", "unfurnished"], size=n),
+            "area": rng.integers(1000, 9000, size=n),
+            "price": rng.integers(1_750_000, 13_300_000, size=n),
+        }), "housing", operation="test_fixture")
+
+        result = run_regression(
+            state=state,
+            params=RunRegressionInput(
+                dataframe_name="housing",
+                target_column="price",
+                feature_columns=["mainroad", "furnishingstatus", "area"],
+                config=RegressionConfig(model_type="random_forest", generate_plots=False),
+            ),
+        )
+        train_step = _step(result, "train_model")
+        assert train_step.status == "success", train_step.error
+        assert set(train_step.result["feature_columns"]) == {
+            "mainroad_encoded", "furnishingstatus_encoded", "area",
+        }

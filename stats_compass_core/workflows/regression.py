@@ -240,7 +240,7 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
                 TrainInputSchema,
                 current_df_name,  # Use FE'd DataFrame if available
                 params.target_column,
-                params.feature_columns,
+                feature_columns,  # Translated through encoding, not params.*
                 config,
             )
 
