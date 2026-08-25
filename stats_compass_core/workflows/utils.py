@@ -66,6 +66,58 @@ def generate_model_save_path(
     return os.path.join(tempfile.gettempdir(), filename)
 
 
+def build_training_params(
+    *,
+    input_schema: type,
+    source_name: str,
+    target_column: str,
+    feature_columns: list[str] | None,
+    config: Any,
+) -> Any:
+    """
+    Build training parameters dynamically based on the input schema.
+
+    Keyword-only on purpose. This existed as two near-identical copies, and
+    classification called it by keyword while regression called it
+    positionally — so the fix that taught it to pass encoding-renamed feature
+    columns matched one call site and silently missed the other. Regression
+    went on asking the trainer for columns that no longer existed. Keyword-only
+    makes that divergence impossible to recreate.
+
+    Merge order is load-bearing: config.hyperparameters override the common
+    params, and the schema filter then drops anything this particular trainer
+    does not accept. Unknown hyperparameter keys are dropped silently, which
+    test_model_tuning_params.py relies on.
+
+    Args:
+        input_schema: The trainer's input schema; also the filter.
+        source_name: DataFrame to train on (post feature engineering).
+        target_column: Name of the target column.
+        feature_columns: Feature names, already translated through any encoding.
+        config: ClassificationConfig or RegressionConfig.
+    """
+    save_path = None
+    if config.save_model:
+        save_path = generate_model_save_path(
+            model_type=config.model_type,
+            target_column=target_column,
+            custom_path=config.model_save_path,
+        )
+
+    all_params = {
+        "dataframe_name": source_name,
+        "target_column": target_column,
+        "feature_columns": feature_columns,
+        "test_size": config.test_size,
+        "random_state": config.random_state,
+        "save_path": save_path,
+        **(config.hyperparameters or {}),
+    }
+
+    schema_fields = set(input_schema.model_fields.keys())
+    return input_schema(**{k: v for k, v in all_params.items() if k in schema_fields})
+
+
 def run_step(
     step_name: str,
     step_index: int,

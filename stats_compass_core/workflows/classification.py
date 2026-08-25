@@ -21,7 +21,12 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import build_holdout_predictions, get_tool, run_step
+from .utils import (
+    build_holdout_predictions,
+    build_training_params,
+    get_tool,
+    run_step,
+)
 
 # =============================================================================
 # Model Registry Mappings
@@ -78,56 +83,6 @@ class RunClassificationInput(StrictToolInput):
         default=None,
         description="Optional configuration to customize the workflow. Uses sensible defaults if not provided."
     )
-
-
-# =============================================================================
-# Helper Functions
-# =============================================================================
-
-def _build_training_params(
-    input_schema: type,
-    source_name: str,
-    target_column: str,
-    feature_columns: list[str] | None,
-    config: ClassificationConfig,
-    model_id_hint: str | None = None,
-) -> Any:
-    """
-    Build training parameters dynamically based on the input schema.
-    
-    Common parameters are set explicitly, model-specific hyperparameters
-    are passed through from config.hyperparameters.
-    """
-    from .utils import generate_model_save_path
-
-    # Determine save path
-    save_path = None
-    if config.save_model:
-        save_path = generate_model_save_path(
-            model_type=config.model_type,
-            target_column=target_column,
-            custom_path=config.model_save_path,
-        )
-
-    # Common parameters all training tools share
-    common_params = {
-        "dataframe_name": source_name,
-        "target_column": target_column,
-        "feature_columns": feature_columns,
-        "test_size": config.test_size,
-        "random_state": config.random_state,
-        "save_path": save_path,
-    }
-
-    # Merge with model-specific hyperparameters
-    hyperparams = config.hyperparameters or {}
-    all_params = {**common_params, **hyperparams}
-
-    # Filter to only params the schema accepts
-    schema_fields = set(input_schema.model_fields.keys())
-    valid_params = {k: v for k, v in all_params.items() if k in schema_fields}
-
-    return input_schema(**valid_params)
 
 
 # =============================================================================
@@ -226,7 +181,7 @@ def run_classification(state: DataFrameState, params: RunClassificationInput) ->
     else:
         try:
             train_func, InputSchema = get_tool("ml", tool_name)
-            train_params = _build_training_params(
+            train_params = build_training_params(
                 input_schema=InputSchema,
                 source_name=current_df_name,  # Use FE'd DataFrame if available
                 target_column=params.target_column,
