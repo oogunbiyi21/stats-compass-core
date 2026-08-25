@@ -1,11 +1,9 @@
 """
 Regression Workflow.
 
-Orchestrates model training, evaluation, and visualization for
-regression tasks using registry-based dispatch.
+Declares what makes regression different from classification; the sequence
+itself lives in supervised.py.
 """
-
-from datetime import datetime
 
 from pydantic import Field
 
@@ -14,17 +12,12 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import RegressionConfig
-from .feature_engineering import map_feature_columns, run_feature_engineering_steps
-from .results import (
-    WorkflowArtifacts,
-    WorkflowResult,
-    WorkflowStepResult,
-)
-from .utils import (
-    build_holdout_predictions,
-    build_training_params,
-    get_tool,
-    run_step,
+from .results import WorkflowResult
+from .supervised import (
+    PlotContext,
+    PlotDecision,
+    SupervisedSpec,
+    run_supervised_workflow,
 )
 
 # =============================================================================
@@ -54,7 +47,9 @@ MODEL_LABELS: dict[str, str] = {
 PLOT_TOOLS: dict[str, tuple[str, str]] = {
     # config_name: (tool_name, chart_type_label)
     "feature_importance": ("feature_importance", "feature_importance"),
-    # Note: residuals and predicted_vs_actual plots would need to be added
+    # RegressionConfig.plots also defaults to residuals and
+    # predicted_vs_actual. Neither has a plot tool yet, so both are reported
+    # as skipped steps rather than dropped silently.
 }
 
 
@@ -82,6 +77,42 @@ class RunRegressionInput(StrictToolInput):
     )
 
 
+
+# =============================================================================
+# Plot Dispatch
+# =============================================================================
+
+def _build_plot_params(ctx: PlotContext) -> PlotDecision:
+    """Turn a requested regression plot into parameters, or a reason not to.
+
+    Only feature_importance has a registered tool; it describes the model's
+    learned structure rather than any rows, so it takes a model id. Anything
+    else configured is reported as skipped by the shared skeleton before it
+    reaches here.
+    """
+    if ctx.plot_name == "feature_importance":
+        if not ctx.model_id:
+            return PlotDecision(skip_reason="no model available")
+        return PlotDecision(params=ctx.schema(model_id=ctx.model_id))
+
+    return PlotDecision(skip_reason=f"unsupported plot type '{ctx.plot_name}'")
+
+
+REGRESSION_SPEC = SupervisedSpec(
+    kind="regression",
+    tool_map=REGRESSOR_TOOLS,
+    model_labels=MODEL_LABELS,
+    evaluator_tool="evaluate_regression_model",
+    plot_map=PLOT_TOOLS,
+    build_plot_params=_build_plot_params,
+    default_config=RegressionConfig,
+    failure_suggestion=(
+        "Check that the DataFrame exists, has numeric features, and a valid "
+        "target column."
+    ),
+)
+
+
 # =============================================================================
 # Main Workflow
 # =============================================================================
@@ -100,277 +131,13 @@ class RunRegressionInput(StrictToolInput):
 def run_regression(state: DataFrameState, params: RunRegressionInput) -> WorkflowResult:
     """
     Execute a regression workflow on a DataFrame.
-    
+
     Steps:
     0. Feature engineering (optional): bin rare categories, target encode categoricals
     1. Train a regression model (dispatched via registry)
     2. Evaluate model performance (RMSE, MAE, R², etc.)
     3. Generate diagnostic plots (feature importance)
-    
+
     The workflow creates a predictions DataFrame and stores the trained model.
     """
-    started_at = datetime.now()
-
-    # Get config with defaults
-    config = params.config or RegressionConfig()
-
-    # Resolve DataFrame
-    source_name = params.dataframe_name or state.get_active_dataframe_name()
-    current_df_name = source_name  # Track which DataFrame to use (may change after FE)
-    feature_columns = params.feature_columns  # May be renamed by encoding
-
-    steps: list[WorkflowStepResult] = []
-    step_index = 0
-    charts_generated = 0
-    dataframes_created: list[str] = []
-    models_created: list[str] = []
-
-    # Track training result for downstream steps
-    model_id: str | None = None
-    predictions_df_name: str | None = None
-
-    # =========================================================================
-    # Step 0a: Drop Columns (inline, if specified)
-    # =========================================================================
-    if config.drop_columns:
-        cols_to_drop = [c for c in config.drop_columns if c != params.target_column]
-        if cols_to_drop:
-            df = state.get_dataframe(current_df_name)
-            df = df.drop(columns=cols_to_drop, errors='ignore')
-            state.set_dataframe(df, name=current_df_name, operation="drop_columns", set_active=True)
-
-    # =========================================================================
-    # Step 0b: Feature Engineering (optional)
-    # =========================================================================
-    if config.feature_engineering:
-        fe_steps, fe_dfs, current_df_name, step_index, fe_mapping = run_feature_engineering_steps(
-            state=state,
-            config=config.feature_engineering,
-            source_name=source_name,
-            target_column=params.target_column,
-            start_step_index=step_index,
-        )
-        steps.extend(fe_steps)
-        dataframes_created.extend(fe_dfs)
-        # Encoding renamed the columns it replaced.
-        feature_columns = map_feature_columns(feature_columns, fe_mapping)
-
-    # =========================================================================
-    # Step 1: Train Model (registry-based dispatch)
-    # =========================================================================
-    step_index += 1
-
-    # Look up the training tool
-    tool_name = REGRESSOR_TOOLS.get(config.model_type)
-    if tool_name is None:
-        available = ", ".join(REGRESSOR_TOOLS.keys())
-        steps.append(WorkflowStepResult(
-            step_name="train_model",
-            step_index=step_index,
-            status="failed",
-            duration_ms=0,
-            summary=f"Unknown model type: {config.model_type}",
-            error=f"Unknown model type '{config.model_type}'. Available: {available}",
-        ))
-    else:
-        try:
-            train_func, TrainInputSchema = get_tool("ml", tool_name)
-            train_params = build_training_params(
-                input_schema=TrainInputSchema,
-                source_name=current_df_name,  # Use FE'd DataFrame if available
-                target_column=params.target_column,
-                feature_columns=feature_columns,  # Translated through encoding
-                config=config,
-            )
-
-            model_label = MODEL_LABELS.get(config.model_type, config.model_type)
-            step_result = run_step(
-                step_name="train_model",
-                step_index=step_index,
-                func=train_func,
-                state=state,
-                params=train_params,
-                summary_template=f"Trained {model_label}",
-            )
-            steps.append(step_result)
-
-            # Extract model info for downstream steps
-            if step_result.status == "success" and step_result.result:
-                model_id = step_result.result.get("model_id")
-                predictions_df_name = step_result.result.get("predictions_dataframe")
-
-                if model_id:
-                    models_created.append(model_id)
-                if predictions_df_name:
-                    dataframes_created.append(predictions_df_name)
-
-        except Exception as e:
-            steps.append(WorkflowStepResult(
-                step_name="train_model",
-                step_index=step_index,
-                status="failed",
-                duration_ms=0,
-                summary=f"Failed to train model: {str(e)}",
-                error=str(e),
-            ))
-
-    # =========================================================================
-    # Step 2: Evaluate Model
-    # =========================================================================
-    if model_id and predictions_df_name:
-        step_index += 1
-
-        try:
-            eval_func, EvalInputSchema = get_tool("ml", "evaluate_regression_model")
-
-            # Build evaluation params
-            # Prediction column follows pattern: pred_{target_column}
-            prediction_col = f"pred_{params.target_column}"
-            eval_params_dict = {
-                "dataframe_name": predictions_df_name,
-                "target_column": params.target_column,
-                "prediction_column": prediction_col,
-            }
-
-            # Filter to schema fields
-            schema_fields = set(EvalInputSchema.model_fields.keys())
-            valid_params = {k: v for k, v in eval_params_dict.items() if k in schema_fields}
-            eval_params = EvalInputSchema(**valid_params)
-
-            step_result = run_step(
-                step_name="evaluate_model",
-                step_index=step_index,
-                func=eval_func,
-                state=state,
-                params=eval_params,
-                summary_template="Evaluated regression model performance",
-            )
-            steps.append(step_result)
-
-        except Exception as e:
-            steps.append(WorkflowStepResult(
-                step_name="evaluate_model",
-                step_index=step_index,
-                status="failed",
-                duration_ms=0,
-                summary=f"Failed to evaluate model: {str(e)}",
-                error=str(e),
-            ))
-
-    # =========================================================================
-    # Step 3: Generate Plots (if enabled)
-    # =========================================================================
-    if config.generate_plots and model_id:
-        # Defined unconditionally: the only plot currently registered is
-        # feature_importance, which takes the model rather than a DataFrame, so
-        # the branch below is unreachable today — and would raise NameError the
-        # moment residuals or predicted_vs_actual were added to PLOT_TOOLS.
-        plot_df_name, plotted_on = (
-            build_holdout_predictions(state, predictions_df_name, params.target_column)
-            if predictions_df_name
-            else (None, "all")
-        )
-
-        for plot_name in config.plots:
-            if plot_name not in PLOT_TOOLS:
-                # Skip unknown plot types silently (may not be implemented yet)
-                continue
-
-            tool_name, chart_type = PLOT_TOOLS[plot_name]
-            step_index += 1
-
-            try:
-                plot_func, PlotInputSchema = get_tool("plots", tool_name)
-
-                # Build plot params - prediction column follows pattern: pred_{target_column}
-                prediction_col = f"pred_{params.target_column}"
-                if plot_name == "feature_importance":
-                    plot_params_dict = {"model_id": model_id}
-                else:
-                    # For other plots that need predictions DataFrame
-                    plot_params_dict = {
-                        "dataframe_name": plot_df_name,
-                        "true_column": params.target_column,
-                        "pred_column": prediction_col,
-                    }
-
-                # Filter to schema fields
-                schema_fields = set(PlotInputSchema.model_fields.keys())
-                valid_params = {k: v for k, v in plot_params_dict.items() if k in schema_fields}
-                plot_params = PlotInputSchema(**valid_params)
-
-                step_result = run_step(
-                    step_name=f"plot_{plot_name}",
-                    step_index=step_index,
-                    func=plot_func,
-                    state=state,
-                    params=plot_params,
-                    summary_template=f"Generated {plot_name.replace('_', ' ')} plot",
-                )
-                steps.append(step_result)
-                if step_result.status == "success":
-                    charts_generated += 1
-
-            except Exception as e:
-                steps.append(WorkflowStepResult(
-                    step_name=f"plot_{plot_name}",
-                    step_index=step_index,
-                    status="failed",
-                    duration_ms=0,
-                    summary=f"Failed to generate {plot_name} plot",
-                    error=str(e),
-                ))
-
-    # =========================================================================
-    # Build Final Result
-    # =========================================================================
-    completed_at = datetime.now()
-    total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-
-    # Determine overall status
-    failed_steps = [s for s in steps if s.status == "failed"]
-    success_steps = [s for s in steps if s.status == "success"]
-
-    if not success_steps:
-        overall_status = "failed"
-        error_summary = "All steps failed"
-        suggestion = "Check that the DataFrame exists, has numeric features, and a valid target column."
-    elif failed_steps:
-        overall_status = "partial_failure"
-        failed_names = [s.step_name for s in failed_steps]
-        error_summary = f"{len(failed_steps)} step(s) failed: {', '.join(failed_names)}"
-        suggestion = "Review failed steps. The trained model may still be usable."
-    else:
-        overall_status = "success"
-        error_summary = None
-        suggestion = None
-
-    # Build helpful notes
-    notes = []
-    if predictions_df_name:
-        notes.append(f"Predictions are in '{predictions_df_name}' (includes 'pred_{params.target_column}' column)")
-    if models_created:
-        notes.append(f"Trained model ID: '{models_created[0]}' - use for feature_importance or predictions")
-
-    # Build artifacts
-    artifacts = WorkflowArtifacts(
-        dataframes_created=dataframes_created,
-        models_created=models_created,
-        charts_generated=charts_generated,
-        final_dataframe=predictions_df_name,
-    )
-
-    return WorkflowResult(
-        workflow_name="run_regression",
-        status=overall_status,
-        started_at=started_at,
-        completed_at=completed_at,
-        total_duration_ms=total_duration_ms,
-        input_dataframe=source_name,
-        steps=steps,
-        artifacts=artifacts,
-        error_summary=error_summary,
-        suggestion=suggestion,
-        notes=notes,
-        recoverable=True,
-    )
+    return run_supervised_workflow(state, params, REGRESSION_SPEC)

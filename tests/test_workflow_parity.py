@@ -304,23 +304,13 @@ class TestResultShape:
 class TestFailuresExplainThemselves:
     """D1. A workflow that fails outright should say why and what to try.
 
-    Regression populates error_summary and suggestion; classification leaves
-    both None, so an assistant handed a failed classification has nothing to
-    relay. The summariser forwards both fields, so this is user-visible.
-
-    Classification is xfailed rather than deleted: it marks the divergence, and
-    strict=True turns the suite red the moment phase 3 fixes it and this stops
-    being a known failure.
+    Regression populated error_summary and suggestion; classification left both
+    None, so an assistant handed a failed classification had nothing to relay —
+    the MCP summariser forwards both fields. The shared skeleton now assembles
+    them for both.
     """
 
-    @pytest.mark.parametrize("kind", [
-        pytest.param("classification", marks=pytest.mark.xfail(
-            strict=True,
-            reason="D1: classification sets neither field; phase 3 adopts "
-                   "regression's behaviour",
-        )),
-        "regression",
-    ])
+    @BOTH
     def test_a_failed_run_carries_a_diagnosis(self, kind):
         _, result = _run(kind, features=["no_such_column"], feature_engineering=None)
         assert result.status == "failed", "scenario stopped reproducing a failure"
@@ -330,22 +320,16 @@ class TestFailuresExplainThemselves:
 
 class TestConfiguredPlotsAreAccountedFor:
     """D2. RegressionConfig.plots defaults to residuals, predicted_vs_actual and
-    feature_importance, but only feature_importance is registered. The other two
-    are dropped by a bare `continue` — no step, no skip, no note. The config
-    advertises charts the workflow cannot produce and says nothing when they do
-    not arrive.
+    feature_importance, but only feature_importance has a registered tool. The
+    other two used to be dropped by a bare `continue` — no step, no skip, no
+    note — so the config advertised charts the workflow could not produce and
+    said nothing when they failed to arrive.
 
-    Classification records status="skipped" in the equivalent situation.
+    Every configured plot now produces a step in both workflows, successful or
+    skipped.
     """
 
-    @pytest.mark.parametrize("kind", [
-        "classification",
-        pytest.param("regression", marks=pytest.mark.xfail(
-            strict=True,
-            reason="D2: regression drops unregistered plots silently; phase 3 "
-                   "records a skipped step instead",
-        )),
-    ])
+    @BOTH
     def test_every_configured_plot_produces_a_step(self, kind):
         _, result = _run(kind, plots=True)
         configured = (

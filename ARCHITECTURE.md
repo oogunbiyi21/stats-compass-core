@@ -310,6 +310,20 @@ Available configs:
 - `EDAConfig` - which analyses/plots to include
 - `TimeSeriesConfig` - ARIMA parameters, forecast periods, validation
 
+### The supervised skeleton
+
+`run_classification` and `run_regression` are the same sequence — drop columns,
+feature-engineer, train, evaluate, plot, assemble — and were originally two
+near-identical files. Keeping them in step by hand did not work: three defects
+shipped where a fix was applied to one and missed the other.
+
+The sequence now lives once in `workflows/supervised.py`. Each workflow declares
+only what differs, as a `SupervisedSpec`: which trainers to dispatch to, which
+evaluator to call, and a `build_plot_params` callable returning either
+parameters or a reason for skipping. `tests/test_workflow_parity.py` runs both
+through identical scenarios and asserts identical step numbering, artifact
+ordering and result shape.
+
 ### Available Workflows
 
 #### EDA Report (`run_eda_report`)
@@ -349,9 +363,12 @@ Train and evaluate regression model:
 train_random_forest_regressor (or user choice)
 → evaluate_regression_model
 → feature_importance
-→ predicted_vs_actual plot
 ```
 *Output: Trained model + evaluation metrics*
+
+`RegressionConfig.plots` also defaults to `residuals` and `predicted_vs_actual`,
+but neither has a plot tool yet. Both are reported as skipped steps rather than
+dropped silently, so the gap is visible in the result.
 
 #### Time Series Forecast (`run_timeseries_forecast`)
 Complete ARIMA forecasting workflow:

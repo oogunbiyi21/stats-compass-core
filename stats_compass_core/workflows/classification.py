@@ -1,12 +1,10 @@
 """
 Classification Workflow.
 
-Orchestrates model training, evaluation, and visualization for
-classification tasks using registry-based dispatch.
+Declares what makes classification different from regression; the sequence
+itself lives in supervised.py.
 """
 
-from datetime import datetime
-from typing import Any
 
 from pydantic import Field
 
@@ -15,17 +13,12 @@ from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
 
 from .configs import ClassificationConfig
-from .feature_engineering import map_feature_columns, run_feature_engineering_steps
-from .results import (
-    WorkflowArtifacts,
-    WorkflowResult,
-    WorkflowStepResult,
-)
-from .utils import (
-    build_holdout_predictions,
-    build_training_params,
-    get_tool,
-    run_step,
+from .results import WorkflowResult
+from .supervised import (
+    PlotContext,
+    PlotDecision,
+    SupervisedSpec,
+    run_supervised_workflow,
 )
 
 # =============================================================================
@@ -85,6 +78,64 @@ class RunClassificationInput(StrictToolInput):
     )
 
 
+
+# =============================================================================
+# Plot Dispatch
+# =============================================================================
+
+def _build_plot_params(ctx: PlotContext) -> PlotDecision:
+    """Turn a requested classification plot into parameters, or a reason not to.
+
+    ROC and precision-recall need a probability column for a positive class,
+    which only exists for binary problems. Returning a reason rather than
+    silently continuing keeps the skip visible in the step list.
+    """
+    if ctx.plot_name == "confusion_matrix":
+        return PlotDecision(params=ctx.schema(
+            dataframe_name=ctx.dataframe_name,
+            true_column=ctx.target_column,
+            pred_column=ctx.prediction_column,
+        ))
+
+    if ctx.plot_name in ("roc", "precision_recall"):
+        is_binary = (
+            ctx.probability_columns and len(ctx.probability_columns) == 2
+            and ctx.class_labels and len(ctx.class_labels) == 2
+        )
+        if not is_binary:
+            return PlotDecision(
+                skip_reason="only supported for binary classification"
+            )
+        return PlotDecision(params=ctx.schema(
+            dataframe_name=ctx.dataframe_name,
+            true_column=ctx.target_column,
+            prob_column=ctx.probability_columns[1],  # positive class
+            model_id=ctx.model_id or "model",
+        ))
+
+    if ctx.plot_name == "feature_importance":
+        if not ctx.model_id:
+            return PlotDecision(skip_reason="no model available")
+        return PlotDecision(params=ctx.schema(model_id=ctx.model_id))
+
+    return PlotDecision(skip_reason=f"unsupported plot type '{ctx.plot_name}'")
+
+
+CLASSIFICATION_SPEC = SupervisedSpec(
+    kind="classification",
+    tool_map=CLASSIFIER_TOOLS,
+    model_labels=MODEL_LABELS,
+    evaluator_tool="evaluate_classification_model",
+    plot_map=PLOT_TOOLS,
+    build_plot_params=_build_plot_params,
+    default_config=ClassificationConfig,
+    failure_suggestion=(
+        "Check that the DataFrame exists, has usable features, and a target "
+        "column with at least two classes."
+    ),
+)
+
+
 # =============================================================================
 # Main Workflow
 # =============================================================================
@@ -100,301 +151,19 @@ class RunClassificationInput(StrictToolInput):
     ),
     tier="workflow",
 )
-def run_classification(state: DataFrameState, params: RunClassificationInput) -> WorkflowResult:
+def run_classification(
+    state: DataFrameState,
+    params: RunClassificationInput,
+) -> WorkflowResult:
     """
     Execute a classification workflow on a DataFrame.
-    
+
     Steps:
     0. Feature engineering (optional): bin rare categories, target encode categoricals
     1. Train a classification model (dispatched via registry)
     2. Evaluate model performance (accuracy, precision, recall, F1)
     3. Generate diagnostic plots (confusion matrix, ROC, PR, feature importance)
-    
+
     The workflow creates a predictions DataFrame and stores the trained model.
     """
-    started_at = datetime.now()
-
-    # Get config with defaults
-    config = params.config or ClassificationConfig()
-
-    # Resolve DataFrame
-    source_name = params.dataframe_name or state.get_active_dataframe_name()
-    current_df_name = source_name  # Track which DataFrame to use (may change after FE)
-    feature_columns = params.feature_columns  # May be renamed by encoding
-
-    steps: list[WorkflowStepResult] = []
-    step_index = 0
-    charts_generated = 0
-    dataframes_created: list[str] = []
-    models_created: list[str] = []
-
-    # Track training result for downstream steps
-    model_id: str | None = None
-    predictions_df_name: str | None = None
-    prediction_column: str | None = None
-    probability_columns: list[str] | None = None
-    class_labels: list[Any] | None = None
-
-    # =========================================================================
-    # Step 0a: Drop Columns (inline, if specified)
-    # =========================================================================
-    if config.drop_columns:
-        cols_to_drop = [c for c in config.drop_columns if c != params.target_column]
-        if cols_to_drop:
-            df = state.get_dataframe(current_df_name)
-            df = df.drop(columns=cols_to_drop, errors='ignore')
-            state.set_dataframe(df, name=current_df_name, operation="drop_columns", set_active=True)
-
-    # =========================================================================
-    # Step 0b: Feature Engineering (optional)
-    # =========================================================================
-    if config.feature_engineering:
-        fe_steps, fe_dfs, current_df_name, step_index, fe_mapping = run_feature_engineering_steps(
-            state=state,
-            config=config.feature_engineering,
-            source_name=source_name,
-            target_column=params.target_column,
-            start_step_index=step_index,
-        )
-        steps.extend(fe_steps)
-        dataframes_created.extend(fe_dfs)
-        # Encoding renamed the columns it replaced.
-        feature_columns = map_feature_columns(feature_columns, fe_mapping)
-
-    # =========================================================================
-    # Step 1: Train Model (registry-based dispatch)
-    # =========================================================================
-    step_index += 1
-
-    # Look up the training tool
-    tool_name = CLASSIFIER_TOOLS.get(config.model_type)
-    if tool_name is None:
-        available = ", ".join(CLASSIFIER_TOOLS.keys())
-        steps.append(WorkflowStepResult(
-            step_name="train_model",
-            step_index=step_index,
-            status="failed",
-            duration_ms=0,
-            summary=f"Unknown model type: {config.model_type}",
-            error=f"Unknown model type '{config.model_type}'. Available: {available}",
-        ))
-    else:
-        try:
-            train_func, InputSchema = get_tool("ml", tool_name)
-            train_params = build_training_params(
-                input_schema=InputSchema,
-                source_name=current_df_name,  # Use FE'd DataFrame if available
-                target_column=params.target_column,
-                feature_columns=feature_columns,
-                config=config,
-            )
-
-            model_label = MODEL_LABELS.get(config.model_type, config.model_type)
-            step_result = run_step(
-                step_name="train_model",
-                step_index=step_index,
-                func=train_func,
-                state=state,
-                params=train_params,
-                summary_template=f"Trained {model_label} model",
-            )
-            steps.append(step_result)
-
-            # Extract training info for downstream steps
-            if step_result.status == "success" and step_result.result:
-                result_data = step_result.result
-                model_id = result_data.get("model_id")
-                predictions_df_name = result_data.get("predictions_dataframe")
-                prediction_column = result_data.get("prediction_column")
-                probability_columns = result_data.get("probability_columns")
-                class_labels = result_data.get("class_labels")
-
-                if model_id:
-                    models_created.append(model_id)
-                if predictions_df_name:
-                    dataframes_created.append(predictions_df_name)
-
-        except Exception as e:
-            steps.append(WorkflowStepResult(
-                step_name="train_model",
-                step_index=step_index,
-                status="failed",
-                duration_ms=0,
-                summary=f"Failed to train model: {str(e)}",
-                error=str(e),
-            ))
-
-    # =========================================================================
-    # Step 2: Evaluate Model
-    # =========================================================================
-    if predictions_df_name and prediction_column:
-        step_index += 1
-
-        try:
-            eval_func, EvalInputSchema = get_tool("ml", "evaluate_classification_model")
-            eval_params = EvalInputSchema(
-                dataframe_name=predictions_df_name,
-                target_column=params.target_column,
-                prediction_column=prediction_column,
-            )
-
-            step_result = run_step(
-                step_name="evaluate_model",
-                step_index=step_index,
-                func=eval_func,
-                state=state,
-                params=eval_params,
-                summary_template="Evaluated model performance",
-            )
-            steps.append(step_result)
-        except Exception as e:
-            steps.append(WorkflowStepResult(
-                step_name="evaluate_model",
-                step_index=step_index,
-                status="failed",
-                duration_ms=0,
-                summary=f"Failed to evaluate model: {str(e)}",
-                error=str(e),
-            ))
-
-    # =========================================================================
-    # Step 3+: Generate Plots (registry-based dispatch)
-    # =========================================================================
-    if config.generate_plots and predictions_df_name and prediction_column:
-        # Plot the holdout, not everything: a confusion matrix over rows the
-        # model memorised contradicts the accuracy printed beside it.
-        plot_df_name, plotted_on = build_holdout_predictions(
-            state, predictions_df_name, params.target_column
-        )
-
-
-        for plot_name in config.plots:
-            if plot_name not in PLOT_TOOLS:
-                continue
-
-            tool_name, chart_type = PLOT_TOOLS[plot_name]
-            step_index += 1
-
-            try:
-                plot_func, PlotInputSchema = get_tool("plots", tool_name)
-
-                # Build plot-specific parameters
-                if plot_name == "confusion_matrix":
-                    plot_params = PlotInputSchema(
-                        dataframe_name=plot_df_name,
-                        true_column=params.target_column,
-                        pred_column=prediction_column,
-                    )
-
-                elif plot_name in ("roc", "precision_recall"):
-                    # These require probability columns - binary classification only
-                    if not (probability_columns and len(probability_columns) == 2
-                            and class_labels and len(class_labels) == 2):
-                        steps.append(WorkflowStepResult(
-                            step_name=chart_type,
-                            step_index=step_index,
-                            status="skipped",
-                            duration_ms=0,
-                            summary=f"{chart_type} skipped: only supported for binary classification",
-                        ))
-                        continue
-
-                    # Use probability of positive class (second class)
-                    pos_prob_col = probability_columns[1]
-                    plot_params = PlotInputSchema(
-                        dataframe_name=plot_df_name,
-                        true_column=params.target_column,
-                        prob_column=pos_prob_col,
-                        model_id=model_id or "model",
-                    )
-
-                elif plot_name == "feature_importance":
-                    if not model_id:
-                        steps.append(WorkflowStepResult(
-                            step_name=chart_type,
-                            step_index=step_index,
-                            status="skipped",
-                            duration_ms=0,
-                            summary="Feature importance skipped: no model available",
-                        ))
-                        continue
-                    plot_params = PlotInputSchema(model_id=model_id)
-
-                else:
-                    continue
-
-                step_result = run_step(
-                    step_name=chart_type,
-                    step_index=step_index,
-                    func=plot_func,
-                    state=state,
-                    params=plot_params,
-                    summary_template=f"Generated {chart_type.replace('_', ' ')}",
-                )
-                steps.append(step_result)
-                if step_result.status == "success":
-                    charts_generated += 1
-
-            except Exception as e:
-                steps.append(WorkflowStepResult(
-                    step_name=chart_type,
-                    step_index=step_index,
-                    status="failed",
-                    duration_ms=0,
-                    summary=f"Failed to generate {chart_type}: {str(e)}",
-                    error=str(e),
-                ))
-
-    # =========================================================================
-    # Build Final Result
-    # =========================================================================
-    completed_at = datetime.now()
-    total_duration_ms = int((completed_at - started_at).total_seconds() * 1000)
-
-    # Determine overall status
-    failed_steps = [s for s in steps if s.status == "failed"]
-    success_steps = [s for s in steps if s.status == "success"]
-
-    if not success_steps:
-        overall_status = "failed"
-    elif failed_steps:
-        overall_status = "partial_failure"
-    else:
-        overall_status = "success"
-
-    # Build artifacts
-    artifacts = WorkflowArtifacts(
-        dataframes_created=dataframes_created,
-        models_created=models_created,
-        charts_generated=charts_generated,
-        final_dataframe=predictions_df_name,
-    )
-
-    # Build helpful notes
-    notes = []
-    if predictions_df_name and prediction_column:
-        notes.append(f"Predictions are in '{predictions_df_name}' (includes '{prediction_column}' column)")
-    if models_created:
-        notes.append(f"Trained model ID: '{models_created[0]}' - use for feature_importance or predictions")
-
-    # Build summary
-    summary_parts = [f"Classification workflow completed with status: {overall_status}"]
-    if model_id:
-        summary_parts.append(f"Model: {model_id}")
-    if predictions_df_name:
-        summary_parts.append(f"Predictions: {predictions_df_name}")
-    summary_parts.append(f"Steps: {len(success_steps)} succeeded, {len(failed_steps)} failed")
-    if charts_generated:
-        summary_parts.append(f"Charts: {charts_generated} generated")
-
-    return WorkflowResult(
-        workflow_name="run_classification",
-        status=overall_status,
-        started_at=started_at,
-        completed_at=completed_at,
-        total_duration_ms=total_duration_ms,
-        input_dataframe=source_name,
-        steps=steps,
-        artifacts=artifacts,
-        notes=notes,
-    )
+    return run_supervised_workflow(state, params, CLASSIFICATION_SPEC)
