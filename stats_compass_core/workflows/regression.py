@@ -322,6 +322,16 @@ def run_regression(state: DataFrameState, params: RunRegressionInput) -> Workflo
     # Step 3: Generate Plots (if enabled)
     # =========================================================================
     if config.generate_plots and model_id:
+        # Defined unconditionally: the only plot currently registered is
+        # feature_importance, which takes the model rather than a DataFrame, so
+        # the branch below is unreachable today — and would raise NameError the
+        # moment residuals or predicted_vs_actual were added to PLOT_TOOLS.
+        plot_df_name, plotted_on = (
+            build_holdout_predictions(state, predictions_df_name, params.target_column)
+            if predictions_df_name
+            else (None, "all")
+        )
+
         for plot_name in config.plots:
             if plot_name not in PLOT_TOOLS:
                 # Skip unknown plot types silently (may not be implemented yet)
