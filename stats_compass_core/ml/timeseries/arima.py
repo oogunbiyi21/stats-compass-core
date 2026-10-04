@@ -23,8 +23,12 @@ from stats_compass_core.results import (
     ARIMAParameterSearchResult,
     ARIMAResult,
     OperationError,
+    ToolWarning,
 )
 from stats_compass_core.state import DataFrameState
+
+# forecast_arima never produces more steps than this.
+MAX_FORECAST_STEPS = 365
 
 # Check for optional dependencies
 try:
@@ -148,6 +152,13 @@ class StationarityTestInput(StrictToolInput):
     target_column: str = Field(
         description="Name of the column containing the time series values"
     )
+    date_column: str | None = Field(
+        default=None,
+        description=(
+            "Date column. When given, rows are tested in date order and duplicate "
+            "dates are refused; without it rows are tested in the order they appear."
+        ),
+    )
     test_type: Literal["adf", "kpss", "both"] = Field(
         default="both",
         description="Type of stationarity test: 'adf' (Augmented Dickey-Fuller), 'kpss', or 'both'",
@@ -249,6 +260,10 @@ class StationarityResult(BaseModel):
     target_column: str = Field(description="Column that was tested")
     n_observations: int = Field(description="Number of observations in the series")
     message: str = Field(description="Human-readable summary")
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -274,8 +289,17 @@ def _prepare_series(
     dataframe_name: str | None,
     target_column: str,
     date_column: str | None,
-) -> tuple[pd.Series, str, str] | OperationError:
-    """Prepare time series data for ARIMA modeling."""
+) -> tuple[pd.Series, str, str, list[ToolWarning]] | OperationError:
+    """Prepare time series data for ARIMA modeling.
+
+    ARIMA treats its input as one observation per period, in order, evenly
+    spaced. Nothing checked that. Order-level rows (several per day), rows out
+    of date order, and days missing from the series all fitted without
+    complaint and produced a forecast. Duplicate dates are refused: no
+    forecast built on them means anything. Unsorted rows are sorted. Gaps and
+    dropped nulls are fitted as before but named in a warning.
+    """
+    warnings: list[ToolWarning] = []
     # Get DataFrame
     try:
         df = state.get_dataframe(dataframe_name)
@@ -319,16 +343,66 @@ def _prepare_series(
                 operation="arima",
                 details={"column": date_column},
             )
-        datetime_index = pd.to_datetime(df[date_column])
+        datetime_index = pd.DatetimeIndex(pd.to_datetime(df[date_column]))
+        duplicated = int(datetime_index.duplicated().sum())
+        if duplicated:
+            return OperationError(
+                error_type="DuplicateDates",
+                error_message=(
+                    f"'{date_column}' has {duplicated} repeated date(s), so this is "
+                    f"not one value per period (order-level rows?). Aggregate to one "
+                    f"row per date first, e.g. with groupby_aggregate."
+                ),
+                operation="arima",
+                details={"column": date_column, "duplicated": duplicated},
+            )
+        series.index = datetime_index
+        if not datetime_index.is_monotonic_increasing:
+            series = series.sort_index()
+            warnings.append(ToolWarning(
+                code="UNSORTED_DATES",
+                columns=[date_column],
+                message=(
+                    f"Rows were not in '{date_column}' order and were sorted before "
+                    f"fitting. Unsorted, the model would have been fitted to a "
+                    f"shuffled series."
+                ),
+            ))
         # Infer and set frequency to avoid statsmodels warnings
-        inferred_freq = pd.infer_freq(datetime_index)
+        inferred_freq = pd.infer_freq(series.index)
         if inferred_freq:
-            series.index = pd.DatetimeIndex(datetime_index, freq=inferred_freq)
-        else:
-            series.index = pd.DatetimeIndex(datetime_index)
+            series.index = pd.DatetimeIndex(series.index, freq=inferred_freq)
 
     # Drop NaN values
+    n_null = int(series.isna().sum())
     series = series.dropna()
+
+    if date_column and len(series) > 2 and pd.infer_freq(series.index) is None:
+        spacing = series.index.to_series().diff().dropna()
+        usual = spacing.median()
+        n_gaps = int((spacing > usual).sum())
+        warnings.append(ToolWarning(
+            code="IRREGULAR_SPACING",
+            columns=[target_column, date_column],
+            message=(
+                f"The series is not evenly spaced: {n_gaps} gap(s) longer than the "
+                f"usual {usual}"
+                + (f", {n_null} from dropped null values" if n_null else "")
+                + ". ARIMA treats consecutive rows as consecutive periods, so the "
+                "fit and the forecast dates are off by the missing periods. Fill "
+                "the missing periods explicitly if they are real zeros."
+            ),
+        ))
+    elif n_null and not date_column:
+        warnings.append(ToolWarning(
+            code="NULLS_DROPPED",
+            columns=[target_column],
+            message=(
+                f"{n_null} null value(s) in '{target_column}' were dropped and the "
+                f"rows either side treated as consecutive. Pass date_column so gaps "
+                f"can be detected, or fill the nulls explicitly."
+            ),
+        ))
 
     if len(series) < 10:
         return OperationError(
@@ -338,7 +412,7 @@ def _prepare_series(
             details={"n_observations": len(series)},
         )
 
-    return series, dataframe_name, target_column
+    return series, dataframe_name, target_column, warnings
 
 
 def _create_forecast_plot(
@@ -434,7 +508,9 @@ def _infer_time_frequency(time_index: pd.DatetimeIndex | pd.Index) -> pd.Timedel
         except (TypeError, ValueError):
             return pd.Timedelta(days=1)  # Can't infer, use default
 
-    # Calculate all time differences
+    # Spacing between distinct dates in order. Unsorted, the diffs are negative
+    # and a daily series came out as -1 day.
+    time_index = time_index.unique().sort_values()
     time_diffs = time_index.to_series().diff().dropna()
 
     if len(time_diffs) == 0:
@@ -448,6 +524,7 @@ def _convert_forecast_period_to_steps(
     time_index: pd.DatetimeIndex | pd.Index,
     forecast_number: int,
     forecast_unit: str,
+    cap: int = MAX_FORECAST_STEPS,
 ) -> int:
     """
     Convert a human-readable forecast period (e.g., "30 days", "6 months")
@@ -481,7 +558,7 @@ def _convert_forecast_period_to_steps(
     # Calculate steps: how many data_freq periods fit in requested_period?
     steps = int(round(requested_period / data_freq))
 
-    return max(1, min(steps, 365))  # Bound between 1 and 365
+    return max(1, min(steps, cap))
 
 
 def _describe_frequency(freq: pd.Timedelta) -> str:
@@ -561,7 +638,8 @@ def fit_arima(
     if isinstance(result, OperationError):
         return result
 
-    series, df_name, target_col = result
+    series, df_name, target_col, tool_warnings = result
+    state.record_warnings(df_name, tool_warnings)
 
     # Prepare ARIMA order
     order = (params.p, params.d, params.q)
@@ -631,6 +709,7 @@ def fit_arima(
             target_column=target_col,
             residual_std=residual_std,
             message=msg,
+            warnings=tool_warnings,
         )
 
     except Exception as e:
@@ -682,6 +761,7 @@ def forecast_arima(
 
     try:
         # Determine number of periods to forecast
+        tool_warnings: list[ToolWarning] = []
         n_periods: int
         freq_description = ""
 
@@ -692,6 +772,22 @@ def forecast_arima(
                 time_index, params.forecast_number, params.forecast_unit
             )
             inferred_freq = _infer_time_frequency(time_index)
+            requested_steps = _convert_forecast_period_to_steps(
+                time_index, params.forecast_number, params.forecast_unit,
+                cap=10**9,
+            )
+            if requested_steps > n_periods:
+                # The message below names the period asked for, so a cut
+                # horizon would otherwise be labelled as the full one.
+                tool_warnings.append(ToolWarning(
+                    code="HORIZON_CAPPED",
+                    columns=[],
+                    message=(
+                        f"{params.forecast_number} {params.forecast_unit} is "
+                        f"{requested_steps} steps at this data frequency; the "
+                        f"forecast stops at {n_periods}."
+                    ),
+                ))
             freq_description = f" (data frequency: {_describe_frequency(inferred_freq)})"
         elif params.n_periods is not None:
             # Use direct n_periods
@@ -757,6 +853,10 @@ def forecast_arima(
             saved_dataframe_name = params.save_as
             msg += f" Saved as DataFrame '{params.save_as}'."
 
+        state.record_warnings(
+            state.get_model_info(params.model_id).source_dataframe, tool_warnings
+        )
+
         return ARIMAForecastResult(
             success=True,
             forecast_values=forecast_values,
@@ -769,6 +869,7 @@ def forecast_arima(
             image_base64=image_base64,
             message=msg,
             saved_dataframe=saved_dataframe_name,
+            warnings=tool_warnings,
         )
 
     except Exception as e:
@@ -815,7 +916,7 @@ def find_optimal_arima(
     if isinstance(result, OperationError):
         return result
 
-    series, df_name, target_col = result
+    series, df_name, target_col, tool_warnings = result
 
     start_time = time.time()
 
@@ -861,6 +962,21 @@ def find_optimal_arima(
             details={},
         )
 
+    # Differencing changes the data the likelihood is computed on, so an
+    # information criterion cannot rank models with different d.
+    d_values = sorted({r["order"][1] for r in results_list})
+    if len(d_values) > 1:
+        tool_warnings.append(ToolWarning(
+            code="AIC_ACROSS_D",
+            columns=[target_col],
+            message=(
+                f"Models with different differencing orders (d in {d_values}) were "
+                f"ranked by {params.criterion.upper()}, which is not comparable "
+                f"across d. Choose d with check_stationarity and pass fixed_d."
+            ),
+        ))
+    state.record_warnings(df_name, tool_warnings)
+
     # Sort by criterion
     results_list.sort(key=lambda x: x["score"])
 
@@ -888,6 +1004,7 @@ def find_optimal_arima(
         dataframe_name=df_name,
         target_column=target_col,
         message=msg,
+        warnings=tool_warnings,
     )
 
 
@@ -922,12 +1039,13 @@ def check_stationarity(
 
     # Prepare data
     result = _prepare_series(
-        state, params.dataframe_name, params.target_column, None
+        state, params.dataframe_name, params.target_column, params.date_column
     )
     if isinstance(result, OperationError):
         return result
 
-    series, _, target_col = result
+    series, df_name, target_col, tool_warnings = result
+    state.record_warnings(df_name, tool_warnings)
 
     adf_test_result: StationarityTestResult | None = None
     kpss_test_result: StationarityTestResult | None = None
@@ -1046,6 +1164,7 @@ def check_stationarity(
         target_column=target_col,
         n_observations=len(series),
         message=msg,
+        warnings=tool_warnings,
     )
 
 

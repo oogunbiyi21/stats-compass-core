@@ -354,6 +354,13 @@ class DataFrameState:
             {"code": code, "message": message, "columns": list(columns or [])},
         )
 
+    def record_warnings(self, dataframe_name: str, warnings: list[Any]) -> None:
+        """record_warning for each ToolWarning in a result."""
+        for warning in warnings:
+            self.record_warning(
+                warning.code, dataframe_name, warning.message, warning.columns
+            )
+
     def _add_history(
         self, operation: str, dataframe_name: str, details: dict[str, Any]
     ) -> None:

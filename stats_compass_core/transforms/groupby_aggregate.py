@@ -8,9 +8,12 @@ from stats_compass_core.base import StrictToolInput, ToolComponent
 from stats_compass_core.registry import registry
 from stats_compass_core.results import (
     DataFrameQueryResult,
+    ToolWarning,
     dataframe_to_json_safe_records,
 )
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.transforms._keys import null_key_warning
+from stats_compass_core.utils.text_values import numeric_as_text
 
 # Valid aggregation functions supported by this tool
 # This is a deliberately constrained list to ensure deterministic behavior
@@ -89,6 +92,36 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
     if missing_agg_cols:
         raise ValueError(f"Aggregation columns not found: {missing_agg_cols}")
 
+    warnings: list[ToolWarning] = []
+    null_keys = null_key_warning(df, params.by)
+    if null_keys:
+        warnings.append(null_keys)
+    for col, functions in agg_func.items():
+        # pandas sums a group with no values to 0, so "no data" reads as
+        # "nothing sold". Reported rather than changed, to keep the output shape.
+        if "sum" in functions:
+            has_value = df[col].notna().groupby([df[k] for k in params.by]).any()
+            empty = [str(g) for g in has_value[~has_value].index]
+            if empty:
+                warnings.append(ToolWarning(
+                    code="NULL_GROUP_SUMMED",
+                    columns=[col],
+                    message=(
+                        f"{len(empty)} group(s) have no values in '{col}' and their "
+                        f"sum is shown as 0, which means no data, not zero: "
+                        f"{', '.join(empty[:5])}."
+                    ),
+                ))
+        if numeric_as_text(df[col]):
+            warnings.append(ToolWarning(
+                code="NUMERIC_AS_TEXT",
+                columns=[col],
+                message=(
+                    f"'{col}' holds numbers stored as text: 'sum' joins them as "
+                    f"strings and 'mean' fails. Convert it with convert_dtype first."
+                ),
+            ))
+
     # Perform groupby and aggregation
     try:
         result_df = df.groupby(params.by, as_index=params.as_index).agg(agg_func)
@@ -112,6 +145,7 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
 
     # Save result to state as new DataFrame
     stored_name = state.set_dataframe(result_df, name=result_name, operation="groupby_aggregate")
+    state.record_warnings(stored_name, warnings)
 
     # Convert to JSON-safe dict (handles NaN, Timestamps, etc.)
     max_rows = 100
@@ -123,6 +157,7 @@ def groupby_aggregate(state: DataFrameState, params: GroupByAggregateInput) -> D
         columns=list(result_df.columns),
         dataframe_name=stored_name,
         source_dataframe=source_name,
+        warnings=warnings,
     )
 
 

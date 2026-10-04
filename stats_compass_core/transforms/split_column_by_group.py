@@ -80,8 +80,11 @@ def split_column_by_group(
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in DataFrame")
 
-    # Determine which groups to include
-    available_groups = df[params.group_column].dropna().unique().tolist()
+    # Determine which groups to include. Groups are matched as text: the output
+    # columns are named by str(group), and comparing "1" with 1 used to match
+    # nothing, so a numeric cohort column split into empty columns.
+    group_keys = df[params.group_column].dropna().astype(str)
+    available_groups = group_keys.unique().tolist()
 
     if params.groups is not None:
         missing = set(params.groups) - set(available_groups)
@@ -92,13 +95,13 @@ def split_column_by_group(
             )
         selected_groups = params.groups
     else:
-        selected_groups = sorted(str(g) for g in available_groups)
+        selected_groups = sorted(available_groups)
 
     # Build a column of values for each group, reset index so they align from 0
     group_series: dict[str, pd.Series] = {}
     for group in selected_groups:
         values = (
-            df.loc[df[params.group_column] == group, params.value_column]
+            df.loc[group_keys[group_keys == group].index, params.value_column]
             .dropna()
             .reset_index(drop=True)
         )

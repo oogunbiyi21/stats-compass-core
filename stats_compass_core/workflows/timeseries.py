@@ -20,7 +20,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import get_tool, run_step
+from .utils import collect_step_warnings, get_tool, run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -224,6 +224,7 @@ def run_timeseries_forecast(
                         error_summary=f"Date validation failed: {error_msg}",
                         suggestion="Clean the date column using preprocessing workflow with date_cleaning config, or set handle_missing_dates='ffill' to auto-fix.",
                         recoverable=True,
+                        warnings=collect_step_warnings(steps),
                     )
 
                 elif config.handle_missing_dates in ["ffill", "bfill", "drop"]:
@@ -313,6 +314,7 @@ def run_timeseries_forecast(
                         error_summary=f"Invalid handle_missing_dates value: {config.handle_missing_dates}. Must be 'error', 'ffill', or 'drop'.",
                         suggestion="Update config.handle_missing_dates to a valid value: 'error', 'ffill', or 'drop'.",
                         recoverable=True,
+                        warnings=collect_step_warnings(steps),
                     )
             else:
                 # Validation passed
@@ -348,6 +350,7 @@ def run_timeseries_forecast(
             stationarity_params_dict = {
                 "dataframe_name": current_df_name,
                 "target_column": params.target_column,
+                "date_column": params.date_column,
                 "test_type": "both",
             }
 
@@ -687,4 +690,5 @@ def run_timeseries_forecast(
         error_summary=error_summary,
         suggestion=suggestion,
         recoverable=True,
+        warnings=collect_step_warnings(steps),
     )

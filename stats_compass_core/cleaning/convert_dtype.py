@@ -24,8 +24,7 @@ from stats_compass_core.results import (
     ToolWarning,
 )
 from stats_compass_core.state import DataFrameState
-
-DEFAULT_NULL_TOKENS = ["", "nan", "null", "none", "na", "n/a", "nat", "-"]
+from stats_compass_core.utils.text_values import NULL_TOKENS as DEFAULT_NULL_TOKENS
 
 TRUE_TOKENS = {"true", "t", "yes", "y", "1", "1.0"}
 FALSE_TOKENS = {"false", "f", "no", "n", "0", "0.0"}

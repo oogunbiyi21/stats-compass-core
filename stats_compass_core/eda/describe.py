@@ -9,8 +9,9 @@ from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import DescribeResult
+from stats_compass_core.results import DescribeResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.text_values import numeric_as_text
 
 
 class DescribeInput(StrictToolInput):
@@ -98,11 +99,28 @@ def describe(state: DataFrameState, params: DescribeInput) -> DescribeResult:
             else:
                 include_types = params.include
 
+        # A numeric column read as text is described as text, or not at all,
+        # and nothing in the statistics says it was skipped.
+        warnings = [
+            ToolWarning(
+                code="NUMERIC_AS_TEXT",
+                columns=[col],
+                message=(
+                    f"'{col}' holds numbers stored as text, so it has no numeric "
+                    f"statistics here. Convert it with convert_dtype first."
+                ),
+            )
+            for col in df.columns
+            if numeric_as_text(df[col])
+        ]
+        state.record_warnings(source_name, warnings)
+
         return DescribeResult(
             statistics=statistics,
             dataframe_name=source_name,
             columns_analyzed=list(stats_df.columns),
             include_types=include_types,
+            warnings=warnings,
         )
     except Exception as e:
         raise ValueError(f"Describe operation failed: {str(e)}") from e

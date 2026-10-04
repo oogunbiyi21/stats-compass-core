@@ -11,8 +11,16 @@ from scipy import stats
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import HypothesisTestResult
+from stats_compass_core.results import HypothesisTestResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+
+# Student's t assumes equal variances. Past this ratio of the larger sample
+# variance to the smaller its p-value is unreliable; Welch's is not affected.
+MAX_VARIANCE_RATIO = 4.0
+
+# Below this many observations a z-test on sample standard deviations
+# understates uncertainty: the p-value is too small. A t-test is the right test.
+MIN_Z_SAMPLE = 30
 
 
 class TTestInput(StrictToolInput):
@@ -91,6 +99,28 @@ def t_test(state: DataFrameState, params: TTestInput) -> HypothesisTestResult:
     statistic, p_value = stats.ttest_ind(
         a, b, equal_var=params.equal_var, alternative=params.alternative
     )
+    if math.isnan(p_value):
+        # Both samples constant: there is no variance to test against. A NaN
+        # p-value is never below 0.05, so it used to read as "no difference".
+        raise ValueError(
+            f"t-test is undefined: '{params.column_a}' and '{params.column_b}' "
+            f"have no variation (means {a.mean():g} and {b.mean():g})."
+        )
+
+    warnings: list[ToolWarning] = []
+    var_a, var_b = float(a.var(ddof=1)), float(b.var(ddof=1))
+    ratio = max(var_a, var_b) / min(var_a, var_b) if min(var_a, var_b) > 0 else math.inf
+    if params.equal_var and ratio > MAX_VARIANCE_RATIO:
+        warnings.append(ToolWarning(
+            code="UNEQUAL_VARIANCE",
+            columns=[params.column_a, params.column_b],
+            message=(
+                f"Student's t-test assumes equal variances, but one sample's "
+                f"variance is {ratio:.1f}x the other's (limit {MAX_VARIANCE_RATIO:g}), "
+                f"so the p-value is unreliable. Use equal_var=False (Welch)."
+            ),
+        ))
+    state.record_warnings(source_name, warnings)
 
     return HypothesisTestResult(
         test_type="t-test (Student)" if params.equal_var else "t-test (Welch)",
@@ -111,6 +141,7 @@ def t_test(state: DataFrameState, params: TTestInput) -> HypothesisTestResult:
             "std_a": float(a.std(ddof=1)),
             "std_b": float(b.std(ddof=1)),
         },
+        warnings=warnings,
     )
 
 
@@ -149,6 +180,27 @@ def z_test(state: DataFrameState, params: ZTestInput) -> HypothesisTestResult:
     std_a = params.population_std_a or float(a.std(ddof=0))
     std_b = params.population_std_b or float(b.std(ddof=0))
 
+    warnings: list[ToolWarning] = []
+    estimated = [
+        (col, n) for col, n, known in (
+            (params.column_a, len(a), params.population_std_a),
+            (params.column_b, len(b), params.population_std_b),
+        )
+        if known is None and n < MIN_Z_SAMPLE
+    ]
+    if estimated:
+        warnings.append(ToolWarning(
+            code="SMALL_SAMPLE",
+            columns=[col for col, _ in estimated],
+            message=(
+                f"A z-test with standard deviations estimated from "
+                f"{' and '.join(f'{n} rows' for _, n in estimated)} (fewer than "
+                f"{MIN_Z_SAMPLE}) gives p-values that are too small. Use t_test, "
+                f"or pass the known population standard deviations."
+            ),
+        ))
+    state.record_warnings(source_name, warnings)
+
     se = math.sqrt((std_a ** 2) / len(a) + (std_b ** 2) / len(b))
     if se == 0:
         raise ValueError("Pooled standard error is zero; z-test undefined.")
@@ -180,4 +232,5 @@ def z_test(state: DataFrameState, params: ZTestInput) -> HypothesisTestResult:
             "mean_a": float(a.mean()),
             "mean_b": float(b.mean()),
         },
+        warnings=warnings,
     )

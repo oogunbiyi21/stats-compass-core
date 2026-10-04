@@ -9,8 +9,12 @@ from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import CorrelationsResult
+from stats_compass_core.results import CorrelationsResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+
+# Below this many rows where both columns have a value, a correlation is
+# mostly noise: two points always give exactly +1 or -1.
+MIN_OVERLAP = 10
 
 
 class CorrelationsInput(StrictToolInput):
@@ -105,7 +109,11 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
             # Sort by absolute correlation descending
             high_correlations.sort(key=lambda x: abs(x["correlation"]), reverse=True)
 
+        warnings = _few_overlap_warnings(working_df, corr_df)
+        state.record_warnings(source_name, warnings)
+
         return CorrelationsResult(
+            warnings=warnings,
             correlations=correlations_dict,
             method=params.method,
             dataframe_name=source_name,
@@ -114,3 +122,26 @@ def correlations(state: DataFrameState, params: CorrelationsInput) -> Correlatio
         )
     except Exception as e:
         raise ValueError(f"Correlation computation failed: {str(e)}") from e
+
+
+def _few_overlap_warnings(df: pd.DataFrame, corr_df: pd.DataFrame) -> list[ToolWarning]:
+    """Pairs whose coefficient rests on fewer than MIN_OVERLAP shared rows."""
+    present = df[list(corr_df.columns)].notna().astype(int)
+    overlap = present.T @ present
+    cols = list(corr_df.columns)
+    warnings = []
+    for i, col1 in enumerate(cols):
+        for col2 in cols[i + 1:]:
+            n = int(overlap.loc[col1, col2])
+            if n < MIN_OVERLAP and pd.notna(corr_df.loc[col1, col2]):
+                warnings.append(ToolWarning(
+                    code="FEW_OVERLAPPING_ROWS",
+                    columns=[col1, col2],
+                    message=(
+                        f"The correlation between '{col1}' and '{col2}' uses only "
+                        f"{n} row(s) where both have a value (fewer than "
+                        f"{MIN_OVERLAP}); treat it as unreliable. Set min_periods "
+                        f"to leave such pairs out."
+                    ),
+                ))
+    return warnings

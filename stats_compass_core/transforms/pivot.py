@@ -8,9 +8,11 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import (
     DataFrameQueryResult,
+    ToolWarning,
     dataframe_to_json_safe_records,
 )
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.transforms._keys import null_key_warning
 
 
 class PivotInput(StrictToolInput):
@@ -82,6 +84,28 @@ def pivot(state: DataFrameState, params: PivotInput) -> DataFrameQueryResult:
     if missing_cols:
         raise ValueError(f"Columns not found in DataFrame: {missing_cols}")
 
+    keys = [
+        *([params.index] if isinstance(params.index, str) else params.index),
+        *([params.columns] if isinstance(params.columns, str) else params.columns),
+    ]
+    warnings: list[ToolWarning] = []
+    null_keys = null_key_warning(df, keys)
+    if null_keys:
+        warnings.append(null_keys)
+    # pivot_table aggregates silently. With order-level rows the default
+    # 'mean' gives average order value where a reader expects a total.
+    shared_cells = int((df.groupby(keys).size() > 1).sum())
+    if shared_cells:
+        warnings.append(ToolWarning(
+            code="CELLS_AGGREGATED",
+            columns=keys,
+            message=(
+                f"{shared_cells} cell(s) combine more than one row, using aggfunc "
+                f"'{params.aggfunc}'. If each row is one order and you want "
+                f"totals, use aggfunc='sum'."
+            ),
+        ))
+
     # Perform pivot
     try:
         result_df = df.pivot_table(
@@ -112,6 +136,7 @@ def pivot(state: DataFrameState, params: PivotInput) -> DataFrameQueryResult:
 
     # Save result to state as new DataFrame
     stored_name = state.set_dataframe(result_df, name=result_name, operation="pivot")
+    state.record_warnings(stored_name, warnings)
 
     # Convert to JSON-safe dict (handles NaN, Timestamps, etc.)
     max_rows = 100
@@ -123,4 +148,5 @@ def pivot(state: DataFrameState, params: PivotInput) -> DataFrameQueryResult:
         columns=list(result_df.columns),
         dataframe_name=stored_name,
         source_dataframe=source_name,
+        warnings=warnings,
     )

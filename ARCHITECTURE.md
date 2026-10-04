@@ -333,7 +333,11 @@ records it in the op-log (`state.get_history()`, operation `"warning"`).
 Workflows lift every step's warnings into `WorkflowResult.warnings`, translated
 back to the input's column names.
 
-The supervised path raises two:
+`docs/audit/unattended.md` lists every cleaning, transform, EDA and
+time-series subtool with what it does when nobody checks its output and which
+warnings it raises; a test keeps that list in step with the registry.
+
+The supervised path raises these:
 
 - `FEATURES_INFERRED`: no `feature_columns` were declared, so the trainer used
   every numeric column except the target. The fallback is kept for library

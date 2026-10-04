@@ -9,7 +9,7 @@ from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import DataFrameMutationResult
+from stats_compass_core.results import DataFrameMutationResult, ToolWarning
 from stats_compass_core.state import DataFrameState
 
 
@@ -191,6 +191,7 @@ def clean_dates(
 
     cleaned_df = df.copy()
     changes_made = []
+    warnings: list[ToolWarning] = []
     rows_dropped = 0
     dates_filled = 0
     dates_created = 0
@@ -198,8 +199,22 @@ def clean_dates(
     # Convert to datetime if not already
     if not pd.api.types.is_datetime64_any_dtype(cleaned_df[date_column]):
         try:
+            had_value = cleaned_df[date_column].notna()
             cleaned_df[date_column] = pd.to_datetime(cleaned_df[date_column], errors='coerce')
             changes_made.append("Converted to datetime format")
+            # errors='coerce' turns a date it cannot read into a missing one,
+            # which the fill below then replaces with a neighbour's date.
+            unreadable = had_value & cleaned_df[date_column].isna()
+            if unreadable.any():
+                sample = [str(v) for v in df.loc[unreadable, date_column].unique()[:5]]
+                warnings.append(ToolWarning(
+                    code="UNPARSEABLE_VALUES",
+                    columns=[date_column],
+                    message=(
+                        f"{int(unreadable.sum())} value(s) in '{date_column}' are "
+                        f"not dates and were treated as missing, e.g. {sample}."
+                    ),
+                ))
         except Exception as e:
             raise ValueError(f"Failed to parse date column: {str(e)}")
 
@@ -227,6 +242,18 @@ def clean_dates(
             )
             dates_filled = initial_nulls - int(cleaned_df[date_column].isna().sum())
             changes_made.append(f"Interpolated {dates_filled} missing dates")
+
+    if dates_filled:
+        warnings.append(ToolWarning(
+            code="DATES_FILLED",
+            columns=[date_column],
+            message=(
+                f"{dates_filled} row(s) had no date and were given one by "
+                f"'{params.fill_method}'. Those dates were not recorded; anything "
+                f"counted by day will place these rows on a neighbour's date. Use "
+                f"fill_method='drop' to leave them out instead."
+            ),
+        ))
 
     # Create missing dates in sequence if requested
     if params.create_missing_dates and params.infer_frequency:
@@ -259,8 +286,15 @@ def clean_dates(
                     dates_created = len(cleaned_df) - rows_before
                     if dates_created > 0:
                         changes_made.append(f"Created {dates_created} missing dates to complete {freq} sequence")
+                else:
+                    # infer_freq needs a regular sequence, so it gives up on
+                    # exactly the series that has gaps to fill.
+                    warnings.append(_gaps_not_filled(
+                        date_column, "no regular frequency could be inferred"
+                    ))
             except Exception as e:
                 changes_made.append(f"Could not create missing dates: {str(e)}")
+                warnings.append(_gaps_not_filled(date_column, str(e)))
 
     # Sort by date for chronological order
     cleaned_df = cleaned_df.sort_values(by=date_column).reset_index(drop=True)
@@ -270,6 +304,7 @@ def clean_dates(
 
     # Save DataFrame to state
     state.set_dataframe(cleaned_df, name=result_name, operation="clean_dates")
+    state.record_warnings(result_name, warnings)
 
     # Build summary message
     if not changes_made:
@@ -286,4 +321,17 @@ def clean_dates(
         operation="clean_dates",
         message=message,
         columns_affected=[date_column],
+        warnings=warnings,
+    )
+
+
+def _gaps_not_filled(date_column: str, why: str) -> ToolWarning:
+    return ToolWarning(
+        code="GAPS_NOT_FILLED",
+        columns=[date_column],
+        message=(
+            f"Missing dates in '{date_column}' were requested but not created: "
+            f"{why}. Days with no rows are still absent, so a per-day average "
+            f"is over the days present only."
+        ),
     )

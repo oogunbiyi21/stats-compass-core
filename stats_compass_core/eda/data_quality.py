@@ -17,8 +17,9 @@ from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import DataQualityResult
+from stats_compass_core.results import DataQualityResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.text_values import missing_as_text
 
 
 class AnalyzeMissingDataInput(StrictToolInput):
@@ -186,6 +187,54 @@ def _detect_outliers_modified_zscore(series: pd.Series, threshold: float = 3.5) 
     }
 
 
+def _missing_as_text_warnings(df: pd.DataFrame) -> list[ToolWarning]:
+    """Missing values spelled as text are counted as present by isnull().
+
+    A column of 'null' strings otherwise gets a clean bill of health and a
+    higher quality score than it deserves.
+    """
+    warnings = []
+    for col in df.columns:
+        n = missing_as_text(df[col])
+        if n:
+            warnings.append(ToolWarning(
+                code="MISSING_AS_TEXT",
+                columns=[col],
+                message=(
+                    f"{n} value(s) in '{col}' are missing values written as text "
+                    f"('null', 'nan', '' ...) and are counted as present here. "
+                    f"Convert them with convert_dtype before trusting the counts."
+                ),
+            ))
+    return warnings
+
+
+def _spread_warning(col: str, series: pd.Series, result: dict) -> ToolWarning | None:
+    """When the method's measure of spread is zero, its verdict means nothing.
+
+    MAD is zero once more than half the values are identical (a store with
+    mostly zero-order days), and the modified z-score then reports no outliers
+    however extreme the rest are. IQR is zero when three quarters are
+    identical, and every other value is then flagged.
+    """
+    spread = {"modified_zscore": "mad", "iqr": "iqr"}.get(result["method"])
+    if spread is None or result.get(spread) != 0 or series.nunique() < 2:
+        return None
+    verdict = (
+        "no value can be flagged" if result["method"] == "modified_zscore"
+        else "every value off the common one is flagged"
+    )
+    return ToolWarning(
+        code="DEGENERATE_SPREAD",
+        columns=[col],
+        message=(
+            f"'{col}': the {spread.upper()} is 0 because most values are identical, "
+            f"so {verdict}. The outlier count for this column is not meaningful; "
+            f"try method='zscore' or look at the distribution directly."
+        ),
+    )
+
+
 def _calculate_quality_score(
     missing_pct: float,
     outlier_pct: float,
@@ -316,6 +365,8 @@ def analyze_missing_data(
 
     # Generate recommendations
     recommendations = _generate_recommendations(missing_summary, None, 0, total_rows)
+    warnings = _missing_as_text_warnings(df)
+    state.record_warnings(source_name, warnings)
 
     # Calculate quality score (based on missing data only)
     overall_missing_pct = missing_counts.sum() / (total_rows * total_cols) * 100 if total_rows * total_cols > 0 else 0
@@ -329,6 +380,7 @@ def analyze_missing_data(
         outlier_summary=None,
         recommendations=recommendations,
         quality_score=quality_score,
+        warnings=warnings,
     )
 
 
@@ -389,6 +441,7 @@ def detect_outliers(
     # Detect outliers in each numeric column
     outlier_results = {}
     total_outliers = 0
+    warnings: list[ToolWarning] = []
 
     for col in numeric_cols:
         series = df[col].dropna()
@@ -404,6 +457,11 @@ def detect_outliers(
 
         outlier_results[col] = result
         total_outliers += result["outlier_count"]
+        spread = _spread_warning(col, series, result)
+        if spread:
+            warnings.append(spread)
+
+    state.record_warnings(source_name, warnings)
 
     # Find columns with significant outliers
     columns_with_outliers = [
@@ -445,6 +503,7 @@ def detect_outliers(
         outlier_summary=outlier_summary,
         recommendations=recommendations,
         quality_score=None,
+        warnings=warnings,
     )
 
 
@@ -496,6 +555,8 @@ def data_quality_report(
         "correlated_missing_patterns": correlated_patterns,
     }
 
+    warnings = _missing_as_text_warnings(df)
+
     # === Outlier Analysis ===
     outlier_summary = None
     total_outliers = 0
@@ -522,6 +583,9 @@ def data_quality_report(
 
                 outlier_results[col] = result
                 total_outliers += result["outlier_count"]
+                spread = _spread_warning(col, series, result)
+                if spread:
+                    warnings.append(spread)
 
             columns_with_outliers = [col for col, info in outlier_results.items() if info["outlier_count"] > 0]
 
@@ -548,6 +612,7 @@ def data_quality_report(
 
     # === Generate Recommendations ===
     recommendations = _generate_recommendations(missing_summary, outlier_summary, duplicate_count, total_rows)
+    state.record_warnings(source_name, warnings)
 
     return DataQualityResult(
         dataframe_name=source_name,
@@ -557,4 +622,5 @@ def data_quality_report(
         outlier_summary=outlier_summary,
         recommendations=recommendations,
         quality_score=quality_score,
+        warnings=warnings,
     )

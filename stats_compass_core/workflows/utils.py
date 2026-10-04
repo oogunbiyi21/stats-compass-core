@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from stats_compass_core.registry import registry
+from stats_compass_core.results import ToolWarning
 from stats_compass_core.state import DataFrameState
 
 from .results import WorkflowStepResult
@@ -245,3 +246,35 @@ def build_holdout_predictions(
         set_active=False,
     )
     return holdout_name, "test"
+
+
+def collect_step_warnings(
+    steps: list[WorkflowStepResult], column_mapping: dict[str, Any] | None = None
+) -> list[ToolWarning]:
+    """Lift every step's warnings to the workflow, in the user's column names.
+
+    The trainer sees 'cancellation_reason_encoded'; the user has never heard of
+    it. A warning is only useful if it names the column they can go and drop.
+    """
+    original_of: dict[str, str] = {}
+    for original, encoded in (column_mapping or {}).items():
+        for name in encoded if isinstance(encoded, list) else [encoded]:
+            original_of[name] = original
+
+    warnings: list[ToolWarning] = []
+    for step in steps:
+        for raw in (step.result or {}).get("warnings") or []:
+            warning = ToolWarning.model_validate(raw)
+            columns = list(
+                dict.fromkeys(original_of.get(c, c) for c in warning.columns)
+            )
+            message = warning.message
+            for name in warning.columns:
+                if name in original_of:
+                    message = message.replace(
+                        f"'{name}'", f"'{original_of[name]}' (encoded as '{name}')"
+                    )
+            warnings.append(
+                warning.model_copy(update={"columns": columns, "message": message})
+            )
+    return warnings

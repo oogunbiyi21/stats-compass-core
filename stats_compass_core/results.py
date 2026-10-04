@@ -106,6 +106,10 @@ class DataFrameMutationResult(BaseModel):
         default=None,
         description="Columns that were affected by the operation"
     )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 class ColumnConversion(BaseModel):
@@ -157,6 +161,10 @@ class DataFrameQueryResult(BaseModel):
     source_dataframe: str = Field(
         default="active",
         description="Name of the source DataFrame"
+    )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
     )
 
 
@@ -218,6 +226,10 @@ class DescribeResult(BaseModel):
         default=None,
         description="Data types included in analysis"
     )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 class CorrelationsResult(BaseModel):
@@ -232,6 +244,10 @@ class CorrelationsResult(BaseModel):
     high_correlations: list[dict[str, Any]] | None = Field(
         default=None,
         description="Pairs with correlation above threshold"
+    )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
     )
 
 
@@ -352,6 +368,10 @@ class HypothesisTestResult(BaseModel):
     details: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional test-specific details"
+    )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
     )
 
 
@@ -550,6 +570,10 @@ class DataQualityResult(BaseModel):
         default=None,
         description="Overall data quality score (0-100)"
     )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 class ClassificationCurveResult(BaseModel):
@@ -613,6 +637,10 @@ class ARIMAResult(BaseModel):
 
     # Interpretation
     message: str = Field(description="Human-readable model summary")
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 class ARIMAForecastResult(BaseModel):
@@ -657,6 +685,10 @@ class ARIMAForecastResult(BaseModel):
 
     # Interpretation
     message: str = Field(description="Human-readable forecast summary")
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 class ARIMAParameterSearchResult(BaseModel):
@@ -689,6 +721,10 @@ class ARIMAParameterSearchResult(BaseModel):
 
     # Interpretation
     message: str = Field(description="Human-readable search summary")
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="Reasons this result may be misleading, if any were detected",
+    )
 
 
 class MeanTargetEncodingResult(BaseModel):

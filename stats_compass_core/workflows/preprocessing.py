@@ -24,7 +24,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import run_step
+from .utils import collect_step_warnings, run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -484,4 +484,5 @@ def run_preprocessing(state: DataFrameState, params: RunPreprocessingInput) -> W
         error_summary=error_summary,
         suggestion=suggestion,
         recoverable=True,
+        warnings=collect_step_warnings(steps),
     )

@@ -21,7 +21,7 @@ from .results import (
     WorkflowResult,
     WorkflowStepResult,
 )
-from .utils import get_tool, run_step
+from .utils import collect_step_warnings, get_tool, run_step
 
 # =============================================================================
 # Tool Registry Mappings
@@ -327,4 +327,5 @@ def run_eda_report(state: DataFrameState, params: RunEDAReportInput) -> Workflow
         input_dataframe=source_name,
         steps=steps,
         artifacts=artifacts,
+        warnings=collect_step_warnings(steps),
     )
