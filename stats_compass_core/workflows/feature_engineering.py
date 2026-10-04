@@ -11,6 +11,10 @@ import pandas as pd
 
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.transforms._cardinality import (
+    high_cardinality_reason,
+    high_cardinality_warning,
+)
 
 from .configs import FeatureEngineeringConfig
 from .results import WorkflowStepResult
@@ -146,7 +150,7 @@ def run_feature_engineering_steps(
     target_column: str,
     start_step_index: int = 0,
     feature_columns: list[str] | None = None,
-) -> tuple[list[WorkflowStepResult], list[str], str, int, dict[str, str]]:
+) -> tuple[list[WorkflowStepResult], list[str], str, int, dict[str, str], list[str]]:
     """
     Run feature engineering steps before model training.
     
@@ -176,6 +180,8 @@ def run_feature_engineering_steps(
           replaces the originals, so a caller holding user-supplied feature
           names must translate them or ask the trainer for columns that no
           longer exist.
+        - Columns excluded as identifiers. They stay in the DataFrame unencoded,
+          so a caller holding declared feature names must drop them too.
     """
     steps: list[WorkflowStepResult] = []
     dataframes_created: list[str] = []
@@ -186,10 +192,14 @@ def run_feature_engineering_steps(
     # Get current DataFrame for column detection
     df = state.get_dataframe(source_name)
 
+    excluded: dict[str, str] = {}
+
     def declared(columns: list[str]) -> list[str]:
-        if feature_columns is None:
-            return columns
-        return [col for col in columns if col in feature_columns]
+        return [
+            col for col in columns
+            if (feature_columns is None or col in feature_columns)
+            and col not in excluded
+        ]
 
     # Determine which categorical columns to process
     categorical_columns = config.categorical_columns
@@ -197,6 +207,37 @@ def run_feature_engineering_steps(
         # Will auto-detect after binning (safer)
         categorical_columns = _detect_categorical_columns(df, target_column)
     categorical_columns = declared(categorical_columns)
+
+    # Identifiers are not categories: binning collapses them to a constant and
+    # encoding turns the constant into a feature. Screened here rather than
+    # left to the tools so the answer does not depend on whether binning runs.
+    for col in categorical_columns:
+        reason = high_cardinality_reason(df[col])
+        if reason:
+            excluded[col] = reason
+    if excluded:
+        categorical_columns = declared(categorical_columns)
+        warnings = [
+            high_cardinality_warning(col, reason, "kept out of the model")
+            for col, reason in excluded.items()
+        ]
+        for warning in warnings:
+            state.record_warning(
+                warning.code, source_name, warning.message, warning.columns
+            )
+        step_index += 1
+        steps.append(WorkflowStepResult(
+            step_name="screen_categoricals",
+            step_index=step_index,
+            status="success",
+            duration_ms=0,
+            summary=f"Kept {len(excluded)} identifier-like column(s) out of the model: "
+            + ", ".join(excluded),
+            result={
+                "excluded_columns": excluded,
+                "warnings": [w.model_dump() for w in warnings],
+            },
+        ))
 
     # Skip if no categorical columns found
     if not categorical_columns:
@@ -212,7 +253,10 @@ def run_feature_engineering_steps(
                 else "None of the declared feature columns is categorical"
             ),
         ))
-        return steps, dataframes_created, current_df_name, step_index, column_mapping
+        return (
+        steps, dataframes_created, current_df_name, step_index, column_mapping,
+        list(excluded),
+    )
 
     # =========================================================================
     # Step 1: Bin Rare Categories (if enabled)
@@ -286,7 +330,10 @@ def run_feature_engineering_steps(
             skip_reason="No valid categorical columns after binning",
         ))
 
-    return steps, dataframes_created, current_df_name, step_index, column_mapping
+    return (
+        steps, dataframes_created, current_df_name, step_index, column_mapping,
+        list(excluded),
+    )
 
 
 def map_feature_columns(

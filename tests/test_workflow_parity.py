@@ -370,3 +370,65 @@ class TestBothWorkflowsScopeFeatureEngineering:
         """The shared fixture is honest data; a detector that fires here is noise."""
         _, result = _run(kind)
         assert "LEAKAGE_SUSPECTED" not in [w.code for w in result.warnings]
+
+
+def _run_with_customer_id(kind: str, *, features=None, **config_overrides):
+    """The parity frame plus a string ID unique to every row."""
+    frame = _frame(kind == "classification")
+    frame.insert(0, "customer_id", [f"C{i:05d}" for i in range(len(frame))])
+    state = DataFrameState()
+    state.set_dataframe(frame, "df", operation="parity")
+    settings = {
+        "model_type": "random_forest", "generate_plots": False, **config_overrides
+    }
+    if kind == "classification":
+        return run_classification(state, RunClassificationInput(
+            dataframe_name="df", target_column="target", feature_columns=features,
+            config=ClassificationConfig(**settings),
+        ))
+    return run_regression(state, RunRegressionInput(
+        dataframe_name="df", target_column="target", feature_columns=features,
+        config=RegressionConfig(**settings),
+    ))
+
+
+class TestBothWorkflowsKeepIdColumnsOutOfTheModel:
+    """T6.7: an ID column is rejected with a named warning and never reaches the
+    model, whether or not binning is enabled and whether or not it was declared.
+    """
+
+    def _assert_excluded(self, result):
+        train = _step(result, "train_model")
+        assert train.status == "success", train.error
+        features = train.result["feature_columns"]
+        assert not any(f.startswith("customer_id") for f in features), features
+        flagged = [w for w in result.warnings if w.code == "HIGH_CARDINALITY"]
+        assert [w.columns for w in flagged] == [["customer_id"]]
+
+    @BOTH
+    def test_undeclared(self, kind):
+        self._assert_excluded(_run_with_customer_id(kind))
+
+    @BOTH
+    def test_binning_disabled(self, kind):
+        from stats_compass_core.workflows.configs import FeatureEngineeringConfig
+
+        self._assert_excluded(_run_with_customer_id(
+            kind,
+            feature_engineering=FeatureEngineeringConfig(bin_rare_categories=False),
+        ))
+
+    @BOTH
+    def test_declared(self, kind):
+        self._assert_excluded(_run_with_customer_id(
+            kind, features=["customer_id", "category_a", "numeric"]
+        ))
+
+    @BOTH
+    def test_declaring_only_an_id_fails_rather_than_inferring(self, kind):
+        """An emptied feature list must not fall back to every numeric column."""
+        result = _run_with_customer_id(kind, features=["customer_id"])
+        train = _step(result, "train_model")
+        assert train.status == "failed"
+        assert "customer_id" in train.error
+        assert result.artifacts.models_created == []

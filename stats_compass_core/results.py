@@ -697,6 +697,13 @@ class MeanTargetEncodingResult(BaseModel):
         description="Parameters used for encoding (cv, smooth, target_type)"
     )
 
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description=(
+            "Requested columns that were not encoded, and why (HIGH_CARDINALITY)"
+        ),
+    )
+
     # Interpretation
     message: str = Field(description="Human-readable encoding summary")
 
@@ -743,6 +750,20 @@ class BinRareCategoriesResult(BaseModel):
 
     # Interpretation
     message: str = Field(description="Human-readable binning summary")
+
+    skipped_columns: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Requested columns that were left untouched, with the reason: "
+            "identifier-like cardinality, or not categorical"
+        ),
+    )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description=(
+            "One warning per skipped column (HIGH_CARDINALITY, NOT_CATEGORICAL)"
+        ),
+    )
 
 
 class OperationError(BaseModel):

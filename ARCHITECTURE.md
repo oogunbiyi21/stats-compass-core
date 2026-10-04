@@ -342,6 +342,12 @@ The supervised path raises two:
 - `LEAKAGE_SUSPECTED`: one feature on its own predicts the target perfectly on
   the training split, through its null pattern or its value (`ml/leakage.py`).
   That is almost always a column recorded after the outcome.
+- `HIGH_CARDINALITY`: a "categorical" column with more than 200 unique values,
+  or more unique values than half its non-null rows, is an identifier.
+  `bin_rare_categories` and `mean_target_encoding` skip it with this warning;
+  feature engineering screens it out before either runs (a
+  `screen_categoricals` step) and drops it from declared features, so it never
+  reaches the model whether or not binning is enabled.
 
 ### Available Workflows
 

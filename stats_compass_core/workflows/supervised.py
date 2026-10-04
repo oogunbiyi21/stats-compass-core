@@ -175,6 +175,7 @@ def run_supervised_workflow(
     current_df_name = source_name
     feature_columns = params.feature_columns  # May be renamed by encoding
     fe_mapping: dict[str, Any] = {}
+    no_features_left: str | None = None
 
     recorder = StepRecorder()
     charts_generated = 0
@@ -203,7 +204,7 @@ def run_supervised_workflow(
     # Step 0b: Feature Engineering (optional)
     # =========================================================================
     if config.feature_engineering:
-        fe_steps, fe_dfs, current_df_name, next_index, fe_mapping = (
+        fe_steps, fe_dfs, current_df_name, next_index, fe_mapping, fe_excluded = (
             run_feature_engineering_steps(
                 state=state,
                 config=config.feature_engineering,
@@ -215,6 +216,15 @@ def run_supervised_workflow(
         )
         recorder.adopt(fe_steps, next_index)
         dataframes_created.extend(fe_dfs)
+        if feature_columns and fe_excluded:
+            # Identifiers stay in the frame unencoded; training on them would
+            # fail on strings, or on nothing at all if they were all there was.
+            feature_columns = [c for c in feature_columns if c not in fe_excluded]
+            if not feature_columns:
+                no_features_left = (
+                    "Every declared feature was excluded as an identifier: "
+                    + ", ".join(fe_excluded)
+                )
         # Encoding renamed the columns it replaced.
         feature_columns = map_feature_columns(feature_columns, fe_mapping)
 
@@ -222,7 +232,11 @@ def run_supervised_workflow(
     # Step 1: Train Model (registry-based dispatch)
     # =========================================================================
     tool_name = spec.tool_map.get(config.model_type)
-    if tool_name is None:
+    if no_features_left:
+        # An empty list would read as "none declared" and quietly train on
+        # every numeric column instead.
+        recorder.fail("train_model", no_features_left, no_features_left)
+    elif tool_name is None:
         available = ", ".join(spec.tool_map.keys())
         recorder.fail(
             "train_model",

@@ -15,8 +15,12 @@ from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import BinRareCategoriesResult
+from stats_compass_core.results import BinRareCategoriesResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.transforms._cardinality import (
+    high_cardinality_reason,
+    high_cardinality_warning,
+)
 
 
 class BinRareCategoriesInput(StrictToolInput):
@@ -178,15 +182,31 @@ def bin_rare_categories(
     # Validate columns are categorical
     valid_columns = []
     validation_errors = []
+    skipped_columns: dict[str, str] = {}
+    warnings: list[ToolWarning] = []
 
     for col in params.categorical_columns:
         is_valid, error_msg = _validate_categorical_column(df, col)
-        if is_valid:
-            valid_columns.append(col)
-        else:
+        if not is_valid:
             validation_errors.append(error_msg)
+            skipped_columns[col] = error_msg
+            warnings.append(ToolWarning(
+                code="NOT_CATEGORICAL", columns=[col], message=error_msg
+            ))
+            continue
+        # An ID has every value rare, so binning it collapses it to one label.
+        reason = high_cardinality_reason(df[col])
+        if reason:
+            skipped_columns[col] = reason
+            warnings.append(high_cardinality_warning(col, reason, "not binned"))
+            continue
+        valid_columns.append(col)
 
-    if validation_errors and not valid_columns:
+    # Nothing usable and nothing deliberately skipped: the request was wrong.
+    # A column skipped for cardinality is an answer, not an error, so a call
+    # that names only an ID column returns a warning rather than raising.
+    skipped_for_cardinality = len(skipped_columns) > len(validation_errors)
+    if validation_errors and not valid_columns and not skipped_for_cardinality:
         raise ValueError(
             "No valid categorical columns to process. Errors:\n" +
             "\n".join(f"  - {e}" for e in validation_errors)
@@ -222,6 +242,10 @@ def bin_rare_categories(
         result_name = source_name  # Modify in place
 
     stored_name = state.set_dataframe(df_binned, name=result_name, operation="bin_rare_categories")
+    for warning in warnings:
+        state.record_warning(
+            warning.code, stored_name, warning.message, warning.columns
+        )
 
     # Build summary message
     total_categories_binned = sum(
@@ -231,7 +255,12 @@ def bin_rare_categories(
         details["rows_affected"] for details in binning_details.values()
     )
 
-    if columns_modified:
+    if not valid_columns:
+        message = (
+            "No columns binned. Skipped: "
+            + "; ".join(f"'{c}' ({why})" for c, why in skipped_columns.items())
+        )
+    elif columns_modified:
         message = (
             f"Binned {total_categories_binned} rare categories across "
             f"{len(columns_modified)} column(s) into '{params.bin_label}'. "
@@ -261,4 +290,6 @@ def bin_rare_categories(
         threshold=params.threshold,
         bin_label=params.bin_label,
         message=message,
+        skipped_columns=skipped_columns,
+        warnings=warnings,
     )

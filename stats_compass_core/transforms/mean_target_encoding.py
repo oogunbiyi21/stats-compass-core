@@ -14,8 +14,12 @@ from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
-from stats_compass_core.results import MeanTargetEncodingResult
+from stats_compass_core.results import MeanTargetEncodingResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.transforms._cardinality import (
+    high_cardinality_reason,
+    high_cardinality_warning,
+)
 
 # Lazy import sklearn to allow graceful failure if not installed
 try:
@@ -158,8 +162,15 @@ def mean_target_encoding(
 
     # Validate columns are categorical
     valid_columns = []
+    warnings: list[ToolWarning] = []
     for col in categorical_columns:
         if df[col].dtype == "object" or df[col].dtype.name == "category":
+            # Encoding an ID gives each row its own (cross-fitted) target mean:
+            # noise that looks like a feature.
+            reason = high_cardinality_reason(df[col])
+            if reason:
+                warnings.append(high_cardinality_warning(col, reason, "not encoded"))
+                continue
             valid_columns.append(col)
         elif df[col].nunique() < 20:
             # Allow numeric columns with few unique values (likely categorical)
@@ -169,6 +180,12 @@ def mean_target_encoding(
                 f"Column '{col}' appears to be numeric with {df[col].nunique()} unique values, "
                 "not categorical. Convert to string/category first if intended as categorical."
             )
+
+    if not valid_columns:
+        raise ValueError(
+            "No columns left to encode: "
+            + "; ".join(w.message for w in warnings)
+        )
 
     # Create working copy
     df_encoded = df.copy()
@@ -270,6 +287,10 @@ def mean_target_encoding(
         result_name = source_name  # Modify in place
 
     stored_name = state.set_dataframe(df_encoded, name=result_name, operation="mean_target_encoding")
+    for warning in warnings:
+        state.record_warning(
+            warning.code, stored_name, warning.message, warning.columns
+        )
 
     # Build result
     message_parts = [
@@ -299,4 +320,5 @@ def mean_target_encoding(
             "create_new_columns": params.create_new_columns,
         },
         message=" ".join(message_parts),
+        warnings=warnings,
     )
