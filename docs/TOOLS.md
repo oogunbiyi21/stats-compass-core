@@ -34,6 +34,7 @@ High-level orchestration tools that execute complete multi-step pipelines in a s
 | `dedupe` | Remove duplicate rows | `DataFrameMutationResult` |
 | `apply_imputation` | Fill missing values (mean/median/mode/constant) | `DataFrameMutationResult` |
 | `handle_outliers` | Handle outliers (cap/remove/winsorize/log/IQR) | `OutlierHandlingResult` |
+| `convert_dtype` | Text to numeric/datetime/bool; 'nan'/'null'/'' become missing, unparseable values counted | `ConvertDtypeResult` |
 
 ## Transform Tools (`stats_compass_core.transforms`)
 

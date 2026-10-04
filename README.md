@@ -50,7 +50,7 @@ result = registry.invoke("workflows", "run_classification", state, {
 | Category | Tools | Description |
 |----------|-------|-------------|
 | **Data** | `load_csv`, `get_schema`, `list_dataframes` | Load and inspect data |
-| **Cleaning** | `drop_na`, `impute`, `dedupe`, `handle_outliers` | Clean messy data |
+| **Cleaning** | `drop_na`, `impute`, `dedupe`, `handle_outliers`, `convert_dtype` | Clean messy data |
 | **Transforms** | `filter`, `groupby`, `pivot`, `encode`, `scale` | Reshape and transform |
 | **EDA** | `describe`, `correlations`, `hypothesis_test` | Statistical analysis |
 | **Plots** | `histogram`, `scatter`, `bar`, `roc_curve` | Visualizations (base64 PNG) |

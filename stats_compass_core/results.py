@@ -108,6 +108,42 @@ class DataFrameMutationResult(BaseModel):
     )
 
 
+class ColumnConversion(BaseModel):
+    """What converting one column cost."""
+
+    from_dtype: str = Field(description="dtype before conversion")
+    to_dtype: str = Field(description="dtype after conversion")
+    null_tokens: int = Field(
+        description=(
+            "Values that were a missing marker ('nan', 'null', '') and are now missing"
+        )
+    )
+    unparseable: int = Field(
+        description=(
+            "Values that were not missing markers but did not convert, now missing"
+        )
+    )
+    unparseable_sample: list[str] = Field(
+        default_factory=list, description="Up to five distinct unparseable values"
+    )
+
+
+class ConvertDtypeResult(BaseModel):
+    """Result for convert_dtype."""
+
+    success: bool = Field(description="Whether the conversion succeeded")
+    operation: str = Field(default="convert_dtype", description="Operation performed")
+    dataframe_name: str = Field(description="Name of the DataFrame holding the result")
+    source_dataframe: str = Field(description="Name of the source DataFrame")
+    to: str = Field(description="Requested type: numeric, datetime or bool")
+    columns: dict[str, ColumnConversion] = Field(description="Per-column detail")
+    message: str = Field(description="Human-readable summary")
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description="UNPARSEABLE_VALUES per column where data was lost to missing",
+    )
+
+
 class DataFrameQueryResult(BaseModel):
     """Result for tools that query/aggregate data without modifying the source."""
 
