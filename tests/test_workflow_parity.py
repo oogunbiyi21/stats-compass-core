@@ -342,3 +342,31 @@ class TestConfiguredPlotsAreAccountedFor:
             f"{len(_chart_steps(result))} steps: "
             f"{[s.step_name for s in _chart_steps(result)]}"
         )
+
+
+class TestBothWorkflowsScopeFeatureEngineering:
+    """T6.6: encode only what was declared, and say so when nothing was."""
+
+    @BOTH
+    def test_undeclared_categorical_is_not_encoded(self, kind):
+        _, result = _run(kind, features=["category_a", "numeric"])
+        encode = _step(result, "target_encode")
+        assert encode.status == "success", encode.error
+        assert encode.result["original_columns"] == ["category_a"]
+
+    @BOTH
+    def test_inferred_features_surface_as_a_workflow_warning(self, kind):
+        _, result = _run(kind)
+        codes = [w.code for w in result.warnings]
+        assert "FEATURES_INFERRED" in codes
+
+    @BOTH
+    def test_declared_features_raise_no_inferred_warning(self, kind):
+        _, result = _run(kind, features=["category_a", "category_b", "numeric"])
+        assert "FEATURES_INFERRED" not in [w.code for w in result.warnings]
+
+    @BOTH
+    def test_parity_frame_raises_no_leakage(self, kind):
+        """The shared fixture is honest data; a detector that fires here is noise."""
+        _, result = _run(kind)
+        assert "LEAKAGE_SUSPECTED" not in [w.code for w in result.warnings]

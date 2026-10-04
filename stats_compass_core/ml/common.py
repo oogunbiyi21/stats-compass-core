@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 import pandas as pd
 
-from stats_compass_core.results import ModelTrainingResult
+from stats_compass_core.results import ModelTrainingResult, ToolWarning
 from stats_compass_core.state import DataFrameState
 
 
@@ -183,6 +183,7 @@ def create_training_result(
     train_indices: np.ndarray | pd.Index | None = None,
     test_indices: np.ndarray | pd.Index | None = None,
     is_classifier: bool = False,
+    features_declared: bool = True,
 ) -> ModelTrainingResult:
     """
     Create a ModelTrainingResult and store the model in state.
@@ -207,6 +208,9 @@ def create_training_result(
         train_indices: Indices for training data
         test_indices: Indices for test data
         is_classifier: Whether this is a classification model
+        features_declared: False when the trainer fell back to "all numeric
+            columns except the target". The fallback is kept for library
+            callers, but the result says it happened and names what it took.
     
     Returns:
         ModelTrainingResult with model stored in state
@@ -282,6 +286,19 @@ def create_training_result(
             is_classifier=is_classifier,
         )
 
+    warnings = _training_warnings(
+        target_column=target_column,
+        feature_cols=feature_cols,
+        features_declared=features_declared,
+        X_train=X_train,
+        y_train=y_train,
+        is_classifier=is_classifier,
+    )
+    for warning in warnings:
+        state.record_warning(
+            warning.code, source_name, warning.message, warning.columns
+        )
+
     return ModelTrainingResult(
         model_id=model_id,
         model_type=model_type,
@@ -299,4 +316,34 @@ def create_training_result(
         probability_columns=probability_columns,
         class_labels=class_labels,
         hyperparameters=hyperparameters,
+        warnings=warnings,
     )
+
+
+def _training_warnings(
+    *,
+    target_column: str,
+    feature_cols: list[str],
+    features_declared: bool,
+    X_train: pd.DataFrame | None,
+    y_train: pd.Series | None,
+    is_classifier: bool,
+) -> list[ToolWarning]:
+    """Everything about this fit that a reader of the scores should know."""
+    from stats_compass_core.ml.leakage import detect_leakage
+
+    warnings: list[ToolWarning] = []
+    if not features_declared:
+        warnings.append(ToolWarning(
+            code="FEATURES_INFERRED",
+            columns=list(feature_cols),
+            message=(
+                f"No feature columns were declared, so every numeric column "
+                f"except '{target_column}' was used: {', '.join(feature_cols)}. "
+                f"Any of these recorded after the outcome will inflate the "
+                f"scores; declare feature_columns to choose them."
+            ),
+        ))
+    if X_train is not None and y_train is not None:
+        warnings.extend(detect_leakage(X_train, y_train, target_column, is_classifier))
+    return warnings

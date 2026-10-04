@@ -336,6 +336,24 @@ class DataFrameState:
         """Get full operation history."""
         return self._history.copy()
 
+    def record_warning(
+        self,
+        code: str,
+        dataframe_name: str,
+        message: str,
+        columns: list[str] | None = None,
+    ) -> None:
+        """Put a warning in the op-log alongside the operation that raised it.
+
+        A warning that lives only in a result is lost once the result has been
+        summarised; the op-log is what a later reader can still audit.
+        """
+        self._add_history(
+            "warning",
+            dataframe_name,
+            {"code": code, "message": message, "columns": list(columns or [])},
+        )
+
     def _add_history(
         self, operation: str, dataframe_name: str, details: dict[str, Any]
     ) -> None:

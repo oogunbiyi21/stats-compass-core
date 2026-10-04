@@ -10,6 +10,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from stats_compass_core.results import ToolWarning
+
 # Status types
 StepStatus = Literal["success", "failed", "skipped"]
 WorkflowStatus = Literal["success", "partial_failure", "failed"]
@@ -106,6 +108,13 @@ class WorkflowResult(BaseModel):
     recoverable: bool = Field(
         default=True,
         description="Whether agent can retry with different parameters"
+    )
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description=(
+            "Warnings raised by any step, with column names as the input "
+            "DataFrame has them (not as encoding renamed them)"
+        ),
     )
 
     @property

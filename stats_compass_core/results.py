@@ -73,6 +73,25 @@ def _normalize_value(value: Any) -> Any:
     return value
 
 
+class ToolWarning(BaseModel):
+    """A result that is returned but should not be trusted without a look.
+
+    Tools run unattended return numbers nobody checks. A warning is how a tool
+    says "this number may be confidently wrong" without refusing to answer.
+    Codes are plain strings rather than an enum so callers can add their own
+    without a schema change.
+    """
+
+    code: str = Field(
+        description="Stable machine-readable code, e.g. LEAKAGE_SUSPECTED"
+    )
+    message: str = Field(description="What was found and what to do about it")
+    columns: list[str] = Field(
+        default_factory=list,
+        description="Columns the warning is about",
+    )
+
+
 class DataFrameMutationResult(BaseModel):
     """Result for tools that modify a DataFrame (drop_na, dedupe, etc.)."""
 
@@ -254,6 +273,15 @@ class ModelTrainingResult(BaseModel):
     hyperparameters: dict[str, Any] = Field(
         default_factory=dict,
         description="Model hyperparameters used"
+    )
+
+    warnings: list[ToolWarning] = Field(
+        default_factory=list,
+        description=(
+            "Reasons the scores may be misleading: features inferred rather than "
+            "declared (FEATURES_INFERRED), or a feature that alone predicts the "
+            "target on the training split (LEAKAGE_SUSPECTED)"
+        ),
     )
 
 

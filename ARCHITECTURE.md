@@ -324,6 +324,25 @@ parameters or a reason for skipping. `tests/test_workflow_parity.py` runs both
 through identical scenarios and asserts identical step numbering, artifact
 ordering and result shape.
 
+### Warnings: results nobody checks
+
+These tools often run with no one reading the output, so a number that is
+confidently wrong is worse than an error. Where a tool can tell, it returns a
+`ToolWarning` (`code`, `message`, `columns`) in the result's `warnings` and
+records it in the op-log (`state.get_history()`, operation `"warning"`).
+Workflows lift every step's warnings into `WorkflowResult.warnings`, translated
+back to the input's column names.
+
+The supervised path raises two:
+
+- `FEATURES_INFERRED`: no `feature_columns` were declared, so the trainer used
+  every numeric column except the target. The fallback is kept for library
+  callers; the warning names what it took. When features *are* declared,
+  feature engineering bins and encodes only categoricals among them.
+- `LEAKAGE_SUSPECTED`: one feature on its own predicts the target perfectly on
+  the training split, through its null pattern or its value (`ml/leakage.py`).
+  That is almost always a column recorded after the outcome.
+
 ### Available Workflows
 
 #### EDA Report (`run_eda_report`)

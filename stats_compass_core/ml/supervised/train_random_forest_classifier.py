@@ -22,7 +22,9 @@ class TrainRandomForestClassifierInput(StrictToolInput):
         default=None,
         description=(
             "List of feature columns. "
-            "If None, uses all numeric columns except target"
+            "If None, uses all numeric columns except target and the result "
+            "carries a FEATURES_INFERRED warning naming them. Declare them when "
+            "any column may have been recorded after the outcome."
         ),
     )
     test_size: float = Field(
@@ -151,4 +153,5 @@ def train_random_forest_classifier(
         train_indices=train_indices,
         test_indices=test_indices,
         is_classifier=True,
+        features_declared=bool(params.feature_columns),
     )

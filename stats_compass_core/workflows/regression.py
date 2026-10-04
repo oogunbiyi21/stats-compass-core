@@ -69,7 +69,11 @@ class RunRegressionInput(StrictToolInput):
     )
     feature_columns: list[str] | None = Field(
         default=None,
-        description="List of feature columns. If None, uses all numeric columns except target."
+        description=(
+            "List of feature columns. Only these are binned and encoded. If None, "
+            "every categorical is encoded and every numeric column except the "
+            "target is used, and the result carries a FEATURES_INFERRED warning."
+        )
     )
     config: RegressionConfig | None = Field(
         default=None,

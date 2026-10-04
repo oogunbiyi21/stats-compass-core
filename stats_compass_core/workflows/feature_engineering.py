@@ -145,6 +145,7 @@ def run_feature_engineering_steps(
     source_name: str,
     target_column: str,
     start_step_index: int = 0,
+    feature_columns: list[str] | None = None,
 ) -> tuple[list[WorkflowStepResult], list[str], str, int, dict[str, str]]:
     """
     Run feature engineering steps before model training.
@@ -160,6 +161,10 @@ def run_feature_engineering_steps(
         source_name: Name of the source DataFrame
         target_column: Target column for encoding
         start_step_index: Starting step number
+        feature_columns: The declared features, if any. Only categoricals among
+            them are binned and encoded. Encoding every non-target categorical
+            is how a post-outcome column reached the model: it became numeric,
+            and the trainer's numeric fallback then picked it up.
     
     Returns:
         Tuple of:
@@ -181,11 +186,17 @@ def run_feature_engineering_steps(
     # Get current DataFrame for column detection
     df = state.get_dataframe(source_name)
 
+    def declared(columns: list[str]) -> list[str]:
+        if feature_columns is None:
+            return columns
+        return [col for col in columns if col in feature_columns]
+
     # Determine which categorical columns to process
     categorical_columns = config.categorical_columns
     if categorical_columns is None:
         # Will auto-detect after binning (safer)
         categorical_columns = _detect_categorical_columns(df, target_column)
+    categorical_columns = declared(categorical_columns)
 
     # Skip if no categorical columns found
     if not categorical_columns:
@@ -195,7 +206,11 @@ def run_feature_engineering_steps(
             step_index=step_index,
             status="skipped",
             summary="No categorical columns found for feature engineering",
-            skip_reason="No object/category dtype columns detected (excluding target)",
+            skip_reason=(
+                "No object/category dtype columns detected (excluding target)"
+                if feature_columns is None
+                else "None of the declared feature columns is categorical"
+            ),
         ))
         return steps, dataframes_created, current_df_name, step_index, column_mapping
 
@@ -228,7 +243,9 @@ def run_feature_engineering_steps(
             # Re-detect categoricals after binning (some may have been cleaned)
             if config.categorical_columns is None:
                 df = state.get_dataframe(current_df_name)
-                categorical_columns = _detect_categorical_columns(df, target_column)
+                categorical_columns = declared(
+                    _detect_categorical_columns(df, target_column)
+                )
 
     # =========================================================================
     # Step 2: Target Encode Categorical Columns (if enabled)

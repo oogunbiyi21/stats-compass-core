@@ -22,7 +22,9 @@ class TrainLinearRegressionInput(StrictToolInput):
         default=None,
         description=(
             "List of feature columns. "
-            "If None, uses all numeric columns except target"
+            "If None, uses all numeric columns except target and the result "
+            "carries a FEATURES_INFERRED warning naming them. Declare them when "
+            "any column may have been recorded after the outcome."
         ),
     )
     test_size: float = Field(
@@ -109,4 +111,5 @@ def train_linear_regression(
         train_indices=train_indices,
         test_indices=test_indices,
         is_classifier=False,
+        features_declared=bool(params.feature_columns),
     )
