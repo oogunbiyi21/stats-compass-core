@@ -90,6 +90,7 @@ def verdict(
     real_change_alpha: float = 0.05,
     min_points: int = 5,
     robust_scale: bool = False,
+    min_reference: int = MIN_REFERENCE_WINDOWS,
 ) -> VerdictFacts | Insufficient:
     """Judge one period's figure against the history before it.
 
@@ -108,6 +109,8 @@ def verdict(
             absolute deviation instead of the standard deviation, so that the
             store's own past spikes do not widen them. Recorded as
             ``params["scale"]``.
+        min_reference: Fewest past positions the expectation's error must be
+            measured at before the period can be judged.
 
     Returns:
         ``VerdictFacts``, or ``Insufficient``: ``TOO_FEW_POINTS``,
@@ -153,6 +156,7 @@ def verdict(
         "noise_band_z": noise_band_z,
         "real_change_alpha": real_change_alpha,
         "min_points": min_points,
+        "min_reference": min_reference,
         "scale": "mad" if robust_scale else "std",
         "period_start": start.date().isoformat(),
         "period_end": end.date().isoformat(),
@@ -174,9 +178,9 @@ def verdict(
 
     errors = dec.expectation_errors(length)
     params["reference"] = errors.attrs["reference"]
-    if len(errors) < MIN_REFERENCE_WINDOWS:
+    if len(errors) < min_reference:
         return Insufficient(
-            needs=len(dec.daily) + MIN_REFERENCE_WINDOWS - len(errors),
+            needs=len(dec.daily) + min_reference - len(errors),
             has=len(dec.daily),
             unit="days",
             reason="TOO_SHORT",

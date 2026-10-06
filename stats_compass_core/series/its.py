@@ -105,6 +105,8 @@ def its_lift(
     seasonal_band_z: float = 2.0,
     noise_band_z: float = 3.0,
     real_change_alpha: float = 0.05,
+    min_baseline_share: float = 0.8,
+    min_reference: int = 20,
     **decompose_options: Any,
 ) -> LiftFacts | Insufficient:
     """Estimate one window's lift on one daily series.
@@ -128,6 +130,9 @@ def its_lift(
         noise_band: ``"none"`` or ``"prior_window"``; see the module notes.
         level: Interval level.
         seasonal_band_z, noise_band_z, real_change_alpha: The calibration.
+        min_baseline_share: Share of ``baseline_days`` that must hold real
+            data.
+        min_reference: Fewest past positions to measure the error against.
         **decompose_options: Passed to ``decompose`` (``max_gap_days``,
             ``annual_smoothing_days``, ``fourier_terms``, ``robust``).
 
@@ -174,7 +179,13 @@ def its_lift(
         )
 
     estimate = _estimate(
-        dec, observed_series, start, present, baseline_days, baseline_lookback_days
+        dec,
+        observed_series,
+        start,
+        present,
+        baseline_days,
+        baseline_lookback_days,
+        min_baseline_share,
     )
     if isinstance(estimate, Insufficient):
         return estimate
@@ -185,9 +196,9 @@ def its_lift(
     )
 
     errors = dec.expectation_errors(length, delete_after_days=post_days)
-    if len(errors) < MIN_REFERENCE_WINDOWS:
+    if len(errors) < min_reference:
         return Insufficient(
-            needs=MIN_REFERENCE_WINDOWS,
+            needs=min_reference,
             has=len(errors),
             unit="days",
             reason="TOO_SHORT",
@@ -206,7 +217,7 @@ def its_lift(
     )
     p_value = (1 + int(np.sum(np.abs(reference) >= abs(judged)))) / (len(reference) + 1)
     band_level = float(2 * stats.norm.cdf(seasonal_band_z) - 1)
-    band_half = float(np.quantile(np.abs(reference), band_level))
+    band_half = _ranked_half_width(reference, band_level)
     expected_range = (-band_half, band_half)
     spread = float(np.std(reference, ddof=1))
 
@@ -214,7 +225,12 @@ def its_lift(
     prior_info: dict[str, Any] = {}
     if prior_window is not None:
         prior = _prior_lift(
-            dec, observed_series, prior_window, baseline_days, baseline_lookback_days
+            dec,
+            observed_series,
+            prior_window,
+            baseline_days,
+            baseline_lookback_days,
+            min_baseline_share,
         )
         if isinstance(prior, str):
             prior_info = {"prior_unavailable": prior}
@@ -244,6 +260,8 @@ def its_lift(
         "window": [str(window[0]), str(window[1])],
         "baseline_days": baseline_days,
         "baseline_lookback_days": baseline_lookback_days,
+        "min_baseline_share": min_baseline_share,
+        "min_reference": min_reference,
         "post_days": post_days,
         "prior_window": None
         if prior_window is None
@@ -293,6 +311,7 @@ def _estimate(
     present: pd.Series,
     baseline_days: int,
     lookback_days: int,
+    min_share: float = MIN_BASELINE_SHARE,
 ) -> tuple[float, float, dict[str, Any]] | Insufficient:
     """Observed and counterfactual totals over the window's days with data.
 
@@ -304,7 +323,7 @@ def _estimate(
     lagged = dec._lagged_seasonal_daily()
     adjusted = dec.daily - lagged
     filled = set(dec.imputed) | set(dec.excluded)
-    needed = math.ceil(MIN_BASELINE_SHARE * baseline_days)
+    needed = math.ceil(min_share * baseline_days)
     chosen: list[pd.Timestamp] = []
     for back in range(1, lookback_days + 1):
         day = start - pd.Timedelta(days=back)
@@ -341,6 +360,7 @@ def _prior_lift(
     prior: Window,
     baseline_days: int,
     lookback_days: int,
+    min_share: float = MIN_BASELINE_SHARE,
 ) -> tuple[float, float] | str:
     """The same estimate at the comparable prior window, or why there is none."""
     start, end = pd.Timestamp(prior[0]), pd.Timestamp(prior[1])
@@ -348,7 +368,9 @@ def _prior_lift(
     present = observed.notna()
     if not present.any():
         return "NO_DATA_IN_PRIOR"
-    estimate = _estimate(dec, values, start, present, baseline_days, lookback_days)
+    estimate = _estimate(
+        dec, values, start, present, baseline_days, lookback_days, min_share
+    )
     if isinstance(estimate, Insufficient):
         return (
             "NO_SEASONAL_BEFORE_PRIOR"
@@ -364,7 +386,21 @@ def _prior_lift(
     return float(lift), float(present.mean())
 
 
+def _ranked_half_width(errors: np.ndarray, level: float) -> float:
+    """The |error| the p-value's ranking puts at ``1 - level``.
+
+    p = (1 + #{|e| >= |x|}) / (N + 1) < 1 - level exactly when |x| exceeds
+    the j-th largest |e|, j = ceil((1 - level)(N + 1) - 1). Taking the
+    half-width from that order statistic, not an interpolated quantile, makes
+    "the interval excludes zero" and "p < 1 - level" the same statement.
+    With too few errors to reach the level, it is the largest |error|.
+    """
+    ordered = np.sort(np.abs(errors))[::-1]
+    j = math.ceil((1 - level) * (len(ordered) + 1) - 1)
+    return float(ordered[min(max(j, 1), len(ordered)) - 1])
+
+
 def _interval(estimate: float, errors: np.ndarray, level: float) -> tuple[float, float]:
-    """Estimate ± the ``level`` quantile of the errors' sizes: the test, inverted."""
-    half = float(np.quantile(np.abs(errors), level))
+    """Estimate ± the ranked half-width: the test, inverted."""
+    half = _ranked_half_width(errors, level)
     return float(estimate - half), float(estimate + half)

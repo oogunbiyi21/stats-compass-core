@@ -63,7 +63,11 @@ class MonthEffects:
 
 
 def month_effects(
-    dec: Decomposition, *, level: float = 0.9, hac_lags: int = 7
+    dec: Decomposition,
+    *,
+    level: float = 0.9,
+    hac_lags: int = 7,
+    min_days_per_month: int = MIN_DAYS_PER_MONTH,
 ) -> MonthEffects | Insufficient:
     """Each calendar month's effect in percent of trend, with a ``level`` interval.
 
@@ -103,9 +107,9 @@ def month_effects(
 
     counts = pd.Series(months).value_counts()
     have = min(int(counts.get(m, 0)) * days_per_unit for m in range(1, 13))
-    if have < MIN_DAYS_PER_MONTH:
+    if have < min_days_per_month:
         return Insufficient(
-            needs=MIN_DAYS_PER_MONTH, has=have, unit="days", reason="MONTH_TOO_SHORT"
+            needs=min_days_per_month, has=have, unit="days", reason="MONTH_TOO_SHORT"
         )
 
     rows: list[MonthEffect] = []
@@ -143,6 +147,7 @@ def month_effects(
         params={
             "level": level,
             "hac_lags": lags,
+            "min_days_per_month": min_days_per_month,
             "grain": dec.grain,
             "df_by_month": df_by_month,
             "decomposition_method": dec.method,

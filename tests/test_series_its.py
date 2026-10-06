@@ -213,6 +213,30 @@ class TestUnitsAndContract:
             excludes = lo > 0 or hi < 0
             assert excludes == (facts.p_value < 0.1), column
 
+    def test_interval_and_band_agree_with_the_test_on_every_store(self):
+        """Both are read from the same ranked error the p-value counts, so they
+        can never disagree with it; an interpolated quantile did on 5 of 300."""
+        for seed in range(30):
+            facts = its_lift(
+                _null(800 + seed), SUMMER30, kind="money", method="fourier"
+            )
+            lo, hi = facts.interval_pct
+            assert (lo > 0 or hi < 0) == (facts.p_value < 0.1), seed
+            band_lo, band_hi = facts.expected_range_pct
+            in_band = band_lo <= facts.estimate_pct <= band_hi
+            assert in_band == (facts.p_value >= 1 - facts.params["band_level"]), seed
+
+    def test_floors_are_arguments(self):
+        facts = its_lift(
+            _demo("net_revenue"),
+            SUMMER30,
+            kind="money",
+            min_baseline_share=0.5,
+            min_reference=30,
+        )
+        assert facts.params["min_baseline_share"] == 0.5
+        assert facts.params["min_reference"] == 30
+
     def test_band_and_interval_levels_are_recorded(self):
         facts = its_lift(_demo("net_revenue"), SUMMER30, kind="money")
         assert facts.params["band_basis"] == "abs_error_quantile"

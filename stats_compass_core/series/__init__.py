@@ -1,8 +1,9 @@
 """Statistics on daily series: series in, statistics out.
 
-Plain functions, not registered tools. Calibration values are arguments with
-defaults; anything that draws at random takes a required ``seed``; a shortage
-of data is returned as ``Insufficient``, never raised. Results are structured
+Plain functions, not registered tools. Calibration values and sufficiency
+floors are arguments with defaults; nothing draws at random, so the same input
+always gives the same output; a shortage of data is returned as
+``Insufficient``, never raised. Results are structured
 facts; wording them for a reader is the caller's job.
 
 statsmodels is imported only when a function needs it (install the

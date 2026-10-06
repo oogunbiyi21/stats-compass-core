@@ -501,6 +501,10 @@ class TestMonthEffects:
         assert isinstance(result, Insufficient)
         assert result.reason == "MONTH_TOO_SHORT"
 
+    def test_the_days_per_month_floor_is_an_argument(self):
+        result = month_effects(decompose(_demo()), min_days_per_month=200)
+        assert isinstance(result, Insufficient) and result.reason == "MONTH_TOO_SHORT"
+
     def test_records_its_basis(self):
         effects = month_effects(decompose(_demo()), level=0.8, hac_lags=5)
         assert effects.params["level"] == 0.8

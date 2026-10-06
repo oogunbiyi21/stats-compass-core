@@ -306,6 +306,11 @@ class TestInsufficientAndContract:
         width = lambda f: f.expected_range[1] - f.expected_range[0]  # noqa: E731
         assert width(robust) < width(plain)
 
+    def test_the_reference_floor_is_an_argument(self):
+        dec, period = _split(_demo("net_revenue"))
+        result = verdict(dec, period, kind="money", min_reference=10_000)
+        assert isinstance(result, Insufficient) and result.reason == "TOO_SHORT"
+
     def test_params_record_every_argument(self):
         dec, period = _split(_demo("net_revenue"))
         facts = verdict(dec, period, kind="money", seasonal_band_z=1.5)
