@@ -74,6 +74,25 @@ class TestCalibration:
         assert run.direction == "down" and run.significant
 
 
+class TestWithExclusions:
+    def test_an_excluded_promotion_does_not_cost_the_run_its_reference(self):
+        """A break only matters inside the run; earlier stretches still compare."""
+        from datetime import date
+
+        dec = decompose(
+            _demo("new_customers"), exclude=[(date(2026, 5, 14), date(2026, 6, 14))]
+        )
+        run = detect_run(dec)
+        assert isinstance(run, RunFacts)
+        assert run.significant and run.direction == "down"
+
+    def test_runs_are_compared_relative_to_where_they_start(self):
+        """On a growing store earlier stretches sit lower; absolute moves would
+        make every recent run look big."""
+        run = detect_run(decompose(_demo("new_customers")))
+        assert run.params["compare"] == "relative"
+
+
 class TestContract:
     def test_no_run_ending_at_the_last_week_is_none(self):
         series = _demo("new_customers").copy()

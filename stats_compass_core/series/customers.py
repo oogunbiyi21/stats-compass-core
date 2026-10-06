@@ -36,6 +36,13 @@ class RepeatRateFacts:
 
 @dataclass(frozen=True)
 class GapFacts:
+    """The median gap and the spread of gaps around it.
+
+    ``iqr`` describes how gaps vary between orders, not how certain the median
+    is. Gaps from one customer are not independent, so an interval for the
+    median would have to resample customers, not gaps.
+    """
+
     estimate: float  # median days between a customer's consecutive orders
     iqr: tuple[float, float]
     n: int
@@ -44,9 +51,7 @@ class GapFacts:
 def repeat_rate(
     order_counts: Sequence[int],
     *,
-    seed: int,
     level: float = 0.9,
-    n_boot: int = 2000,
     min_customers: int = 100,
     comparison_rate: float | None = None,
     comparison_n: int | None = None,
@@ -58,13 +63,16 @@ def repeat_rate(
     Args:
         order_counts: Each cohort member's orders within the window, the first
             order included.
-        seed: Seeds the bootstrap over customers. Required, so a run repeats.
-        level: Interval level.
-        n_boot: Bootstrap draws.
+        level: Interval level. The interval is Clopper-Pearson: exact for a
+            share of independent customers, so nothing is drawn. (Resampling
+            customers gives the same distribution, but drawn, and it claimed
+            certainty, [0, 0], for a cohort with no repeats.)
         min_customers: Fewest customers for an estimate (the count floor; the
             time floor is the caller's).
-        comparison_rate: The rate to judge against (for example the store's
-            other cohorts). Without it there is no verdict.
+        comparison_rate: The rate to judge against, for example the store's
+            other cohorts. It must not include the cohort being judged, or
+            the cohort is partly compared with itself. Without it there is no
+            verdict.
         comparison_n: Customers behind ``comparison_rate``. With it the test
             compares two rates; without it, one rate against a fixed value.
         seasonal_band_z: Width of the expected band, in standard errors of
@@ -84,13 +92,14 @@ def repeat_rate(
     repeats = int((counts >= 2).sum())
     estimate = repeats / n
 
-    # Resampling customers with replacement: the count of repeaters in each
-    # resample is binomial(n, estimate), so draw that directly.
-    rng = np.random.default_rng(seed)
-    draws = rng.binomial(n, estimate, size=n_boot) / n
     tail = (1 - level) / 2
-    low, high = np.quantile(draws, [tail, 1 - tail])
-    interval = (float(min(low, estimate)), float(max(high, estimate)))
+    low = 0.0 if repeats == 0 else float(stats.beta.ppf(tail, repeats, n - repeats + 1))
+    high = (
+        1.0
+        if repeats == n
+        else float(stats.beta.ppf(1 - tail, repeats + 1, n - repeats))
+    )
+    interval = (low, high)
 
     verdict = p_value = decided_by = test = None
     if comparison_rate is not None:
@@ -113,11 +122,9 @@ def repeat_rate(
         p_value=None if p_value is None else float(p_value),
         decided_by=decided_by,
         test=test,
-        method="bootstrap_customers",
+        method="clopper_pearson",
         params={
-            "seed": seed,
             "level": level,
-            "n_boot": n_boot,
             "min_customers": min_customers,
             "comparison_rate": comparison_rate,
             "comparison_n": comparison_n,

@@ -63,20 +63,27 @@ def detect_run(
         ``RunFacts``; None when no run of ``min_moves`` ends at the latest
         week; ``Insufficient(reason="TOO_SHORT")`` when there are too few
         earlier stretches to compare with.
+
+    Only the run itself has to be unbroken. Earlier stretches are taken from
+    any unbroken part of the history, so an excluded promotion or a gap costs
+    only the stretches that cross it. Changes are compared relative to each
+    stretch's starting week when every start is positive: on a growing store
+    earlier stretches sit lower, and absolute moves would make every recent
+    run look large.
     """
     if min_moves < 1:
         raise ValueError("min_moves must be at least 1")
     weekly = _adjusted_weeks(dec)
-    if len(weekly) < 2:
-        return None
     values = weekly.to_numpy()
+    if len(values) < 2 or not np.isfinite(values[-1]):
+        return None
     moves = np.sign(np.diff(values))
     last = moves[-1]
-    if last == 0:
+    if not np.isfinite(last) or last == 0:
         return None
     count = 0
     for move in moves[::-1]:
-        if move != last:
+        if move != last:  # also stops at a break, where the move is NaN
             break
         count += 1
     if count < min_moves:
@@ -84,12 +91,14 @@ def detect_run(
 
     span = count + 1
     change = float(values[-1] - values[-span])
+    start_value = float(values[-span])
     earlier = values[: len(values) - span]
     windows = (
         np.lib.stride_tricks.sliding_window_view(earlier, span)
         if len(earlier) >= span
         else np.empty((0, span))
     )
+    windows = windows[np.isfinite(windows).all(axis=1)]
     if len(windows) < min_reference:
         return Insufficient(
             needs=len(dec.daily) + 7 * (min_reference - len(windows)),
@@ -99,10 +108,14 @@ def detect_run(
         )
     steps = np.diff(windows, axis=1)
     monotone = (steps > 0).all(axis=1) | (steps < 0).all(axis=1)
-    moved = np.abs(windows[:, -1] - windows[:, 0]) >= abs(change)
+    starts = windows[:, 0]
+    relative = start_value > 0 and bool((starts > 0).all())
+    if relative:
+        moved = np.abs(windows[:, -1] - starts) / starts >= abs(change) / start_value
+    else:
+        moved = np.abs(windows[:, -1] - starts) >= abs(change)
     p_value = (int((monotone & moved).sum()) + 1) / (len(windows) + 1)
 
-    start_value = float(values[-span])
     return RunFacts(
         direction="up" if last > 0 else "down",
         moves=count,
@@ -118,14 +131,20 @@ def detect_run(
             "real_change_alpha": real_change_alpha,
             "min_reference": min_reference,
             "decomposition_method": dec.method,
-            "n_weeks": len(weekly),
+            "n_weeks": int(np.isfinite(values).sum()),
+            "compare": "relative" if relative else "absolute",
         },
         warnings=[],
     )
 
 
 def _adjusted_weeks(dec: Decomposition) -> pd.Series:
-    """Complete Monday-start weekly totals of daily values minus last period's seasonal."""
+    """Monday-start weekly totals of daily values minus last period's seasonal.
+
+    One value per calendar week across the history; NaN where the week is
+    incomplete, unadjustable (no seasonal a period earlier) or touches an
+    excluded day, so a run cannot be stitched across a break.
+    """
     adjusted = dec.daily - dec._lagged_seasonal_daily()
     if dec.excluded:
         adjusted = adjusted.copy()
@@ -133,16 +152,5 @@ def _adjusted_weeks(dec: Decomposition) -> pd.Series:
     weeks = week_start(adjusted.index)
     grouped = adjusted.groupby(weeks)
     complete = (grouped.count() == 7) & (grouped.size() == 7)
-    totals = grouped.sum()[complete]
-    # A run is consecutive weeks: keep only the unbroken stretch that reaches
-    # the latest week, so a gap in the data does not join two stretches.
-    expected = (
-        pd.date_range(totals.index[0], totals.index[-1], freq="7D")
-        if len(totals)
-        else totals.index
-    )
-    totals = totals.reindex(expected)
-    breaks = np.flatnonzero(totals.isna().to_numpy())
-    if len(breaks):
-        totals = totals.iloc[breaks[-1] + 1 :]
-    return totals
+    totals = grouped.sum().where(complete)
+    return totals.reindex(pd.date_range(totals.index[0], totals.index[-1], freq="7D"))
