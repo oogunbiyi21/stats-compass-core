@@ -13,15 +13,16 @@ Architecture §7.5. For one window (a promotion) and one daily series:
   the series' units and in percent of the counterfactual.
 - **Interval and test.** The same estimator applied at every past position
   where it can be tried (``Decomposition.expectation_errors``): the counterfactual
-  and its reference are one function. The interval subtracts the errors'
-  quantiles from the lift; the p-value ranks the lift among them. Exact, so
-  nothing is drawn. The first version read the window's seasonal in-sample
-  while its reference read it a period earlier; its 90% intervals missed zero
-  for 20% of inert promotions.
-- **Verdict.** §7.3 applied to the lift. The expected band is the central
-  ``band_level`` of the errors, where ``band_level`` is the normal coverage of
-  ``±seasonal_band_z`` (0.954 at 2): the same empirical basis as the interval,
-  at the band's level. With ``noise_band="prior_window"`` the noise band is the
+  and its reference are one function. The p-value ranks |lift| among the
+  errors' sizes; the interval is the lift ± the ``level`` quantile of |error|,
+  which is the same test inverted: it excludes zero exactly when
+  p < 1 - level. Separate 5% and 95% quantiles rested each tail on one or
+  two effectively independent windows (the windows overlap) and missed zero
+  for 14% of inert promotions. Exact, so nothing is drawn.
+- **Verdict.** §7.3 applied to the lift. The expected band is ± the
+  ``band_level`` quantile of |error|, where ``band_level`` is the normal
+  coverage of ``±seasonal_band_z`` (0.954 at 2): the same basis as the
+  interval and the test, at the band's level. With ``noise_band="prior_window"`` the noise band is the
   lift estimated at ``prior_window`` ± ``noise_band_z`` × √2 × the errors'
   spread: two estimates by the same function, each with the reference's
   variance. It needs a seasonal period before the prior window, so with two
@@ -195,11 +196,8 @@ def its_lift(
     positive = errors["expected"].to_numpy() > 0
     err_pct = 100 * err_abs[positive] / errors["expected"].to_numpy()[positive]
 
-    tail_q = (1 - level) / 2
-    interval_abs = _interval(lift_abs, err_abs, tail_q)
-    interval_pct = (
-        _interval(lift_pct, err_pct, tail_q) if lift_pct is not None else None
-    )
+    interval_abs = _interval(lift_abs, err_abs, level)
+    interval_pct = _interval(lift_pct, err_pct, level) if lift_pct is not None else None
 
     # Judge on the percent scale when there is one: it does not drift with the
     # store's growth the way absolute errors do.
@@ -208,10 +206,8 @@ def its_lift(
     )
     p_value = (1 + int(np.sum(np.abs(reference) >= abs(judged)))) / (len(reference) + 1)
     band_level = float(2 * stats.norm.cdf(seasonal_band_z) - 1)
-    band_low, band_high = np.quantile(
-        reference, [(1 - band_level) / 2, (1 + band_level) / 2]
-    )
-    expected_range = (float(band_low), float(band_high))
+    band_half = float(np.quantile(np.abs(reference), band_level))
+    expected_range = (-band_half, band_half)
     spread = float(np.std(reference, ddof=1))
 
     prior_lift_pct: float | None = None
@@ -257,7 +253,8 @@ def its_lift(
         "level": level,
         "interval_level": level,
         "band_level": band_level,
-        "band_basis": "empirical_quantiles",
+        "band_basis": "abs_error_quantile",
+        "interval_basis": "abs_error_quantile",
         "seasonal_band_z": seasonal_band_z,
         "noise_band_z": noise_band_z,
         "real_change_alpha": real_change_alpha,
@@ -367,6 +364,7 @@ def _prior_lift(
     return float(lift), float(present.mean())
 
 
-def _interval(estimate: float, errors: np.ndarray, tail: float) -> tuple[float, float]:
-    low, high = np.quantile(errors, [tail, 1 - tail])
-    return float(estimate - high), float(estimate - low)
+def _interval(estimate: float, errors: np.ndarray, level: float) -> tuple[float, float]:
+    """Estimate ± the ``level`` quantile of the errors' sizes: the test, inverted."""
+    half = float(np.quantile(np.abs(errors), level))
+    return float(estimate - half), float(estimate + half)

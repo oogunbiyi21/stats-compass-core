@@ -25,6 +25,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 from stats_compass_core.results import ToolWarning
 from stats_compass_core.series._common import Insufficient
@@ -116,7 +117,15 @@ def forecast(
     for label in dict.fromkeys(labels):
         mask = labels == label
         totals = errors[:, mask].sum(axis=1)
-        m_low, m_mid, m_high = np.quantile(totals, [tail, 0.5, 1 - tail])
+        # The origins overlap: a month's totals from n origins hold only about
+        # n / n_days independent months, too few for tail quantiles. Use a
+        # prediction interval on that effective sample instead: t critical
+        # value x spread x sqrt(1 + 1/n_eff).
+        m_mid = float(np.median(totals))
+        n_eff = max(len(totals) / max(int(mask.sum()), 1), 2.0)
+        t_crit = float(stats.t.ppf(1 - tail, df=n_eff - 1))
+        m_half = t_crit * float(np.std(totals, ddof=1)) * float(np.sqrt(1 + 1 / n_eff))
+        m_low, m_high = m_mid - m_half, m_mid + m_half
         total = float(base[mask].sum())
         mid = total + m_mid
         width = float(m_high - m_low)

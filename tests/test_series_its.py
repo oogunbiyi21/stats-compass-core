@@ -205,9 +205,18 @@ class TestUnitsAndContract:
         lo, hi = facts.noise_range_pct
         assert (lo + hi) / 2 == pytest.approx(facts.prior_lift_pct)
 
+    def test_the_interval_excludes_zero_exactly_when_the_test_is_significant(self):
+        """The interval is the test inverted, so the report cannot contradict itself."""
+        for column, kind in (("net_revenue", "money"), ("new_customers", "count")):
+            facts = its_lift(_demo(column), SUMMER30, kind=kind, level=0.9)
+            lo, hi = facts.interval_pct
+            excludes = lo > 0 or hi < 0
+            assert excludes == (facts.p_value < 0.1), column
+
     def test_band_and_interval_levels_are_recorded(self):
         facts = its_lift(_demo("net_revenue"), SUMMER30, kind="money")
-        assert facts.params["band_basis"] == "empirical_quantiles"
+        assert facts.params["band_basis"] == "abs_error_quantile"
+        assert facts.params["interval_basis"] == "abs_error_quantile"
         assert facts.params["band_level"] == pytest.approx(0.9545, abs=1e-4)
         assert facts.params["interval_level"] == 0.9
 
