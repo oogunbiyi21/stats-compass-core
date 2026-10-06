@@ -82,6 +82,7 @@ def verdict(
     real_change_alpha: float = 0.05,
     n_boot: int = 2000,
     min_points: int = 5,
+    robust_scale: bool = False,
 ) -> VerdictFacts | Insufficient:
     """Judge one period's figure against the history before it.
 
@@ -98,6 +99,10 @@ def verdict(
         seasonal_band_z, noise_band_z, real_change_alpha: The calibration.
         n_boot: Bootstrap draws for the money test.
         min_points: Fewest days with data for the period to be judged.
+        robust_scale: Measure both bands' spreads with 1.4826 × the median
+            absolute deviation instead of the standard deviation, so that the
+            store's own past spikes do not widen them. Recorded as
+            ``params["scale"]``.
 
     Returns:
         ``VerdictFacts``, or ``Insufficient`` (``TOO_FEW_POINTS``,
@@ -140,6 +145,7 @@ def verdict(
         "real_change_alpha": real_change_alpha,
         "n_boot": n_boot,
         "min_points": min_points,
+        "scale": "mad" if robust_scale else "std",
         "period_start": start.date().isoformat(),
         "period_end": end.date().isoformat(),
         "decomposition_method": dec.method,
@@ -163,7 +169,7 @@ def verdict(
     params["n_points"] = int(present.sum())
 
     scale = 1.0 if aggregate == "sum" else 1.0 / length
-    sigma_expected = dec.residual_sigma(length) * scale
+    sigma_expected = dec.residual_sigma(length, robust=robust_scale) * scale
     expected_range = (
         expected - seasonal_band_z * sigma_expected,
         expected + seasonal_band_z * sigma_expected,
@@ -171,7 +177,7 @@ def verdict(
 
     prior_days = dec.daily.iloc[-length:]
     prior = _aggregate(prior_days, _weights_for(weights, prior_days.index), aggregate)
-    sigma_change = _change_sigma(dec, length) * scale
+    sigma_change = _change_sigma(dec, length, robust_scale) * scale
     noise_range = (
         prior - noise_band_z * sigma_change,
         prior + noise_band_z * sigma_change,
@@ -261,7 +267,7 @@ def _aggregate(values: pd.Series, weights: pd.Series, how: Aggregate) -> float:
     return float((values * weights).sum() / total)
 
 
-def _change_sigma(dec: Decomposition, length: int) -> float:
+def _change_sigma(dec: Decomposition, length: int, robust: bool = False) -> float:
     """Spread of the change between consecutive seasonally adjusted periods."""
     if dec.grain == "day":
         adjusted = (dec.observed - dec.seasonal).to_numpy()
@@ -271,14 +277,14 @@ def _change_sigma(dec: Decomposition, length: int) -> float:
             .reshape(blocks, length)
             .sum(axis=1)
         )
-        return float(np.diff(totals).std(ddof=1)) if blocks > 2 else float("nan")
+        return _spread(np.diff(totals), robust) if blocks > 2 else float("nan")
     weeks = max(1, round(length / 7))
     adjusted = (dec.observed - dec.seasonal).to_numpy()
     blocks = len(adjusted) // weeks
     totals = (
         adjusted[len(adjusted) - blocks * weeks :].reshape(blocks, weeks).sum(axis=1)
     )
-    return float(np.diff(totals).std(ddof=1) * length / (7 * weeks))
+    return _spread(np.diff(totals), robust) * length / (7 * weeks)
 
 
 def _remainder_windows(dec: Decomposition, length: int) -> np.ndarray:
@@ -330,3 +336,9 @@ def _binomial_p(rates: pd.Series, n: pd.Series, expected_rate: float) -> float:
         return 1.0
     p0 = float(np.clip(expected_rate, 1e-9, 1 - 1e-9))
     return float(stats.binomtest(min(successes, trials), trials, p0).pvalue)
+
+
+def _spread(values: np.ndarray, robust: bool) -> float:
+    if robust:
+        return float(1.4826 * np.median(np.abs(values - np.median(values))))
+    return float(np.std(values, ddof=1))

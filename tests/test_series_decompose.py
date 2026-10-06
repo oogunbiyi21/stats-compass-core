@@ -138,13 +138,78 @@ class TestDecompose:
         assert dec.params["start"] == "2024-09-19"
         assert dec.imputed == []
 
-    def test_deterministic(self):
-        a, b = decompose(_demo()), decompose(_demo())
+    @pytest.mark.parametrize("method", METHODS)
+    def test_deterministic(self, method):
+        a, b = decompose(_demo(), method=method), decompose(_demo(), method=method)
         assert a.remainder.to_numpy().tobytes() == b.remainder.to_numpy().tobytes()
+        assert a.trend.to_numpy().tobytes() == b.trend.to_numpy().tobytes()
+
+    def test_trimmed_days_are_named_not_dropped_silently(self):
+        y = _demo().copy()
+        y.iloc[:2] = np.nan
+        y.iloc[-1] = np.nan  # a partial last day sent as null
+        dec = decompose(y)
+        assert dec.trimmed == [date(2024, 9, 16), date(2024, 9, 17), date(2026, 9, 27)]
+        assert "TRIMMED_DAYS" in [w.code for w in dec.warnings]
+
+    def test_components_are_matched_to_their_period_by_name(self):
+        dec = decompose(_demo(), method="mstl")
+        weekly = dec.seasonal_by_period[7].to_numpy()[: 7 * 50].reshape(50, 7)
+        # A weekly component repeats every 7 days; the annual one does not.
+        assert (
+            np.abs(weekly.sum(axis=1)).max() < 0.05 * np.abs(weekly).sum(axis=1).max()
+        )
+
+    @pytest.mark.parametrize("method", ["mstl", "stl"])
+    def test_robustness_is_one_setting_for_both_stl_methods(self, method):
+        plain = decompose(_demo(), method=method)
+        robust = decompose(_demo(), method=method, robust=True)
+        assert (plain.params["robust"], robust.params["robust"]) == (False, True)
+        assert not np.allclose(plain.trend.to_numpy(), robust.trend.to_numpy())
+
+    def test_records_the_statsmodels_version(self):
+        import statsmodels
+
+        assert (
+            decompose(_demo()).params["statsmodels_version"] == statsmodels.__version__
+        )
+
+
+class TestExclude:
+    """For promotion ITS: leave a window out of the fit without calling it a gap."""
+
+    WINDOW = (date(2026, 5, 14), date(2026, 5, 24))
+
+    def test_a_long_window_is_excluded_not_insufficient(self):
+        dec = decompose(_demo(), exclude=[self.WINDOW])
+        assert isinstance(dec, Decomposition)
+        assert len(dec.excluded) == 11 and dec.imputed == []
+        assert dec.remainder.loc["2026-05-14":"2026-05-24"].isna().all()
+        assert dec.params["exclude"] == [["2026-05-14", "2026-05-24"]]
+
+    def test_excluded_values_do_not_shape_the_fit(self):
+        clean = _demo()
+        planted = clean.copy()
+        planted.loc["2026-05-14":"2026-05-24"] *= 3
+        a = decompose(clean, exclude=[self.WINDOW]).expected_total(*self.WINDOW)
+        b = decompose(planted, exclude=[self.WINDOW]).expected_total(*self.WINDOW)
+        assert a == pytest.approx(b, rel=1e-12)
+
+    def test_excluded_days_are_left_out_of_the_noise(self):
+        dec = decompose(_demo(), exclude=[self.WINDOW])
+        assert not np.isnan(dec.residual_sigma(7))
 
 
 class TestResidualSigma:
     """The spread the verdict bands are built from must be the noise's, not less."""
+
+    def test_robust_scale_ignores_spikes_but_matches_on_plain_noise(self):
+        demo = decompose(_demo())
+        assert demo.residual_sigma(7, robust=True) < demo.residual_sigma(7)
+        noise = decompose(_null(100))
+        assert noise.residual_sigma(7, robust=True) == pytest.approx(
+            noise.residual_sigma(7), rel=0.15
+        )
 
     @pytest.mark.parametrize("method", METHODS)
     def test_weekly_sigma_matches_the_noise_on_a_patternless_store(self, method):
@@ -237,11 +302,14 @@ class TestMonthEffects:
         assert effects.interval_basis == "newey_west_t"
 
     def test_demo_november_is_recovered(self):
-        """T7.2: within 5 pt of the measured figure.
+        """T7.2: within 5 pt of the measured figure. PROVISIONAL until §5.2 is decided.
 
         The effect is the month's mean deviation from trend, the same definition
-        the measurement uses, so one-day spikes count: the figure with Black
-        Friday applies (brief §5.2).
+        the measurement uses, so one-day spikes count and the figure with Black
+        Friday is the one compared. The seasonal component and the expectation
+        smooth Black Friday into the remainder instead, which is the other
+        answer to §5.2. Which figure T7.2 is measured against is the founder's
+        call (brief §5.2, T7.1).
         """
         effects = month_effects(decompose(_demo(), method="mstl"))
         november = effects.rows[10]
@@ -253,14 +321,49 @@ class TestMonthEffects:
         effects = month_effects(decompose(y))
         assert all(row.lower <= 0 <= row.upper for row in effects.rows)
 
-    def test_patternless_stores_exclude_zero_at_about_the_nominal_rate(self):
-        """The bootstrap this replaced excluded zero for 94% of months."""
+    @pytest.mark.parametrize("method", METHODS)
+    def test_patternless_stores_exclude_zero_at_about_the_nominal_rate(self, method):
+        """The bootstrap this replaced excluded zero for 94% of months.
+
+        Two-sided: an interval that never excludes zero is as useless as one
+        that always does.
+        """
         excluded = total = 0
-        for seed in range(20):
-            effects = month_effects(decompose(_null(500 + seed)), level=0.9)
+        for seed in range(40):
+            effects = month_effects(
+                decompose(_null(500 + seed), method=method), level=0.9
+            )
             excluded += sum(1 for r in effects.rows if r.lower > 0 or r.upper < 0)
             total += 12
-        assert excluded / total <= 0.2, f"{excluded}/{total}"
+        assert 0.05 <= excluded / total <= 0.15, f"{method}: {excluded}/{total}"
+
+    def test_a_level_at_or_below_zero_is_insufficient(self):
+        y = _demo() - 400_000.0  # net revenue below zero all year
+        result = month_effects(decompose(y, method="fourier"))
+        assert isinstance(result, Insufficient)
+        assert (result.reason, result.needs, result.has) == (
+            "NONPOSITIVE_LEVEL",
+            None,
+            None,
+        )
+
+    def test_a_month_without_enough_days_is_insufficient(self):
+        dec = decompose(_demo(), method="fourier")
+        short = Decomposition(
+            method=dec.method,
+            grain="day",
+            params=dec.params,
+            observed=dec.observed.loc[:"2025-08-31"].iloc[-200:],
+            trend=dec.trend.loc[:"2025-08-31"].iloc[-200:],
+            seasonal=dec.seasonal.loc[:"2025-08-31"].iloc[-200:],
+            remainder=dec.remainder.loc[:"2025-08-31"].iloc[-200:],
+            seasonal_by_period={},
+            imputed=[],
+            warnings=[],
+        )
+        result = month_effects(short)
+        assert isinstance(result, Insufficient)
+        assert result.reason == "MONTH_TOO_SHORT"
 
     def test_records_its_basis(self):
         effects = month_effects(decompose(_demo()), level=0.8, hac_lags=5)

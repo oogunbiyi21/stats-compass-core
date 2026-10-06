@@ -12,8 +12,13 @@ smaller than the noise, and intervals built from it excluded zero for 94% of
 months on stores with no seasonality at all. The interval here uses the
 spread of the deviations themselves: a Newey-West standard error with a t
 critical value whose degrees of freedom count weeks, not days, because days
-within a month are not independent. On patternless stores that excluded zero
-for 11% of months at level 0.9.
+within a month are not independent. On 40 patternless stores at level 0.9 it
+excluded zero for 9.6% of months with ``mstl``, 9.2% with ``fourier`` and
+12.5% with ``stl``.
+
+At weekly grain a month holds four or five values a year, and a Newey-West
+correction on so few made the interval narrower, not wider (16.9% excluding
+zero at one lag), so a weekly decomposition uses the plain standard error.
 
 **What the interval does not cover.** With two years of history it describes
 the noise within those years. It says nothing about whether the next November
@@ -65,8 +70,8 @@ def month_effects(
     Args:
         dec: A decomposition from ``decompose``.
         level: Interval level, e.g. 0.9.
-        hac_lags: Newey-West lags, in days. A weekly-grain decomposition uses
-            ``hac_lags // 7`` weeks, at least one.
+        hac_lags: Newey-West lags, in days. A weekly-grain decomposition
+            ignores it and uses the plain standard error (lags 0).
 
     Returns:
         Twelve ``MonthEffect`` rows, or ``Insufficient`` when a month has fewer
@@ -87,7 +92,7 @@ def month_effects(
         if daily
         else (dec.observed.index + pd.Timedelta(days=3)).month
     )
-    lags = hac_lags if daily else max(1, hac_lags // 7)
+    lags = hac_lags if daily else 0
     days_per_unit = 1 if daily else 7
 
     counts = pd.Series(months).value_counts()
@@ -103,7 +108,9 @@ def month_effects(
         in_month = months == month
         level_mean = float(dec.trend[in_month].mean())
         if level_mean <= 0:
-            return Insufficient(needs=1, has=0, unit="days", reason="NONPOSITIVE_LEVEL")
+            return Insufficient(
+                needs=None, has=None, unit="days", reason="NONPOSITIVE_LEVEL"
+            )
         values = deviation[in_month].to_numpy(dtype=float)
         # Rounding dust from the fit is not a deviation: a flat series must give
         # intervals of exactly zero, not ones that miss zero by 1e-14.

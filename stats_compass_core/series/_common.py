@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal
+from typing import Literal, Sequence
 
 import pandas as pd
 
@@ -19,24 +19,47 @@ class Insufficient:
     shortage of data from a bug if both arrive as exceptions, and the shortage
     is the expected case for a young store. ``reason`` is a code, not prose;
     the caller words it.
+
+    ``needs`` and ``has`` read as "needs X; you have Y" for the shortage
+    reasons (``TOO_SHORT``, ``TOO_FEW_POINTS``, ``MONTH_TOO_SHORT``,
+    ``NO_DATA``, ``NO_DENOMINATOR``). For ``GAP_TOO_LONG`` they are the longest
+    gap allowed and the longest found. Where no number applies
+    (``NONPOSITIVE_LEVEL``) both are None and the reason alone explains it.
     """
 
-    needs: int
-    has: int
+    needs: int | None
+    has: int | None
     unit: Unit
     reason: str
 
 
+@dataclass(frozen=True)
+class Prepared:
+    """A daily series ready to decompose, and an account of what was done to it."""
+
+    values: pd.Series
+    imputed: list[date]  # missing days filled by interpolation
+    excluded: list[date]  # days left out of the fit on request, also filled for it
+    trimmed: list[date]  # missing days before the first value or after the last
+
+
 def prepare_daily(
-    values: pd.Series, max_gap_days: int
-) -> tuple[pd.Series, list[date]] | Insufficient:
-    """One value per calendar day, short gaps filled, and the filled days named.
+    values: pd.Series,
+    max_gap_days: int,
+    exclude: Sequence[tuple[date, date]] = (),
+) -> Prepared | Insufficient:
+    """One value per calendar day, short gaps filled, and every change named.
 
     A missing day means "no data", never zero, so it is never treated as zero.
     Interior gaps up to ``max_gap_days`` are filled by linear interpolation and
     returned as imputed; a longer gap makes the series insufficient rather than
     invented. Missing days before the first value or after the last are
-    trimmed: there is nothing on one side to interpolate from.
+    trimmed, since there is nothing on one side to interpolate from, and
+    returned as trimmed.
+
+    Days inside an ``exclude`` window are left out of the fit on purpose (a
+    promotion, say): their values are replaced by interpolation like a gap,
+    but they are not a gap, so they never make the series insufficient.
     """
     if not isinstance(values, pd.Series) or not isinstance(
         values.index, pd.DatetimeIndex
@@ -52,9 +75,15 @@ def prepare_daily(
 
     full = pd.date_range(series.index.min(), series.index.max(), freq="D")
     series = series.reindex(full)
-    series = series.loc[series.first_valid_index() : series.last_valid_index()]
+    first, last = series.first_valid_index(), series.last_valid_index()
+    trimmed = [day.date() for day in full if day < first or day > last]
+    series = series.loc[first:last]
 
-    missing = series.isna()
+    excluded_mask = pd.Series(False, index=series.index)
+    for start, end in exclude:
+        excluded_mask.loc[pd.Timestamp(start) : pd.Timestamp(end)] = True
+
+    missing = series.isna() & ~excluded_mask
     longest = _longest_run(missing)
     if longest > max_gap_days:
         return Insufficient(
@@ -62,10 +91,12 @@ def prepare_daily(
         )
 
     imputed = [day.date() for day in series.index[missing]]
-    if imputed:
-        series = series.interpolate(method="time", limit_area="inside")
+    excluded = [day.date() for day in series.index[excluded_mask]]
+    series = series.mask(excluded_mask)
+    if imputed or excluded:
+        series = series.interpolate(method="time", limit_direction="both")
     series.index.freq = "D"
-    return series, imputed
+    return Prepared(values=series, imputed=imputed, excluded=excluded, trimmed=trimmed)
 
 
 def _longest_run(flags: pd.Series) -> int:

@@ -267,6 +267,14 @@ class TestInsufficientAndContract:
         with pytest.raises(TypeError):
             verdict(dec, period, kind="money")  # type: ignore[call-arg]
 
+    def test_robust_scale_is_an_option_and_recorded(self):
+        dec, period = _split(_demo("net_revenue"))
+        plain = verdict(dec, period, kind="money", seed=1)
+        robust = verdict(dec, period, kind="money", seed=1, robust_scale=True)
+        assert (plain.params["scale"], robust.params["scale"]) == ("std", "mad")
+        width = lambda f: f.expected_range[1] - f.expected_range[0]  # noqa: E731
+        assert width(robust) < width(plain)
+
     def test_params_record_every_argument(self):
         dec, period = _split(_demo("net_revenue"))
         facts = verdict(dec, period, kind="money", seed=3, seasonal_band_z=1.5)
