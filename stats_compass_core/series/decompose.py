@@ -316,17 +316,35 @@ def decompose(
         return prepared
     y, imputed = prepared.values, prepared.imputed
 
-    needs = {
-        "mstl": 2 * max(periods),
-        "stl": 2 * WEEKLY_PERIOD * 7,
-        "fourier": 365,
-    }[method]
-    if len(y) < needs:
-        return Insufficient(needs=needs, has=len(y), unit="days", reason="TOO_SHORT")
+    # Fit the periods the history supports. A young store gets its weekly
+    # pattern, and the annual variation lands in the remainder, widening the
+    # bands, rather than the store getting nothing at all.
+    if method == "stl":
+        needs = 2 * WEEKLY_PERIOD * 7  # no weekly grain without the annual period
+        if len(y) < needs:
+            return Insufficient(
+                needs=needs, has=len(y), unit="days", reason="TOO_SHORT"
+            )
+        periods_used = periods
+    else:
+
+        def supported(period: int) -> bool:
+            if method == "fourier" and period >= ANNUAL_MIN_PERIOD_DAYS:
+                return len(y) >= period  # one full cycle fixes the harmonics
+            return len(y) >= 2 * period
+
+        periods_used = [p for p in periods if supported(p)]
+        if not periods_used:
+            needs = 2 * min(periods)
+            return Insufficient(
+                needs=needs, has=len(y), unit="days", reason="TOO_SHORT"
+            )
+    dropped = [p for p in periods if p not in periods_used]
 
     params: dict[str, Any] = {
         "method": method,
         "periods": periods,
+        "periods_used": periods_used,
         "max_gap_days": max_gap_days,
         "annual_smoothing_days": annual_smoothing_days,
         "fourier_terms": fourier_terms,
@@ -370,11 +388,25 @@ def decompose(
             )
         )
 
+    if dropped:
+        warnings.append(
+            ToolWarning(
+                code="ANNUAL_DROPPED",
+                columns=columns,
+                message=(
+                    f"{len(y)} days of history cannot support the period(s) "
+                    f"{dropped}, so only {periods_used} were fitted. Variation over "
+                    f"the year is in the remainder: expectations do not allow for "
+                    f"the time of year, and bands are wider for it."
+                ),
+            )
+        )
+
     def fit(values: pd.Series) -> Decomposition:
         if method == "mstl":
             return _mstl(
                 values,
-                periods,
+                periods_used,
                 imputed,
                 params,
                 warnings,
@@ -385,7 +417,7 @@ def decompose(
             return _stl_weekly(
                 values, imputed, params, warnings, annual_smoothing_days, robust
             )
-        return _fourier(values, periods, imputed, params, warnings, fourier_terms)
+        return _fourier(values, periods_used, imputed, params, warnings, fourier_terms)
 
     dec = fit(y)
     if prepared.excluded:

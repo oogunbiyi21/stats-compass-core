@@ -104,14 +104,15 @@ class TestDecompose:
         assert dec.params["max_gap_days"] == 5
 
     @pytest.mark.parametrize(
-        "method, needs", [("mstl", 730), ("stl", 728), ("fourier", 365)]
+        "method, days, needs",
+        [("mstl", 10, 14), ("stl", 300, 728), ("fourier", 10, 14)],
     )
-    def test_too_little_history_is_a_returned_value(self, method, needs):
-        result = decompose(_demo().iloc[-300:], method=method)
+    def test_too_little_history_is_a_returned_value(self, method, days, needs):
+        result = decompose(_demo().iloc[-days:], method=method)
         assert isinstance(result, Insufficient)
         assert (result.needs, result.has, result.unit, result.reason) == (
             needs,
-            300,
+            days,
             "days",
             "TOO_SHORT",
         )
@@ -275,6 +276,35 @@ class TestExpected:
         assert len(week) == 7
         weekly_value = float((dec.trend + dec.seasonal).loc["2026-09-21"])
         assert week.sum() == pytest.approx(weekly_value)
+
+
+class TestYoungStores:
+    """Under two years, fit the weekly pattern and say the annual one was dropped.
+
+    Requiring the annual period made every headline of a six-month store
+    insufficient, though its floors are 84 days. Dropping the annual period
+    is a statistical choice (its variation lands in the remainder and widens
+    the bands), so it is made here and recorded, not left to the caller.
+    """
+
+    @pytest.mark.parametrize("method", ["mstl", "fourier"])
+    def test_a_young_store_gets_its_weekly_pattern(self, method):
+        dec = decompose(_demo().iloc[-300:], method=method)
+        assert isinstance(dec, Decomposition)
+        assert dec.params["periods_used"] == [7]
+        assert set(dec.seasonal_by_period) == {7}
+        warning = next(w for w in dec.warnings if w.code == "ANNUAL_DROPPED")
+        assert "365" in warning.message
+
+    def test_two_years_keep_the_annual_period(self):
+        dec = decompose(_demo())
+        assert dec.params["periods_used"] == [7, 365]
+        assert "ANNUAL_DROPPED" not in [w.code for w in dec.warnings]
+
+    def test_month_effects_need_the_annual_period(self):
+        result = month_effects(decompose(_demo().iloc[-300:]))
+        assert isinstance(result, Insufficient)
+        assert (result.reason, result.needs, result.has) == ("NO_ANNUAL", 730, 300)
 
 
 class TestExpectationErrors:

@@ -323,6 +323,15 @@ class TestInsufficientAndContract:
 # =============================================================================
 
 
+class TestYoungStore:
+    def test_a_store_with_four_months_still_gets_a_verdict(self):
+        series = _demo("net_revenue").loc["2026-05-25":]
+        dec, period = _split(series)
+        facts = verdict(dec, period, kind="money")
+        assert isinstance(facts, VerdictFacts)
+        assert dec.params["periods_used"] == [7]
+
+
 class TestDemoStore:
     def test_the_last_week_of_the_decline_is_below_expected_but_inside_the_noise_band(
         self,

@@ -82,6 +82,12 @@ def month_effects(
         raise ValueError("level must be between 0 and 1")
 
     daily = dec.grain == "day"
+    if daily and not any(p >= 300 for p in dec.seasonal_by_period):
+        # Without an annual component the trend follows the seasons, and every
+        # month's deviation from it reads as zero.
+        return Insufficient(
+            needs=730, has=len(dec.observed), unit="days", reason="NO_ANNUAL"
+        )
     deviation = (
         dec.observed
         - dec.trend
