@@ -10,6 +10,12 @@ statsmodels is imported only when a function needs it (install the
 """
 
 from stats_compass_core.series._common import Insufficient
+from stats_compass_core.series.customers import (
+    GapFacts,
+    RepeatRateFacts,
+    median_gap,
+    repeat_rate,
+)
 from stats_compass_core.series.decompose import (
     Decomposition,
     WeeklyComponents,
@@ -22,6 +28,7 @@ from stats_compass_core.series.forecast import (
     forecast,
 )
 from stats_compass_core.series.its import LiftFacts, its_lift
+from stats_compass_core.series.runs import RunFacts, detect_run
 from stats_compass_core.series.seasonality import (
     MonthEffect,
     MonthEffects,
@@ -34,15 +41,21 @@ __all__ = [
     "ForecastFacts",
     "ForecastMonth",
     "ForecastPoint",
+    "GapFacts",
     "Insufficient",
     "LiftFacts",
     "MonthEffect",
     "MonthEffects",
+    "RepeatRateFacts",
+    "RunFacts",
     "VerdictFacts",
     "WeeklyComponents",
     "decompose",
+    "detect_run",
     "forecast",
     "its_lift",
+    "median_gap",
     "month_effects",
+    "repeat_rate",
     "verdict",
 ]
