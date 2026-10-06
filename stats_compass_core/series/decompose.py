@@ -59,7 +59,8 @@ class Decomposition:
 
     Series are indexed by day (``grain == "day"``) or by the Monday that starts
     each week (``grain == "week"``). ``observed`` is the series decomposed, with
-    imputed days filled in.
+    imputed days filled in; ``daily`` is the same input at daily grain, whatever
+    the method.
     """
 
     method: str
@@ -72,12 +73,19 @@ class Decomposition:
     seasonal_by_period: dict[int, pd.Series]
     imputed: list[date]
     warnings: list[ToolWarning]
+    daily: pd.Series = field(repr=False, default_factory=lambda: pd.Series(dtype=float))
     day_of_week_share: tuple[float, ...] | None = field(default=None, repr=False)
 
     # -- expectation ---------------------------------------------------------
 
     def expected_daily(self, start: date, end: date) -> pd.Series:
         """Trend + seasonal for each day in ``[start, end]``, in-sample or ahead.
+
+        To judge a period, decompose the history that ends the day before it
+        and read the expectation ahead. An in-sample expectation has already
+        absorbed the period: the trend bends towards it, and a real change
+        reads as expected. ``verdict`` refuses a decomposition that overlaps
+        the period for that reason.
 
         Ahead of the data, each seasonal component repeats its value from whole
         periods earlier and the trend follows ``params["trend_ahead"]``. A
@@ -304,6 +312,7 @@ def _mstl(
         grain="day",
         params=params,
         observed=y.rename(None),
+        daily=y.rename(None),
         trend=fit.trend.rename(None),
         seasonal=seasonal,
         remainder=remainder.rename(None),
@@ -346,6 +355,7 @@ def _stl_weekly(y, imputed, params, warnings, annual_smoothing_days) -> Decompos
         grain="week",
         params=params,
         observed=weekly.rename(None),
+        daily=y.rename(None),
         trend=fit.trend.rename(None),
         seasonal=annual.rename(None),
         remainder=remainder.rename(None),
@@ -394,6 +404,7 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
         grain="day",
         params=params,
         observed=y.rename(None),
+        daily=y.rename(None),
         trend=trend.rename(None),
         seasonal=seasonal.rename(None),
         remainder=remainder.rename(None),
