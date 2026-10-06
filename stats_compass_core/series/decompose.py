@@ -163,6 +163,15 @@ class Decomposition:
         shares = np.asarray(self.day_of_week_share)[days.dayofweek]
         return pd.Series(weekly * shares, index=days)
 
+    def _seasonal_daily(self) -> pd.Series:
+        """The in-sample seasonal pattern, per day, whatever the grain."""
+        if self.grain == "day":
+            return self.seasonal
+        days = self.daily.index
+        weekly = self.seasonal.reindex(week_start(days)).to_numpy()
+        shares = np.asarray(self.day_of_week_share)[days.dayofweek]
+        return pd.Series(weekly * shares, index=days)
+
     def _lagged_seasonal_daily(self) -> pd.Series:
         """The seasonal pattern as a forecast reads it: one period earlier, per day."""
         days = self.daily.index
