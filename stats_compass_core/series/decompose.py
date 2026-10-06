@@ -146,7 +146,12 @@ class Decomposition:
             round(self.params["trend_window_days"] / (1 if self.grain == "day" else 7)),
         )
         if self.params["trend_ahead"] == "level":
-            return float((self.observed - self.seasonal).iloc[-window:].mean())
+            # The same adjustment expectation_errors makes at past positions:
+            # the seasonal read one period earlier, per day.
+            days = int(self.params["trend_window_days"])
+            recent = (self.daily - self._lagged_seasonal_daily()).iloc[-days:]
+            daily_level = float(recent.mean())
+            return daily_level if self.grain == "day" else 7 * daily_level
         recent = self.trend.iloc[-window:]
         if self.params["trend_ahead"] == "flat":
             return float(recent.mean())

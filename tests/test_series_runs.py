@@ -15,7 +15,12 @@ import pytest
 
 pytest.importorskip("statsmodels")
 
-from stats_compass_core.series import Insufficient, RunFacts, decompose, detect_run  # noqa: E402
+from stats_compass_core.series import (  # noqa: E402
+    Insufficient,
+    RunFacts,
+    decompose,
+    detect_run,
+)
 
 DEMO = Path(__file__).parent / "fixtures" / "demo_store_daily.csv"
 

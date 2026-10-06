@@ -130,24 +130,24 @@ class TestCounterfactual:
 
 
 class TestCalibration:
-    def test_inert_promotions_on_patternless_stores(self):
-        """No effect at all: the 90% interval should miss zero about 10% of the time.
+    """No effect at all: the 90% interval should miss zero about 10% of the time.
 
-        40 stores: a calibrated interval misses zero on at most 9 of them 99% of
-        the time (Binomial(40, 0.1)). Measured: fourier 8/40, mstl 2/40, so
-        fourier's interval runs a little narrow here, a point for T7.1.
-        """
+    A trip-wire with fixed seeds, bounded by Binomial(n, 0.1)'s 99% region; the
+    harness's runs over many stores are the calibration evidence. The first
+    version read the window's seasonal in-sample while its reference read it a
+    period earlier, and missed zero for 20% of inert promotions.
+    """
+
+    @pytest.mark.parametrize("method, n, bound", [("fourier", 60, 12), ("mstl", 20, 6)])
+    def test_inert_promotions_on_patternless_stores(self, method, n, bound):
         excluded = real = 0
-        seeds = range(40)
-        for seed in seeds:
-            facts = its_lift(
-                _null(600 + seed), SUMMER30, kind="money", method="fourier"
-            )
+        for seed in range(n):
+            facts = its_lift(_null(600 + seed), SUMMER30, kind="money", method=method)
             lo, hi = facts.interval_pct
             excluded += lo > 0 or hi < 0
             real += facts.verdict == "real change"
-        assert excluded <= 9, excluded
-        assert real / len(seeds) <= 0.1, real
+        assert excluded <= bound, f"{method}: {excluded}/{n}"
+        assert real <= bound // 2, f"{method}: {real}/{n}"
 
 
 # =============================================================================
@@ -171,23 +171,45 @@ class TestUnitsAndContract:
         assert facts.counterfactual_total <= 0
         assert facts.estimate_pct is None and facts.interval_pct is None
 
-    def test_noise_band_switch_is_recorded(self):
-        none = its_lift(
+    def test_the_noise_band_is_off_by_default(self):
+        facts = its_lift(
+            _demo("net_revenue"), SUMMER30, kind="money", prior_window=PRIOR
+        )
+        assert facts.params["noise_band"] == "none" and facts.noise_range_pct is None
+
+    def test_a_prior_lift_needs_a_seasonal_period_before_it(self):
+        """With two years, May 2025 has no May before it to adjust by."""
+        facts = its_lift(
             _demo("net_revenue"),
             SUMMER30,
             kind="money",
             prior_window=PRIOR,
-            noise_band="none",
+            noise_band="prior_window",
         )
-        banded = its_lift(
-            _demo("net_revenue"), SUMMER30, kind="money", prior_window=PRIOR
+        assert facts.prior_lift_pct is None and facts.noise_range_pct is None
+        assert facts.params["prior_unavailable"] == "NO_SEASONAL_BEFORE_PRIOR"
+
+    def test_with_three_years_the_prior_lift_centres_the_noise_band(self):
+        series = _null(42, days=1200)
+        window = (date(2027, 5, 13), date(2027, 5, 23))
+        prior = (date(2026, 5, 14), date(2026, 5, 24))
+        facts = its_lift(
+            series,
+            window,
+            kind="money",
+            method="fourier",
+            prior_window=prior,
+            noise_band="prior_window",
         )
-        assert none.params["noise_band"] == "none" and none.noise_range_pct is None
-        assert (
-            banded.params["noise_band"] == "prior_window"
-            and banded.noise_range_pct is not None
-        )
-        assert banded.prior_lift_pct is not None
+        assert facts.prior_lift_pct is not None
+        lo, hi = facts.noise_range_pct
+        assert (lo + hi) / 2 == pytest.approx(facts.prior_lift_pct)
+
+    def test_band_and_interval_levels_are_recorded(self):
+        facts = its_lift(_demo("net_revenue"), SUMMER30, kind="money")
+        assert facts.params["band_basis"] == "empirical_quantiles"
+        assert facts.params["band_level"] == pytest.approx(0.9545, abs=1e-4)
+        assert facts.params["interval_level"] == 0.9
 
     def test_deterministic(self):
         a = its_lift(_demo("net_revenue"), SUMMER30, kind="money", prior_window=PRIOR)
@@ -215,6 +237,9 @@ class TestUnitsAndContract:
             "noise_band_z",
             "real_change_alpha",
             "decomposition",
+            "baseline_lookback_days",
+            "band_level",
+            "interval_level",
         ):
             assert key in facts.params, key
         assert facts.method == "mstl+its_empirical_windows"
@@ -225,6 +250,16 @@ class TestUnitsAndContract:
         )
         assert isinstance(result, Insufficient)
         assert result.reason == "BASELINE_TOO_SHORT"
+        assert result.needs == 23  # 80% of 28, what is actually required
+
+    def test_the_baseline_reaches_back_past_another_promotion(self):
+        """Monthly promotions would otherwise leave every lift without a baseline."""
+        earlier = (date(2026, 4, 1), date(2026, 4, 7))  # its tail runs to 28 April
+        facts = its_lift(
+            _demo("net_revenue"), SUMMER30, kind="money", other_windows=[earlier]
+        )
+        assert facts.params["baseline_real_days"] == 28
+        assert facts.params["baseline_first_day"] < "2026-04-01"
 
     def test_too_few_days_with_data_in_the_window(self):
         series = _demo("net_revenue").copy()

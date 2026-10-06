@@ -252,7 +252,9 @@ class TestExpected:
         )
 
     def test_ahead_repeats_each_seasonal_period_and_holds_the_level(self):
-        """Ahead, the level is the mean of the seasonally adjusted values.
+        """Ahead, the level is the mean of the seasonally adjusted values,
+        adjusted by the seasonal read one period earlier: the estimator that
+        expectation_errors measures in the past.
 
         Not the trend: at the end of the data a smoother sees only one side,
         and its end value carried more error than the 28-day mean of the data.
@@ -260,7 +262,8 @@ class TestExpected:
         dec = decompose(_demo())
         last = dec.trend.index[-1]
         ahead = dec.expected_daily(date(2026, 9, 28), date(2026, 10, 4))
-        level = (dec.observed - dec.seasonal).iloc[-28:].mean()
+        lagged = sum(c.shift(p) for p, c in dec.seasonal_by_period.items())
+        level = (dec.daily - lagged).iloc[-28:].mean()
         for day, value in ahead.items():
             seasonal = sum(
                 comp.loc[day - pd.Timedelta(days=p)]
