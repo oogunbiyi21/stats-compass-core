@@ -23,11 +23,17 @@ banded procedure's.
 
 The tests, each against the seasonal expectation:
 
-- money: the period's deviation from expectation against ``n_boot`` seeded
-  draws of historical remainder windows of the same length.
+- money (``empirical_windows``): the period's deviation from expectation,
+  ranked among the expectation's errors at every past position where the same
+  estimator can be tried (``Decomposition.expectation_errors``). Exact, so
+  nothing is drawn and no seed is needed. An earlier version drew from
+  in-sample remainder windows: the fit had absorbed part of each past
+  window's noise, and the test fired at three times its nominal rate.
 - count: Poisson, or negative binomial when the history's counts vary more
-  than a Poisson would, with the dispersion measured from that history.
-- ratio: binomial on the period's successes out of its denominators.
+  than a Poisson would, with the dispersion measured from the same past errors.
+- ratio: binomial on the period's successes out of its denominators. It
+  assumes the trials are independent; customers who cluster make it
+  over-confident, which matters less because it only decides after both bands.
 """
 
 from __future__ import annotations
@@ -47,6 +53,9 @@ Kind = Literal["count", "money", "ratio"]
 Aggregate = Literal["sum", "mean"]
 Outcome = Literal["expected", "noise", "real change"]
 
+# The money test needs this many past positions to rank a deviation among.
+MIN_REFERENCE_WINDOWS = 20
+
 
 @dataclass(frozen=True)
 class VerdictFacts:
@@ -59,9 +68,9 @@ class VerdictFacts:
     noise_range: tuple[float, float]
     change_vs_prior: tuple[
         float, float | None
-    ]  # (absolute, percent); percent None when prior is 0
+    ]  # (absolute, percent); None when prior is 0
     p_value: float
-    n_boot: int | None
+    n_reference: int | None  # past positions the money test ranked against
     test: str
     decided_by: Literal["expected_band", "noise_band", "test"]
     method: str
@@ -74,30 +83,26 @@ def verdict(
     period: pd.Series,
     *,
     kind: Kind,
-    seed: int,
     weights: pd.Series | None = None,
     aggregate: Aggregate = "sum",
     seasonal_band_z: float = 2.0,
     noise_band_z: float = 3.0,
     real_change_alpha: float = 0.05,
-    n_boot: int = 2000,
     min_points: int = 5,
     robust_scale: bool = False,
 ) -> VerdictFacts | Insufficient:
     """Judge one period's figure against the history before it.
 
     Args:
-        dec: A decomposition of the history that ends the day before
-            ``period`` starts.
+        dec: A decomposition of the history before ``period``. It should end
+            the day before the period starts; days in between are allowed
+            only if they were trimmed for having no data.
         period: The period's daily values; NaN means no data.
         kind: ``"count"``, ``"money"`` or ``"ratio"``. Chooses the test.
-        seed: Seeds the money bootstrap. Required so that a run can be
-            repeated exactly.
         weights: Daily denominators (``n``), over at least the prior period
             and the period. Required for ``ratio``; weights a ``mean``.
         aggregate: ``"sum"`` for totals, ``"mean"`` for averages and rates.
         seasonal_band_z, noise_band_z, real_change_alpha: The calibration.
-        n_boot: Bootstrap draws for the money test.
         min_points: Fewest days with data for the period to be judged.
         robust_scale: Measure both bands' spreads with 1.4826 × the median
             absolute deviation instead of the standard deviation, so that the
@@ -105,12 +110,14 @@ def verdict(
             ``params["scale"]``.
 
     Returns:
-        ``VerdictFacts``, or ``Insufficient`` (``TOO_FEW_POINTS``,
-        ``NO_DENOMINATOR``).
+        ``VerdictFacts``, or ``Insufficient``: ``TOO_FEW_POINTS``,
+        ``NO_DENOMINATOR``, ``HISTORY_ENDS_EARLY`` (days with data between the
+        history and the period), ``TOO_SHORT`` (too little history to measure
+        the expectation's error against).
 
     Raises:
-        ValueError: if ``dec`` does not end the day before ``period`` starts,
-            or the arguments contradict each other.
+        ValueError: if ``dec`` overlaps ``period``, or the arguments
+            contradict each other.
     """
     if kind not in ("count", "money", "ratio"):
         raise ValueError(f"unknown kind {kind!r}")
@@ -129,27 +136,30 @@ def verdict(
             f"the decomposition must end before the period starts: it ends "
             f"{history_end.date()}, the period starts {start.date()}"
         )
-    if start != history_end + pd.Timedelta(days=1):
-        raise ValueError(
-            f"the period must start the day after the decomposition ends "
-            f"({(history_end + pd.Timedelta(days=1)).date()}), not {start.date()}"
+    between = pd.date_range(
+        history_end + pd.Timedelta(days=1), start - pd.Timedelta(days=1)
+    )
+    if len(between) and not set(between.date) <= set(dec.trimmed):
+        # A day with data the history left out: the caller cut it short.
+        return Insufficient(
+            needs=None, has=None, unit="days", reason="HISTORY_ENDS_EARLY"
         )
     length = len(period)
 
     params: dict[str, Any] = {
         "kind": kind,
-        "seed": seed,
         "aggregate": aggregate,
         "seasonal_band_z": seasonal_band_z,
         "noise_band_z": noise_band_z,
         "real_change_alpha": real_change_alpha,
-        "n_boot": n_boot,
         "min_points": min_points,
         "scale": "mad" if robust_scale else "std",
         "period_start": start.date().isoformat(),
         "period_end": end.date().isoformat(),
         "decomposition_method": dec.method,
+        "days_read_across": len(between),
     }
+    warnings: list[ToolWarning] = []
 
     present = period.notna()
     if int(present.sum()) < min_points:
@@ -162,8 +172,29 @@ def verdict(
     if kind == "ratio" and weights is None:
         return Insufficient(needs=length, has=0, unit="days", reason="NO_DENOMINATOR")
 
+    errors = dec.expectation_errors(length)
+    if len(errors) < MIN_REFERENCE_WINDOWS:
+        return Insufficient(
+            needs=len(dec.daily) + MIN_REFERENCE_WINDOWS - len(errors),
+            has=len(dec.daily),
+            unit="days",
+            reason="TOO_SHORT",
+        )
+
     expected_daily = dec.expected_daily(start.date(), end.date())
     period_w = _weights_for(weights, period.index)
+    if (
+        aggregate == "mean"
+        and weights is not None
+        and float(period_w[present].sum()) == 0
+    ):
+        warnings.append(
+            ToolWarning(
+                code="ZERO_WEIGHTS",
+                columns=[],
+                message="Every weight in the period is zero, so its mean is unweighted.",
+            )
+        )
     observed = _aggregate(period[present], period_w[present], aggregate)
     expected = _aggregate(expected_daily[present], period_w[present], aggregate)
     params["n_points"] = int(present.sum())
@@ -185,22 +216,23 @@ def verdict(
     change_abs = observed - prior
     change_pct = None if prior == 0 else 100 * change_abs / prior
 
-    rng = np.random.default_rng(seed)
+    n_reference: int | None = None
     if kind == "money":
-        test, p_value, draws = (
-            "block_bootstrap",
-            _bootstrap_p(dec, length, observed - expected, scale, n_boot, rng),
-            n_boot,
+        reference = errors["error"].to_numpy() * scale
+        exceed = int(np.sum(np.abs(reference) >= abs(observed - expected)))
+        test, p_value, n_reference = (
+            "empirical_windows",
+            (exceed + 1) / (len(reference) + 1),
+            len(reference),
         )
     elif kind == "count":
-        test, p_value = _count_p(dec, length, observed, expected)
-        draws = None
-        params["dispersion"] = _dispersion(dec, length)
+        phi = _dispersion(errors)
+        params["dispersion"] = phi
+        test, p_value = _count_p(observed, expected, phi)
     else:
-        test, p_value, draws = (
+        test, p_value = (
             "binomial",
             _binomial_p(period[present], period_w[present], expected),
-            None,
         )
 
     if expected_range[0] <= observed <= expected_range[1]:
@@ -223,12 +255,12 @@ def verdict(
             None if change_pct is None else float(change_pct),
         ),
         p_value=float(p_value),
-        n_boot=draws,
+        n_reference=n_reference,
         test=test,
         decided_by=decided_by,
         method=f"{dec.method}+{test}",
         params=params,
-        warnings=[],
+        warnings=warnings,
     )
 
 
@@ -269,8 +301,8 @@ def _aggregate(values: pd.Series, weights: pd.Series, how: Aggregate) -> float:
 
 def _change_sigma(dec: Decomposition, length: int, robust: bool = False) -> float:
     """Spread of the change between consecutive seasonally adjusted periods."""
+    adjusted = (dec.observed - dec.seasonal).to_numpy()
     if dec.grain == "day":
-        adjusted = (dec.observed - dec.seasonal).to_numpy()
         blocks = len(adjusted) // length
         totals = (
             adjusted[len(adjusted) - blocks * length :]
@@ -279,7 +311,6 @@ def _change_sigma(dec: Decomposition, length: int, robust: bool = False) -> floa
         )
         return _spread(np.diff(totals), robust) if blocks > 2 else float("nan")
     weeks = max(1, round(length / 7))
-    adjusted = (dec.observed - dec.seasonal).to_numpy()
     blocks = len(adjusted) // weeks
     totals = (
         adjusted[len(adjusted) - blocks * weeks :].reshape(blocks, weeks).sum(axis=1)
@@ -287,39 +318,15 @@ def _change_sigma(dec: Decomposition, length: int, robust: bool = False) -> floa
     return _spread(np.diff(totals), robust) * length / (7 * weeks)
 
 
-def _remainder_windows(dec: Decomposition, length: int) -> np.ndarray:
-    """Every historical remainder total over a window of the period's length."""
-    if dec.grain == "day":
-        return dec.remainder.rolling(length).sum().dropna().to_numpy()
-    weeks = max(1, round(length / 7))
-    return (
-        dec.remainder.rolling(weeks).sum().dropna() * length / (7 * weeks)
-    ).to_numpy()
+def _dispersion(errors: pd.DataFrame) -> float:
+    """Variance of the expectation's past errors over the expected count."""
+    mean = float(errors["expected"].mean())
+    return float(errors["error"].var(ddof=1) / mean) if mean > 0 else float("inf")
 
 
-def _bootstrap_p(dec, length, deviation, scale, n_boot, rng) -> float:
-    windows = _remainder_windows(dec, length) * scale
-    draws = windows[rng.integers(0, len(windows), size=n_boot)]
-    exceed = int(np.sum(np.abs(draws) >= abs(deviation)))
-    return (exceed + 1) / (n_boot + 1)
-
-
-def _dispersion(dec: Decomposition, length: int) -> float:
-    """Variance of period totals over their mean, from the history."""
-    windows = _remainder_windows(dec, length)
-    level = (
-        (dec.trend + dec.seasonal).rolling(length).sum().dropna()
-        if dec.grain == "day"
-        else ((dec.trend + dec.seasonal) * length / 7)
-    )
-    mean = float(level.mean())
-    return float(windows.var(ddof=1) / mean) if mean > 0 else float("inf")
-
-
-def _count_p(dec, length, observed, expected) -> tuple[str, float]:
+def _count_p(observed: float, expected: float, phi: float) -> tuple[str, float]:
     mu = max(float(expected), 1e-9)
     count = int(round(observed))
-    phi = _dispersion(dec, length)
     if phi <= 1:
         dist, name = stats.poisson(mu), "poisson"
     else:

@@ -195,6 +195,19 @@ class TestExclude:
         b = decompose(planted, exclude=[self.WINDOW]).expected_total(*self.WINDOW)
         assert a == pytest.approx(b, rel=1e-12)
 
+    def test_excluded_days_are_refilled_from_the_fit_not_a_straight_line(self):
+        """A line between the two days either side of a long window is as noisy
+        as those two days; on the demo it moved a promotion lift by 14 pt."""
+        start, end = date(2026, 5, 14), date(2026, 6, 21)
+        dec = decompose(_demo(), exclude=[(start, end)])
+        inside = slice(str(start), str(end))
+        refit_gap = (
+            (dec.observed[inside] - (dec.trend + dec.seasonal)[inside]).abs().mean()
+        )
+        noise = dec.remainder.dropna().abs().mean()
+        assert refit_gap < 0.25 * noise
+        assert dec.params["exclude_iterations"] == 3
+
     def test_excluded_days_are_left_out_of_the_noise(self):
         dec = decompose(_demo(), exclude=[self.WINDOW])
         assert not np.isnan(dec.residual_sigma(7))
@@ -237,18 +250,24 @@ class TestExpected:
             float((dec.trend[window] + dec.seasonal[window]).sum())
         )
 
-    def test_ahead_repeats_each_seasonal_period_and_holds_the_trend(self):
+    def test_ahead_repeats_each_seasonal_period_and_holds_the_level(self):
+        """Ahead, the level is the mean of the seasonally adjusted values.
+
+        Not the trend: at the end of the data a smoother sees only one side,
+        and its end value carried more error than the 28-day mean of the data.
+        """
         dec = decompose(_demo())
         last = dec.trend.index[-1]
         ahead = dec.expected_daily(date(2026, 9, 28), date(2026, 10, 4))
-        held = dec.trend.iloc[-28:].mean()
+        level = (dec.observed - dec.seasonal).iloc[-28:].mean()
         for day, value in ahead.items():
             seasonal = sum(
                 comp.loc[day - pd.Timedelta(days=p)]
                 for p, comp in dec.seasonal_by_period.items()
             )
-            assert value == pytest.approx(held + seasonal)
+            assert value == pytest.approx(level + seasonal)
         assert ahead.index[0] == last + pd.Timedelta(days=1)
+        assert dec.params["trend_ahead"] == "level"
 
     def test_weekly_grain_apportions_to_days(self):
         dec = decompose(_demo(), method="stl")
@@ -256,6 +275,45 @@ class TestExpected:
         assert len(week) == 7
         weekly_value = float((dec.trend + dec.seasonal).loc["2026-09-21"])
         assert week.sum() == pytest.approx(weekly_value)
+
+
+class TestExpectationErrors:
+    """The error of the expectation, measured where it can be: in the past.
+
+    At each past position the same estimator the period is judged by: the
+    seasonally adjusted level over the 28 days before, plus the seasonal
+    pattern read one period earlier, as a forecast must read it.
+    """
+
+    def test_one_row_per_position_with_a_full_year_and_baseline_behind_it(self):
+        dec = decompose(_demo())
+        errors = dec.expectation_errors(7)
+        assert list(errors.columns) == ["error", "expected"]
+        earliest = dec.daily.index[0] + pd.Timedelta(days=365 + 28)
+        assert errors.index.min() == earliest
+        assert errors.index.max() == dec.daily.index[-1] - pd.Timedelta(days=6)
+        assert not errors.isna().any().any()
+
+    def test_each_error_is_the_estimator_applied_at_that_position(self):
+        dec = decompose(_demo())
+        errors = dec.expectation_errors(7)
+        lagged = sum(c.shift(p) for p, c in dec.seasonal_by_period.items())
+        adjusted = dec.daily - lagged
+        at = pd.Timestamp("2026-03-02")
+        level = adjusted.loc[
+            at - pd.Timedelta(days=28) : at - pd.Timedelta(days=1)
+        ].mean()
+        week = slice(at, at + pd.Timedelta(days=6))
+        expected = 7 * level + lagged.loc[week].sum()
+        assert errors.loc[at, "expected"] == pytest.approx(expected)
+        assert errors.loc[at, "error"] == pytest.approx(
+            dec.daily.loc[week].sum() - expected
+        )
+
+    @pytest.mark.parametrize("method", METHODS)
+    def test_every_method_provides_them(self, method):
+        errors = decompose(_demo(), method=method).expectation_errors(11)
+        assert len(errors) > 300
 
 
 class TestWeeklyView:

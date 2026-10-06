@@ -36,7 +36,7 @@ from stats_compass_core.results import ToolWarning
 from stats_compass_core.series._common import Insufficient, prepare_daily, week_start
 
 Method = Literal["mstl", "stl", "fourier"]
-TrendAhead = Literal["flat", "linear"]
+TrendAhead = Literal["level", "flat", "linear"]
 
 WEEKLY_PERIOD = 52
 # Periods at least this long are treated as the annual pattern, and smoothed.
@@ -145,12 +145,70 @@ class Decomposition:
             1,
             round(self.params["trend_window_days"] / (1 if self.grain == "day" else 7)),
         )
+        if self.params["trend_ahead"] == "level":
+            return float((self.observed - self.seasonal).iloc[-window:].mean())
         recent = self.trend.iloc[-window:]
         if self.params["trend_ahead"] == "flat":
             return float(recent.mean())
         slope = (recent.iloc[-1] - recent.iloc[0]) / max(len(recent) - 1, 1)
         steps = (when - self.trend.index[-1]) / self._step()
         return float(recent.iloc[-1] + slope * steps)
+
+    def _fitted_daily(self) -> pd.Series:
+        """In-sample trend + seasonal, per day, whatever the grain."""
+        if self.grain == "day":
+            return self.trend + self.seasonal
+        days = self.daily.index
+        weekly = (self.trend + self.seasonal).reindex(week_start(days)).to_numpy()
+        shares = np.asarray(self.day_of_week_share)[days.dayofweek]
+        return pd.Series(weekly * shares, index=days)
+
+    def _lagged_seasonal_daily(self) -> pd.Series:
+        """The seasonal pattern as a forecast reads it: one period earlier, per day."""
+        days = self.daily.index
+        lagged = pd.Series(0.0, index=days)
+        for period, component in self.seasonal_by_period.items():
+            shifted = component.shift(period)
+            if self.grain == "day":
+                lagged = lagged + shifted.reindex(days).to_numpy()
+            else:
+                shares = np.asarray(self.day_of_week_share)[days.dayofweek]
+                lagged = lagged + shifted.reindex(week_start(days)).to_numpy() * shares
+        return lagged
+
+    def expectation_errors(self, ndays: int) -> pd.DataFrame:
+        """How wrong the expectation has been, at every past position it can be tried.
+
+        At each position the estimator ``expected_*`` uses ahead of the data:
+        the mean of the seasonally adjusted values over the
+        ``trend_window_days`` before, times ``ndays``, plus the seasonal
+        pattern read one period earlier. The error is the observed total over
+        the ``ndays`` from that position, minus that expectation.
+
+        Why not the remainder: the fit has already absorbed part of each past
+        window's own noise, which the period being judged never gets. Tests
+        built on remainder windows fired at three times their nominal rate.
+
+        Returns one row per window start, with ``error`` and ``expected``.
+        Positions whose baseline or window touches an excluded day are left
+        out.
+        """
+        if ndays < 1:
+            raise ValueError("ndays must be at least 1")
+        baseline = int(self.params["trend_window_days"])
+        lagged = self._lagged_seasonal_daily()
+        adjusted = self.daily - lagged
+        level = adjusted.rolling(baseline).mean().shift(1)
+        ahead = lambda s: s.rolling(ndays).sum().shift(-(ndays - 1))  # noqa: E731
+        expected = ndays * level + ahead(lagged)
+        error = ahead(self.daily) - expected
+        frame = pd.DataFrame({"error": error, "expected": expected})
+        if self.excluded:
+            touched = pd.Series(0.0, index=self.daily.index)
+            touched.loc[pd.DatetimeIndex(self.excluded)] = 1.0
+            span = touched.rolling(baseline + ndays).sum().shift(-(ndays - 1))
+            frame = frame[span.fillna(1.0) == 0]
+        return frame.dropna()
 
     # -- noise ---------------------------------------------------------------
 
@@ -207,10 +265,11 @@ def decompose(
     max_gap_days: int = 7,
     annual_smoothing_days: int = 31,
     fourier_terms: int = 4,
-    trend_ahead: TrendAhead = "flat",
+    trend_ahead: TrendAhead = "level",
     trend_window_days: int = 28,
     robust: bool = False,
     exclude: Sequence[tuple[date, date]] = (),
+    exclude_iterations: int = 3,
 ) -> Decomposition | Insufficient:
     """Decompose a daily series into trend, seasonal components and remainder.
 
@@ -224,9 +283,14 @@ def decompose(
         annual_smoothing_days: Width of the centred moving average applied to
             the annual component (``mstl`` and ``stl``); 0 disables it.
         fourier_terms: Annual harmonics, for ``fourier``.
-        trend_ahead: How ``expected_*`` continues the trend past the data:
-            ``"flat"`` holds its mean over the last ``trend_window_days``,
-            ``"linear"`` extends its slope over that window.
+        trend_ahead: How ``expected_*`` continues past the data. ``"level"``
+            holds the mean of the seasonally adjusted values over the last
+            ``trend_window_days``: the same estimator ``expectation_errors``
+            measures in the past, so a test built on those errors fits it.
+            ``"flat"`` holds the trend's mean over that window; ``"linear"``
+            extends the trend's slope. At the end of the data a smoother sees
+            one side only, and its end value carries more error than the
+            data's own mean.
         trend_window_days: The window ``trend_ahead`` reads.
         robust: Robust LOESS fitting for ``mstl`` and ``stl`` alike, so that a
             comparison of the methods is not a comparison of robustness.
@@ -234,6 +298,10 @@ def decompose(
             promotion being measured. Their values are replaced by
             interpolation for fitting; unlike a gap, they never make the series
             insufficient. They are returned in ``excluded``.
+        exclude_iterations: Excluded days start as a straight line between
+            their neighbours, which is as noisy as the two days it joins. They
+            are then replaced by the fit's own trend + seasonal and refitted,
+            this many times.
 
     Returns:
         A ``Decomposition``, or ``Insufficient`` when there is too little
@@ -265,6 +333,7 @@ def decompose(
         "trend_ahead": trend_ahead,
         "trend_window_days": trend_window_days,
         "robust": robust,
+        "exclude_iterations": exclude_iterations,
         "exclude": [[str(start), str(end)] for start, end in exclude],
         "start": y.index[0].date().isoformat(),
         "end": y.index[-1].date().isoformat(),
@@ -301,14 +370,31 @@ def decompose(
             )
         )
 
-    if method == "mstl":
-        dec = _mstl(
-            y, periods, imputed, params, warnings, annual_smoothing_days, robust
-        )
-    elif method == "stl":
-        dec = _stl_weekly(y, imputed, params, warnings, annual_smoothing_days, robust)
-    else:
-        dec = _fourier(y, periods, imputed, params, warnings, fourier_terms)
+    def fit(values: pd.Series) -> Decomposition:
+        if method == "mstl":
+            return _mstl(
+                values,
+                periods,
+                imputed,
+                params,
+                warnings,
+                annual_smoothing_days,
+                robust,
+            )
+        if method == "stl":
+            return _stl_weekly(
+                values, imputed, params, warnings, annual_smoothing_days, robust
+            )
+        return _fourier(values, periods, imputed, params, warnings, fourier_terms)
+
+    dec = fit(y)
+    if prepared.excluded:
+        excluded_days = pd.DatetimeIndex(prepared.excluded)
+        for _ in range(exclude_iterations):
+            refilled = y.copy()
+            refilled.loc[excluded_days] = dec._fitted_daily().loc[excluded_days]
+            y = refilled
+            dec = fit(y)
     return _account_for(dec, prepared.excluded, prepared.trimmed)
 
 
