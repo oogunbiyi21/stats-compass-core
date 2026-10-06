@@ -445,7 +445,9 @@ class TestMonthEffects:
             trend=dec.trend.loc[:"2025-08-31"].iloc[-200:],
             seasonal=dec.seasonal.loc[:"2025-08-31"].iloc[-200:],
             remainder=dec.remainder.loc[:"2025-08-31"].iloc[-200:],
-            seasonal_by_period={},
+            seasonal_by_period={
+                365: dec.seasonal_by_period[365].loc[:"2025-08-31"].iloc[-200:]
+            },
             imputed=[],
             warnings=[],
         )
