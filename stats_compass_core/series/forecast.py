@@ -151,6 +151,10 @@ def forecast(
         "bias_corrected": True,
         "decomposition_method": dec.method,
         "trend_ahead": dec.params["trend_ahead"],
+        "reference": "out_of_sample_exact" if dec.linear is not None else "in_sample",
+        # Origins overlap: monthly quantiles rest on about this many
+        # independent months, not on n_origins.
+        "effective_independent_months": round(len(errors) / 30, 1),
         "first_day": days[0].date().isoformat(),
     }
     return ForecastFacts(
@@ -198,7 +202,18 @@ def _horizon_errors(dec: Decomposition, horizon: int) -> np.ndarray:
             seasonal += values
         if not ok:
             continue
-        rows.append(y[origin : origin + horizon] - level[origin] - seasonal)
+        error = y[origin : origin + horizon] - level[origin] - seasonal
+        if dec.linear is not None:
+            # Out of sample: delete the horizon's rows from the Fourier fit
+            # and move the error by what that does to the coefficients.
+            Z = dec.linear["Z"]
+            delta = dec._deletion_delta(np.arange(origin, origin + horizon))
+            gradient = (
+                Z[origin - baseline : origin].mean(axis=0)
+                - Z[origin : origin + horizon]
+            )
+            error = error - gradient @ delta
+        rows.append(error)
     return np.asarray(rows).reshape(-1, horizon)
 
 

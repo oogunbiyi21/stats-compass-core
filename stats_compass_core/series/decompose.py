@@ -80,6 +80,9 @@ class Decomposition:
     daily: pd.Series = field(repr=False, default_factory=lambda: pd.Series(dtype=float))
     day_of_week_share: tuple[float, ...] | None = field(default=None, repr=False)
     excluded: list[date] = field(default_factory=list)
+    # The Fourier fit's least-squares pieces, so a past window can be deleted
+    # from it exactly (see expectation_errors). None for the STL methods.
+    linear: dict[str, Any] | None = field(default=None, repr=False)
     trimmed: list[date] = field(default_factory=list)
 
     # -- expectation ---------------------------------------------------------
@@ -190,7 +193,9 @@ class Decomposition:
                 lagged = lagged + shifted.reindex(week_start(days)).to_numpy() * shares
         return lagged
 
-    def expectation_errors(self, ndays: int) -> pd.DataFrame:
+    def expectation_errors(
+        self, ndays: int, out_of_sample: bool = True, delete_after_days: int = 0
+    ) -> pd.DataFrame:
         """How wrong the expectation has been, at every past position it can be tried.
 
         At each position the estimator ``expected_*`` uses ahead of the data:
@@ -202,6 +207,16 @@ class Decomposition:
         Why not the remainder: the fit has already absorbed part of each past
         window's own noise, which the period being judged never gets. Tests
         built on remainder windows fired at three times their nominal rate.
+
+        Out of sample: with two cycles, the seasonal one period before a past
+        position was fitted with that position's own values in it, so its
+        error comes out too small. The period really being judged was never
+        in the fit. For the Fourier fit (``out_of_sample=True``) each window's
+        rows, and ``delete_after_days`` after it, are deleted from the least
+        squares solution exactly before its seasonal is read: a closed-form
+        update, no refit. The STL methods have no closed form, so their
+        errors stay in sample and slightly too small (about 1.2x on null
+        data). ``attrs["reference"]`` says which.
 
         Returns one row per window start, with ``error`` and ``expected``.
         Positions whose baseline or window touches an excluded day are left
@@ -222,7 +237,45 @@ class Decomposition:
             touched.loc[pd.DatetimeIndex(self.excluded)] = 1.0
             span = touched.rolling(baseline + ndays).sum().shift(-(ndays - 1))
             frame = frame[span.fillna(1.0) == 0]
-        return frame.dropna()
+        frame = frame.dropna()
+        exact = out_of_sample and self.linear is not None
+        if exact:
+            shift = self._deletion_shift(
+                frame.index, ndays, baseline, delete_after_days
+            )
+            frame = frame.assign(
+                error=frame["error"] - shift, expected=frame["expected"] + shift
+            )
+        frame.attrs["reference"] = "out_of_sample_exact" if exact else "in_sample"
+        return frame
+
+    def _deletion_delta(self, rows: np.ndarray) -> np.ndarray:
+        """How far the coefficients move when ``rows`` are deleted from the fit."""
+        lin = self.linear
+        X_b = lin["X"][rows]
+        hat = X_b @ lin["xtx_inv"] @ X_b.T
+        u = np.linalg.solve(np.eye(len(rows)) - hat, lin["resid"][rows])
+        return lin["xtx_inv"] @ X_b.T @ u
+
+    def _deletion_shift(
+        self, starts: pd.DatetimeIndex, ndays: int, baseline: int, after: int
+    ) -> np.ndarray:
+        """Per window start, how much the expectation moves with its rows deleted.
+
+        The error is linear in the coefficients: error = c + g·beta, with
+        g = ndays × mean(Z over the baseline) − sum(Z over the window), where
+        Z is the lagged-seasonal design. Deleting the window's rows moves the
+        coefficients by -delta, so the expectation moves by g·delta.
+        """
+        Z = self.linear["Z"]
+        n = len(Z)
+        positions = self.daily.index.get_indexer(starts)
+        shifts = np.empty(len(positions))
+        for j, p in enumerate(positions):
+            g = ndays * Z[p - baseline : p].mean(axis=0) - Z[p : p + ndays].sum(axis=0)
+            rows = np.arange(p, min(p + ndays + after, n))
+            shifts[j] = g @ self._deletion_delta(rows)
+        return shifts
 
     # -- noise ---------------------------------------------------------------
 
@@ -588,6 +641,34 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
     beta, *_ = np.linalg.lstsq(X.to_numpy(), y.to_numpy(), rcond=None)
     coef = pd.Series(beta, index=X.columns)
 
+    # The seasonal as a forecast reads it, one period earlier, as a design
+    # matrix: the lagged seasonal is Z @ beta. Day-of-week effects repeat
+    # every 7 days, so their lag is themselves; annual harmonics are read at
+    # t - period, and are unknown before the first full period.
+    Z = np.zeros(X.shape)
+    names = list(X.columns)
+    if weekly:
+        for dow in range(1, 7):
+            Z[:, names.index(f"dow{dow}")] = (y.index.dayofweek == dow) - 1 / 7
+    for period in annual_periods:
+        cycle = 365.25 if period == 365 else period
+        back = t - period
+        for k in range(1, fourier_terms + 1):
+            angle = 2 * np.pi * k * back / cycle
+            Z[:, names.index(f"sin{period}_{k}")] = np.where(
+                back >= 0, np.sin(angle), np.nan
+            )
+            Z[:, names.index(f"cos{period}_{k}")] = np.where(
+                back >= 0, np.cos(angle), np.nan
+            )
+    design = X.to_numpy()
+    linear = {
+        "X": design,
+        "Z": Z,
+        "xtx_inv": np.linalg.pinv(design.T @ design),
+        "resid": y.to_numpy() - design @ beta,
+    }
+
     components: dict[int, pd.Series] = {}
     level_shift = 0.0
     if weekly:
@@ -616,4 +697,5 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
         seasonal_by_period=components,
         imputed=imputed,
         warnings=warnings,
+        linear=linear,
     )

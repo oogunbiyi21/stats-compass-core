@@ -173,6 +173,7 @@ def verdict(
         return Insufficient(needs=length, has=0, unit="days", reason="NO_DENOMINATOR")
 
     errors = dec.expectation_errors(length)
+    params["reference"] = errors.attrs["reference"]
     if len(errors) < MIN_REFERENCE_WINDOWS:
         return Insufficient(
             needs=len(dec.daily) + MIN_REFERENCE_WINDOWS - len(errors),

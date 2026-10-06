@@ -183,7 +183,7 @@ def its_lift(
         100 * lift_abs / counterfactual_total if counterfactual_total > 0 else None
     )
 
-    errors = dec.expectation_errors(length)
+    errors = dec.expectation_errors(length, delete_after_days=post_days)
     if len(errors) < MIN_REFERENCE_WINDOWS:
         return Insufficient(
             needs=MIN_REFERENCE_WINDOWS,
@@ -264,6 +264,7 @@ def its_lift(
         "exclude": [[str(a), str(b)] for a, b in exclusions],
         "n_window_days_with_data": int(present.sum()),
         "judged_on": "percent" if lift_pct is not None else "absolute",
+        "reference": errors.attrs["reference"],
         "decomposition": dec.params,
         **baseline_info,
         **prior_info,

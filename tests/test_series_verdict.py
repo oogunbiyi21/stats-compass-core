@@ -180,10 +180,16 @@ class TestCalibration:
 
 
 class TestCountTest:
-    def test_poisson_counts_use_poisson(self):
+    def test_the_expectations_own_error_counts_as_dispersion(self):
+        """Even Poisson counts vary more than a Poisson around an expectation
+        that is itself estimated: a 28-day baseline adds about 7/28 for a
+        week, so the dispersion is about 1.25 and the test is negative
+        binomial. Treating the expectation as known would be over-confident."""
         series = _null_counts(1)
         dec, period = _split(series, *_last_week(series), method="fourier")
-        assert verdict(dec, period, kind="count").test == "poisson"
+        facts = verdict(dec, period, kind="count")
+        assert facts.test == "negative_binomial"
+        assert 1.0 < facts.params["dispersion"] < 2.5
 
     def test_overdispersed_counts_use_negative_binomial(self):
         rng = np.random.default_rng(2)

@@ -349,6 +349,49 @@ class TestExpectationErrors:
         assert len(errors) > 300
 
 
+class TestOutOfSampleReference:
+    """A past window's own data leaks into the seasonal it is judged against.
+
+    With two cycles, the seasonal one period before a past position was fitted
+    with that position's values in it; the period really being judged was not.
+    For the Fourier fit the leak is removed exactly, by deleting each window's
+    rows from the least-squares solution.
+    """
+
+    def test_fourier_errors_match_a_refit_without_the_window(self):
+        y = _demo()
+        dec = decompose(y, method="fourier")
+        errors = dec.expectation_errors(7)
+        assert errors.attrs["reference"] == "out_of_sample_exact"
+        at = pd.Timestamp("2026-03-02")
+        week = slice(at, at + pd.Timedelta(days=6))
+        # Excluding the week and refilling it from the fit until it settles is
+        # least squares without those rows: what the deletion computes directly.
+        refit = decompose(
+            y,
+            method="fourier",
+            exclude=[(at.date(), (at + pd.Timedelta(days=6)).date())],
+            exclude_iterations=40,
+        )
+        lagged = sum(c.shift(p) for p, c in refit.seasonal_by_period.items())
+        adjusted = y - lagged
+        level = adjusted.loc[
+            at - pd.Timedelta(days=28) : at - pd.Timedelta(days=1)
+        ].mean()
+        expected = 7 * level + lagged.loc[week].sum()
+        assert errors.loc[at, "expected"] == pytest.approx(expected, rel=1e-6)
+
+    def test_out_of_sample_errors_are_wider_than_in_sample(self):
+        dec = decompose(_null(100), method="fourier")
+        oos = dec.expectation_errors(7)["error"].std()
+        ins = dec.expectation_errors(7, out_of_sample=False)["error"].std()
+        assert oos > ins
+
+    def test_other_methods_say_their_reference_is_in_sample(self):
+        errors = decompose(_demo(), method="mstl").expectation_errors(7)
+        assert errors.attrs["reference"] == "in_sample"
+
+
 class TestWeeklyView:
     """Brief §5.3, settled: Monday-start weekly sums, complete weeks only, any method."""
 
