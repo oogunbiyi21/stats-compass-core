@@ -15,6 +15,12 @@ from stats_compass_core.series.decompose import (
     WeeklyComponents,
     decompose,
 )
+from stats_compass_core.series.forecast import (
+    ForecastFacts,
+    ForecastMonth,
+    ForecastPoint,
+    forecast,
+)
 from stats_compass_core.series.its import LiftFacts, its_lift
 from stats_compass_core.series.seasonality import (
     MonthEffect,
@@ -25,6 +31,9 @@ from stats_compass_core.series.verdict import VerdictFacts, verdict
 
 __all__ = [
     "Decomposition",
+    "ForecastFacts",
+    "ForecastMonth",
+    "ForecastPoint",
     "Insufficient",
     "LiftFacts",
     "MonthEffect",
@@ -32,6 +41,7 @@ __all__ = [
     "VerdictFacts",
     "WeeklyComponents",
     "decompose",
+    "forecast",
     "its_lift",
     "month_effects",
     "verdict",
