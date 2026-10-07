@@ -177,6 +177,17 @@ def verdict(
         return Insufficient(needs=length, has=0, unit="days", reason="NO_DENOMINATOR")
 
     errors = dec.expectation_errors(length)
+    params["annual_fallback"] = False
+    if len(errors) < min_reference:
+        # The annual pattern can use up the history the reference needs; the
+        # weekly pattern alone may still leave enough.
+        fallback = dec.without_annual()
+        if fallback is not None:
+            fallback_errors = fallback.expectation_errors(length)
+            if len(fallback_errors) >= min_reference:
+                dec, errors = fallback, fallback_errors
+                params["annual_fallback"] = True
+                warnings.extend(w for w in dec.warnings if w.code == "ANNUAL_DROPPED")
     params["reference"] = errors.attrs["reference"]
     if len(errors) < min_reference:
         return Insufficient(

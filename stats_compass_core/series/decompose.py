@@ -151,9 +151,7 @@ class Decomposition:
         if self.params["trend_ahead"] == "level":
             # The same adjustment expectation_errors makes at past positions:
             # the seasonal read one period earlier, per day.
-            days = int(self.params["trend_window_days"])
-            recent = (self.daily - self._lagged_seasonal_daily()).iloc[-days:]
-            daily_level = float(recent.mean())
+            daily_level = self._level_from_real_days()
             return daily_level if self.grain == "day" else 7 * daily_level
         recent = self.trend.iloc[-window:]
         if self.params["trend_ahead"] == "flat":
@@ -161,6 +159,34 @@ class Decomposition:
         slope = (recent.iloc[-1] - recent.iloc[0]) / max(len(recent) - 1, 1)
         steps = (when - self.trend.index[-1]) / self._step()
         return float(recent.iloc[-1] + slope * steps)
+
+    def _level_from_real_days(self) -> float:
+        """Mean seasonally adjusted value over the last real days before the end.
+
+        Walks back past excluded and imputed days, up to
+        ``level_lookback_days``, until it has ``trend_window_days`` real ones.
+        Refilled days are the fit's own values: a level read from them reads
+        the fit back to itself, and with a recent promotion excluded the
+        verdict's test fired five times its nominal rate. If the lookback holds
+        fewer than half a window of real days, the last window is used as it
+        is.
+        """
+        days = int(self.params["trend_window_days"])
+        lookback = int(self.params.get("level_lookback_days", 3 * days))
+        adjusted = self.daily - self._lagged_seasonal_daily()
+        filled = set(self.imputed) | set(self.excluded)
+        chosen = []
+        for day, value in zip(
+            adjusted.index[::-1][:lookback], adjusted.to_numpy()[::-1][:lookback]
+        ):
+            if day.date() in filled or not np.isfinite(value):
+                continue
+            chosen.append(value)
+            if len(chosen) == days:
+                break
+        if len(chosen) * 2 < days:
+            return float(adjusted.iloc[-days:].mean())
+        return float(np.mean(chosen))
 
     def _fitted_daily(self) -> pd.Series:
         """In-sample trend + seasonal, per day, whatever the grain."""
@@ -277,6 +303,64 @@ class Decomposition:
             shifts[j] = g @ self._deletion_delta(rows)
         return shifts
 
+    def without_annual(self) -> Decomposition | None:
+        """The same decomposition with the annual period dropped, or None.
+
+        For callers whose error reference needs history behind the annual
+        pattern: reading the seasonal one year back leaves the first year with
+        nothing to measure against, so a store just past a year would get
+        less than one just under it. The fallback keeps the weekly pattern,
+        carries over what was imputed, excluded and trimmed, and says why the
+        annual pattern was dropped. None for a weekly-grain decomposition
+        (its only period is annual) or one with no annual period to drop.
+        """
+        keep = [p for p in self.seasonal_by_period if p < ANNUAL_MIN_PERIOD_DAYS]
+        if self.grain != "day" or not keep or len(keep) == len(self.seasonal_by_period):
+            return None
+        options = {
+            key: self.params[key]
+            for key in (
+                "max_gap_days",
+                "annual_smoothing_days",
+                "fourier_terms",
+                "trend_ahead",
+                "trend_window_days",
+                "robust",
+                "exclude_iterations",
+                "level_lookback_days",
+            )
+        }
+        exclude = [
+            (date.fromisoformat(a), date.fromisoformat(b))
+            for a, b in self.params["exclude"]
+        ]
+        fallback = decompose(
+            self.daily, method=self.method, periods=keep, exclude=exclude, **options
+        )
+        if isinstance(fallback, Insufficient):
+            return None
+        warning = ToolWarning(
+            code="ANNUAL_DROPPED",
+            columns=[],
+            message=(
+                f"The annual pattern left too little history behind it to measure "
+                f"the expectation's error ({len(self.daily)} days; the first year "
+                f"is used up reading the seasonal a year back), so only "
+                f"{keep} were used. Expectations do not allow for the time of year."
+            ),
+        )
+        return replace(
+            fallback,
+            imputed=self.imputed,
+            trimmed=self.trimmed,
+            warnings=[*self.warnings, warning],
+            params={
+                **fallback.params,
+                "periods": self.params["periods"],
+                "annual_fallback": True,
+            },
+        )
+
     # -- noise ---------------------------------------------------------------
 
     def residual_sigma(self, ndays: int, robust: bool = False) -> float:
@@ -337,6 +421,7 @@ def decompose(
     robust: bool = False,
     exclude: Sequence[tuple[date, date]] = (),
     exclude_iterations: int = 3,
+    level_lookback_days: int = 84,
 ) -> Decomposition | Insufficient:
     """Decompose a daily series into trend, seasonal components and remainder.
 
@@ -365,6 +450,8 @@ def decompose(
             promotion being measured. Their values are replaced by
             interpolation for fitting; unlike a gap, they never make the series
             insufficient. They are returned in ``excluded``.
+        level_lookback_days: How far back the level ahead may reach past
+            excluded and imputed days to find ``trend_window_days`` real ones.
         exclude_iterations: Excluded days start as a straight line between
             their neighbours, which is as noisy as the two days it joins. They
             are then replaced by the fit's own trend + seasonal and refitted,
@@ -419,6 +506,7 @@ def decompose(
         "trend_window_days": trend_window_days,
         "robust": robust,
         "exclude_iterations": exclude_iterations,
+        "level_lookback_days": level_lookback_days,
         "exclude": [[str(start), str(end)] for start, end in exclude],
         "start": y.index[0].date().isoformat(),
         "end": y.index[-1].date().isoformat(),

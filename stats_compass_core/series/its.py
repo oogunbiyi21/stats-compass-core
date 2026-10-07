@@ -178,15 +178,42 @@ def its_lift(
             reason="TOO_FEW_POINTS",
         )
 
-    estimate = _estimate(
-        dec,
-        observed_series,
-        start,
-        present,
-        baseline_days,
-        baseline_lookback_days,
-        min_baseline_share,
-    )
+    def attempt(d: Decomposition):
+        """The estimate and its reference from one decomposition, or why not."""
+        est = _estimate(
+            d,
+            observed_series,
+            start,
+            present,
+            baseline_days,
+            baseline_lookback_days,
+            min_baseline_share,
+        )
+        if isinstance(est, Insufficient):
+            return est, None
+        errs = d.expectation_errors(length, delete_after_days=post_days)
+        if len(errs) < min_reference:
+            short = Insufficient(
+                needs=min_reference, has=len(errs), unit="days", reason="TOO_SHORT"
+            )
+            return short, None
+        return est, errs
+
+    estimate, errors = attempt(dec)
+    annual_fallback = False
+    if isinstance(estimate, Insufficient) and estimate.reason in (
+        "NO_SEASONAL_BEFORE",
+        "BASELINE_TOO_SHORT",
+        "TOO_SHORT",
+    ):
+        # The annual pattern needs a year before the window to read, and uses
+        # up a year of the reference; the weekly pattern alone may not.
+        fallback = dec.without_annual()
+        if fallback is not None:
+            retried, retried_errors = attempt(fallback)
+            if not isinstance(retried, Insufficient):
+                dec, estimate, errors = fallback, retried, retried_errors
+                annual_fallback = True
     if isinstance(estimate, Insufficient):
         return estimate
     observed_total, counterfactual_total, baseline_info = estimate
@@ -195,14 +222,6 @@ def its_lift(
         100 * lift_abs / counterfactual_total if counterfactual_total > 0 else None
     )
 
-    errors = dec.expectation_errors(length, delete_after_days=post_days)
-    if len(errors) < min_reference:
-        return Insufficient(
-            needs=min_reference,
-            has=len(errors),
-            unit="days",
-            reason="TOO_SHORT",
-        )
     err_abs = errors["error"].to_numpy()
     positive = errors["expected"].to_numpy() > 0
     err_pct = 100 * err_abs[positive] / errors["expected"].to_numpy()[positive]
@@ -279,6 +298,7 @@ def its_lift(
         "exclude": [[str(a), str(b)] for a, b in exclusions],
         "n_window_days_with_data": int(present.sum()),
         "judged_on": "percent" if lift_pct is not None else "absolute",
+        "annual_fallback": annual_fallback,
         "reference": errors.attrs["reference"],
         "decomposition": dec.params,
         **baseline_info,

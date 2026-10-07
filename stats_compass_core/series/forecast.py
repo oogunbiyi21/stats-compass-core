@@ -88,6 +88,17 @@ def forecast(
         raise ValueError("level must be between 0 and 1")
 
     errors = _horizon_errors(dec, horizon_days)
+    annual_fallback = False
+    warnings: list[ToolWarning] = []
+    if len(errors) < min_origins:
+        # The annual pattern can use up the history the origins need; the
+        # weekly pattern alone may still leave enough.
+        fallback = dec.without_annual()
+        if fallback is not None:
+            fallback_errors = _horizon_errors(fallback, horizon_days)
+            if len(fallback_errors) >= min_origins:
+                dec, errors, annual_fallback = fallback, fallback_errors, True
+                warnings = [w for w in dec.warnings if w.code == "ANNUAL_DROPPED"]
     if len(errors) < min_origins:
         return Insufficient(
             needs=len(dec.daily) + min_origins - len(errors),
@@ -153,6 +164,7 @@ def forecast(
             )
 
     params = {
+        "annual_fallback": annual_fallback,
         "horizon_days": horizon_days,
         "level": level,
         "wide_ratio": wide_ratio,
@@ -172,7 +184,7 @@ def forecast(
         n_origins=int(len(errors)),
         method=f"{dec.method}+empirical_horizon_errors",
         params=params,
-        warnings=[],
+        warnings=warnings,
     )
 
 

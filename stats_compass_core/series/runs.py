@@ -73,6 +73,28 @@ def detect_run(
     """
     if min_moves < 1:
         raise ValueError("min_moves must be at least 1")
+    result = _detect(dec, min_moves, real_change_alpha, min_reference)
+    if isinstance(result, Insufficient) and result.reason == "TOO_SHORT":
+        # The annual pattern uses up a year of the history the comparison
+        # needs; the weekly pattern alone may still leave enough.
+        fallback = dec.without_annual()
+        if fallback is not None:
+            retried = _detect(fallback, min_moves, real_change_alpha, min_reference)
+            if not isinstance(retried, Insufficient):
+                if retried is not None:
+                    retried.params["annual_fallback"] = True
+                    retried.warnings.extend(
+                        w for w in fallback.warnings if w.code == "ANNUAL_DROPPED"
+                    )
+                return retried
+    if isinstance(result, RunFacts):
+        result.params["annual_fallback"] = False
+    return result
+
+
+def _detect(
+    dec: Decomposition, min_moves: int, real_change_alpha: float, min_reference: int
+) -> RunFacts | None | Insufficient:
     weekly = _adjusted_weeks(dec)
     values = weekly.to_numpy()
     if len(values) < 2 or not np.isfinite(values[-1]):
