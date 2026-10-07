@@ -436,6 +436,45 @@ Benefits:
 - **Error recovery**: Clear failure points with suggestions
 - **Consistency**: Best practices baked in
 
+## Series statistics (`stats_compass_core.series`)
+
+Plain functions over daily series, separate from the tool registry: series in,
+statistics out. They are built to run with nobody checking the output, so:
+
+- A shortage of data is a returned `Insufficient(needs, has, unit, reason)`,
+  never an exception. Exceptions mean a caller error.
+- Calibration values and sufficiency floors are arguments with defaults.
+- Nothing draws at random: the same input always gives the same output.
+- Results are structured facts; wording them is the caller's job.
+
+| Function | Answers |
+|---|---|
+| `decompose` | trend + seasonal components + remainder; methods `mstl`, `stl` (weekly sums), `fourier` |
+| `month_effects` | each calendar month's effect in percent of trend, with an interval |
+| `verdict` | is a period expected, noise, or a real change (bands first, then a test fitting the kind) |
+| `forecast` | daily points and monthly totals ahead, with intervals that never narrow |
+| `its_lift` | a window's lift over its counterfactual (interrupted time series) |
+| `detect_run` | a run of same-direction weekly moves, judged against the series' own history |
+| `repeat_rate`, `median_gap` | a cohort's repeat share with an exact interval; the typical gap between orders |
+
+**How uncertainty is measured.** Intervals and tests come from the
+expectation's own past errors (`Decomposition.expectation_errors`): the same
+estimator applied at every earlier position, with the seasonal pattern read as
+a forecast would have read it. With two years of history a past position's
+seasonal was partly fitted from its own values, which flatters the error. For
+`fourier` that is removed exactly, by deleting each window's rows from the
+least-squares fit; for `mstl` and `stl` the errors stay in sample and run about
+1.2x small. Prefer `fourier` where calibration matters.
+
+**Why the annual component is smoothed.** With two years of data, a daily
+annual component follows the noise: on patternless data MSTL's remainder had a
+tenth of the true spread. `annual_smoothing_days` (default 31) smooths it and
+returns the difference to the remainder, so one-day spikes such as Black Friday
+land in the remainder.
+
+Each module's docstring records what was measured on patternless data and why
+the design is what it is.
+
 ## Memory Management
 
 `DataFrameState` enforces a configurable memory limit (default 500MB):
