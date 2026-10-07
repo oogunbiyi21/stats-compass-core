@@ -341,7 +341,7 @@ class Decomposition:
             )
         }
         exclude = [
-            (date.fromisoformat(a), date.fromisoformat(b))
+            (pd.Timestamp(a).date(), pd.Timestamp(b).date())
             for a, b in self.params["exclude"]
         ]
         fallback = decompose(
@@ -359,7 +359,7 @@ class Decomposition:
                 f"{keep} were used. Expectations do not allow for the time of year."
             ),
         )
-        return replace(
+        result = replace(
             fallback,
             imputed=self.imputed,
             trimmed=self.trimmed,
@@ -374,6 +374,10 @@ class Decomposition:
                 "annual_fallback": True,
             },
         )
+        # The refit saw the filled series, with no gaps left in it: count the
+        # level's real days again now that the imputed days are known.
+        _record_level(result, [])
+        return result
 
     # -- noise ---------------------------------------------------------------
 
@@ -475,6 +479,11 @@ def decompose(
         A ``Decomposition``, or ``Insufficient`` when there is too little
         history for the method (``TOO_SHORT``) or a gap too long to fill.
     """
+    if level_lookback_days * 2 < trend_window_days:
+        raise ValueError(
+            f"level_lookback_days ({level_lookback_days}) must be at least half of "
+            f"trend_window_days ({trend_window_days}), or every level is refused"
+        )
     if method not in ("mstl", "stl", "fourier"):
         raise ValueError(f"unknown method {method!r}; use 'mstl', 'stl' or 'fourier'")
     periods = sorted({int(p) for p in periods})
@@ -521,7 +530,7 @@ def decompose(
         "robust": robust,
         "exclude_iterations": exclude_iterations,
         "level_lookback_days": level_lookback_days,
-        "exclude": [[str(start), str(end)] for start, end in exclude],
+        "exclude": [[_iso(start), _iso(end)] for start, end in exclude],
         "start": y.index[0].date().isoformat(),
         "end": y.index[-1].date().isoformat(),
         "n_days": len(y),
@@ -597,23 +606,39 @@ def decompose(
             y = refilled
             dec = fit(y)
     dec = _account_for(dec, prepared.excluded, prepared.trimmed)
+    _record_level(dec, columns)
+    return dec
+
+
+def _iso(day: Any) -> str:
+    """A date, datetime or Timestamp as a plain ISO date."""
+    return pd.Timestamp(day).date().isoformat()
+
+
+def _record_level(dec: Decomposition, columns: list[str]) -> None:
+    """Record how many real days the level ahead rests on, and warn below half.
+
+    Called on the finished object, after imputed and excluded days are known:
+    counted any earlier, filled days pass for real ones.
+    """
+    window = int(dec.params["trend_window_days"])
     _, real_days = dec._level_from_real_days()
     dec.params["level_real_days"] = real_days
-    if real_days * 2 < trend_window_days:
+    dec.warnings[:] = [w for w in dec.warnings if w.code != "RECENT_DAYS_FILLED"]
+    if real_days * 2 < window:
         dec.warnings.append(
             ToolWarning(
                 code="RECENT_DAYS_FILLED",
                 columns=columns,
                 message=(
                     f"Only {real_days} real day(s) in the last "
-                    f"{level_lookback_days} were available to read the current "
-                    f"level from (fewer than half of {trend_window_days}); the "
-                    f"rest were excluded, filled or have no seasonal a year "
-                    f"back. Expectations ahead are not to be trusted."
+                    f"{dec.params['level_lookback_days']} were available to read the "
+                    f"current level from (fewer than half of {window}); the rest were "
+                    f"excluded, filled or have no seasonal a year back. Expectations "
+                    f"ahead are not to be trusted."
                 ),
             )
         )
-    return dec
 
 
 def _account_for(

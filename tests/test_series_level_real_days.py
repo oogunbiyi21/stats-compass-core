@@ -131,3 +131,64 @@ class TestTooFewRealDays:
         assert dec.params["periods_used"] == [7, 365]
         assert dec.params["level_real_days"] < 14
         assert "RECENT_DAYS_FILLED" in [w.code for w in dec.warnings]
+
+
+class TestFallbackKeepsItsAccount:
+    """Found by the fresh review of 9d918f8."""
+
+    def _young_store_with_gaps(self, as_timestamps: bool = False):
+        rng = np.random.default_rng(3)
+        y = _null(3).iloc[-400:].copy()
+        last = y.index[-1]
+        start = last - pd.Timedelta(days=62)  # the last 63 days excluded
+        before = y.loc[: start - pd.Timedelta(days=1)].index[-21:]
+        y.loc[before[2:9]] = np.nan  # a run of 7 imputed days
+        y.loc[before[15]] = np.nan  # and one more
+        del rng
+        bounds = (start, last) if as_timestamps else (start.date(), last.date())
+        return y, bounds
+
+    def test_imputed_days_still_count_against_the_level_after_the_fallback(self):
+        from stats_compass_core.series import Insufficient
+
+        y, bounds = self._young_store_with_gaps()
+        dec = decompose(y, method="fourier", exclude=[bounds])
+        fallback = dec.without_annual()
+        assert (
+            fallback.params["level_real_days"]
+            == fallback._level_from_real_days()[1]
+            == 13
+        )
+        assert "RECENT_DAYS_FILLED" in [w.code for w in fallback.warnings]
+        period = pd.Series(
+            1.0, index=pd.date_range(y.index[-1] + pd.Timedelta(days=1), periods=7)
+        )
+        result = verdict(dec, period * y.mean(), kind="money")
+        assert isinstance(result, Insufficient)
+        assert result.reason in ("RECENT_DAYS_FILLED", "TOO_SHORT")
+
+    def test_timestamp_exclusion_bounds_are_returned_not_raised(self):
+        y, bounds = self._young_store_with_gaps(as_timestamps=True)
+        dec = decompose(y, method="fourier", exclude=[bounds])
+        assert dec.params["exclude"] == [
+            [bounds[0].date().isoformat(), bounds[1].date().isoformat()]
+        ]
+        dec.without_annual()  # raised ValueError on the Timestamp's string form
+
+    def test_too_little_history_outranks_filled_recent_days(self):
+        """When both apply, the history shortage is the reason that matters."""
+        from stats_compass_core.series import Insufficient
+
+        y = _demo().iloc[-200:]
+        history, period = y.iloc[:-7], y.iloc[-7:]
+        last = history.index[-1].date()
+        dec = decompose(
+            history, method="fourier", exclude=[(last - timedelta(days=76), last)]
+        )
+        assert dec.params["level_real_days"] == 7  # the recent days are filled
+        result = verdict(dec, period, kind="money", min_reference=10_000)
+        assert isinstance(result, Insufficient) and result.reason == "TOO_SHORT"
+
+    def test_a_lookback_shorter_than_half_a_window_is_a_caller_error(self):
+        with pytest.raises(ValueError, match="level_lookback_days"):
+            decompose(_demo(), method="fourier", level_lookback_days=10)

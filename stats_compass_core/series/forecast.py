@@ -100,6 +100,13 @@ def forecast(
             if len(fallback_errors) >= min_origins:
                 dec, errors, annual_fallback = fallback, fallback_errors, True
                 warnings = [w for w in dec.warnings if w.code == "ANNUAL_DROPPED"]
+    if len(errors) < min_origins:
+        return Insufficient(
+            needs=len(dec.daily) + min_origins - len(errors),
+            has=len(dec.daily),
+            unit="days",
+            reason="TOO_SHORT",
+        )
     if dec.params["trend_ahead"] == "level":
         window = int(dec.params["trend_window_days"])
         real_days = int(dec.params.get("level_real_days", window))
@@ -110,13 +117,6 @@ def forecast(
                 unit="days",
                 reason="RECENT_DAYS_FILLED",
             )
-    if len(errors) < min_origins:
-        return Insufficient(
-            needs=len(dec.daily) + min_origins - len(errors),
-            has=len(dec.daily),
-            unit="days",
-            reason="TOO_SHORT",
-        )
 
     first = pd.Timestamp(dec.params["end"]) + pd.Timedelta(days=1)
     days = pd.date_range(first, periods=horizon_days, freq="D")

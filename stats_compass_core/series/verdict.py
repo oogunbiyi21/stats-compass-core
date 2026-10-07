@@ -189,6 +189,14 @@ def verdict(
                 dec, errors = fallback, fallback_errors
                 params["annual_fallback"] = True
                 warnings.extend(w for w in dec.warnings if w.code == "ANNUAL_DROPPED")
+    params["reference"] = errors.attrs["reference"]
+    if len(errors) < min_reference:
+        return Insufficient(
+            needs=len(dec.daily) + min_reference - len(errors),
+            has=len(dec.daily),
+            unit="days",
+            reason="TOO_SHORT",
+        )
     if dec.params["trend_ahead"] == "level":
         window = int(dec.params["trend_window_days"])
         real_days = int(dec.params.get("level_real_days", window))
@@ -199,14 +207,6 @@ def verdict(
                 unit="days",
                 reason="RECENT_DAYS_FILLED",
             )
-    params["reference"] = errors.attrs["reference"]
-    if len(errors) < min_reference:
-        return Insufficient(
-            needs=len(dec.daily) + min_reference - len(errors),
-            has=len(dec.daily),
-            unit="days",
-            reason="TOO_SHORT",
-        )
 
     expected_daily = dec.expected_daily(start.date(), end.date())
     period_w = _weights_for(weights, period.index)

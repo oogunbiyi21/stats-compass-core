@@ -295,7 +295,10 @@ def its_lift(
         "seasonal_band_z": seasonal_band_z,
         "noise_band_z": noise_band_z,
         "real_change_alpha": real_change_alpha,
-        "exclude": [[str(a), str(b)] for a, b in exclusions],
+        "exclude": [
+            [pd.Timestamp(a).date().isoformat(), pd.Timestamp(b).date().isoformat()]
+            for a, b in exclusions
+        ],
         "n_window_days_with_data": int(present.sum()),
         "judged_on": "percent" if lift_pct is not None else "absolute",
         "annual_fallback": annual_fallback,
