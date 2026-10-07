@@ -38,6 +38,7 @@ The tests, each against the seasonal expectation:
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -188,6 +189,16 @@ def verdict(
                 dec, errors = fallback, fallback_errors
                 params["annual_fallback"] = True
                 warnings.extend(w for w in dec.warnings if w.code == "ANNUAL_DROPPED")
+    if dec.params["trend_ahead"] == "level":
+        window = int(dec.params["trend_window_days"])
+        real_days = int(dec.params.get("level_real_days", window))
+        if real_days * 2 < window:
+            return Insufficient(
+                needs=math.ceil(window / 2),
+                has=real_days,
+                unit="days",
+                reason="RECENT_DAYS_FILLED",
+            )
     params["reference"] = errors.attrs["reference"]
     if len(errors) < min_reference:
         return Insufficient(

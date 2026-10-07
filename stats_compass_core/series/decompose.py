@@ -151,7 +151,7 @@ class Decomposition:
         if self.params["trend_ahead"] == "level":
             # The same adjustment expectation_errors makes at past positions:
             # the seasonal read one period earlier, per day.
-            daily_level = self._level_from_real_days()
+            daily_level, _ = self._level_from_real_days()
             return daily_level if self.grain == "day" else 7 * daily_level
         recent = self.trend.iloc[-window:]
         if self.params["trend_ahead"] == "flat":
@@ -160,33 +160,43 @@ class Decomposition:
         steps = (when - self.trend.index[-1]) / self._step()
         return float(recent.iloc[-1] + slope * steps)
 
-    def _level_from_real_days(self) -> float:
-        """Mean seasonally adjusted value over the last real days before the end.
+    def _level_from_real_days(self) -> tuple[float, int]:
+        """Mean seasonally adjusted value over the last real days, and how many.
 
         Walks back past excluded and imputed days, up to
         ``level_lookback_days``, until it has ``trend_window_days`` real ones.
         Refilled days are the fit's own values: a level read from them reads
         the fit back to itself, and with a recent promotion excluded the
-        verdict's test fired five times its nominal rate. If the lookback holds
-        fewer than half a window of real days, the last window is used as it
-        is.
+        verdict's test fired five times its nominal rate.
+
+        Below half a window of real days (back-to-back promotions with their
+        tails, or the year-back seasonal still missing) the level is not
+        trusted. The last window is used as it is, so ``expected_daily`` still
+        answers, but ``decompose`` records the count in
+        ``params["level_real_days"]`` with a ``RECENT_DAYS_FILLED`` warning,
+        and ``verdict`` and ``forecast`` refuse.
+
+        The real days need not be contiguous, while the reference's baselines
+        are. On a growing store that makes the level slightly stale (about 1%
+        of level on the demo's growth with a full lookback).
         """
         days = int(self.params["trend_window_days"])
         lookback = int(self.params.get("level_lookback_days", 3 * days))
         adjusted = self.daily - self._lagged_seasonal_daily()
         filled = set(self.imputed) | set(self.excluded)
         chosen = []
-        for day, value in zip(
+        recent = zip(
             adjusted.index[::-1][:lookback], adjusted.to_numpy()[::-1][:lookback]
-        ):
+        )
+        for day, value in recent:
             if day.date() in filled or not np.isfinite(value):
                 continue
             chosen.append(value)
             if len(chosen) == days:
                 break
         if len(chosen) * 2 < days:
-            return float(adjusted.iloc[-days:].mean())
-        return float(np.mean(chosen))
+            return float(adjusted.iloc[-days:].mean()), len(chosen)
+        return float(np.mean(chosen)), len(chosen)
 
     def _fitted_daily(self) -> pd.Series:
         """In-sample trend + seasonal, per day, whatever the grain."""
@@ -353,7 +363,11 @@ class Decomposition:
             fallback,
             imputed=self.imputed,
             trimmed=self.trimmed,
-            warnings=[*self.warnings, warning],
+            warnings=[
+                *(w for w in self.warnings if w.code != "RECENT_DAYS_FILLED"),
+                *(w for w in fallback.warnings if w.code == "RECENT_DAYS_FILLED"),
+                warning,
+            ],
             params={
                 **fallback.params,
                 "periods": self.params["periods"],
@@ -582,7 +596,24 @@ def decompose(
             refilled.loc[excluded_days] = dec._fitted_daily().loc[excluded_days]
             y = refilled
             dec = fit(y)
-    return _account_for(dec, prepared.excluded, prepared.trimmed)
+    dec = _account_for(dec, prepared.excluded, prepared.trimmed)
+    _, real_days = dec._level_from_real_days()
+    dec.params["level_real_days"] = real_days
+    if real_days * 2 < trend_window_days:
+        dec.warnings.append(
+            ToolWarning(
+                code="RECENT_DAYS_FILLED",
+                columns=columns,
+                message=(
+                    f"Only {real_days} real day(s) in the last "
+                    f"{level_lookback_days} were available to read the current "
+                    f"level from (fewer than half of {trend_window_days}); the "
+                    f"rest were excluded, filled or have no seasonal a year "
+                    f"back. Expectations ahead are not to be trusted."
+                ),
+            )
+        )
+    return dec
 
 
 def _account_for(

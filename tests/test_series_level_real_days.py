@@ -72,3 +72,62 @@ def test_a_recent_excluded_promotion_does_not_make_the_test_fire(method):
         )
         fired += verdict(dec, series.loc[start:end], kind="money").p_value < 0.05
     assert fired <= 10, f"{method}: {fired}/80"
+
+
+class TestTooFewRealDays:
+    """Back-to-back promotions with their tails can fill the whole lookback.
+
+    Silently falling back to refilled days made the test fire 42% of the time
+    with no warning. Below half a window of real days the level is not
+    trusted: the decomposition says so, and verdict and forecast refuse.
+    """
+
+    def _filled(self, days_excluded: int):
+        y = _demo().loc[:"2026-09-20"]
+        last = y.index[-1].date()
+        window = (last - timedelta(days=days_excluded - 1), last)
+        return y, decompose(y, method="fourier", exclude=[window])
+
+    def test_the_decomposition_records_how_many_real_days_it_had(self):
+        _, dec = self._filled(77)  # 84-day lookback leaves 7 real days
+        assert dec.params["level_real_days"] == 7
+        assert "RECENT_DAYS_FILLED" in [w.code for w in dec.warnings]
+
+    def test_verdict_refuses(self):
+        from stats_compass_core.series import Insufficient
+
+        _, dec = self._filled(77)
+        period = _demo().loc["2026-09-21":"2026-09-27"]
+        result = verdict(dec, period, kind="money")
+        assert isinstance(result, Insufficient)
+        assert (result.reason, result.needs, result.has) == (
+            "RECENT_DAYS_FILLED",
+            14,
+            7,
+        )
+
+    def test_forecast_refuses(self):
+        from stats_compass_core.series import Insufficient, forecast
+
+        _, dec = self._filled(77)
+        result = forecast(dec)
+        assert (
+            isinstance(result, Insufficient) and result.reason == "RECENT_DAYS_FILLED"
+        )
+
+    def test_half_a_window_is_enough(self):
+        from stats_compass_core.series import VerdictFacts
+
+        _, dec = self._filled(63)  # 21 real days left
+        assert dec.params["level_real_days"] == 21
+        assert "RECENT_DAYS_FILLED" not in [w.code for w in dec.warnings]
+        period = _demo().loc["2026-09-21":"2026-09-27"]
+        assert isinstance(verdict(dec, period, kind="money"), VerdictFacts)
+
+    def test_a_level_read_across_the_first_year_says_so(self):
+        """With the annual period kept at 370 days, the year-back seasonal is
+        missing for most of the last 28 days."""
+        dec = decompose(_demo().iloc[-370:], method="fourier")
+        assert dec.params["periods_used"] == [7, 365]
+        assert dec.params["level_real_days"] < 14
+        assert "RECENT_DAYS_FILLED" in [w.code for w in dec.warnings]
