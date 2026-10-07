@@ -439,7 +439,7 @@ def decompose(
     robust: bool = False,
     exclude: Sequence[tuple[date, date]] = (),
     exclude_iterations: int = 3,
-    level_lookback_days: int = 84,
+    level_lookback_days: int | None = None,
 ) -> Decomposition | Insufficient:
     """Decompose a daily series into trend, seasonal components and remainder.
 
@@ -470,6 +470,8 @@ def decompose(
             insufficient. They are returned in ``excluded``.
         level_lookback_days: How far back the level ahead may reach past
             excluded and imputed days to find ``trend_window_days`` real ones.
+            Defaults to three windows. Less than half a window is a
+            contradiction (every level would be refused) and raises.
         exclude_iterations: Excluded days start as a straight line between
             their neighbours, which is as noisy as the two days it joins. They
             are then replaced by the fit's own trend + seasonal and refitted,
@@ -479,7 +481,9 @@ def decompose(
         A ``Decomposition``, or ``Insufficient`` when there is too little
         history for the method (``TOO_SHORT``) or a gap too long to fill.
     """
-    if level_lookback_days * 2 < trend_window_days:
+    if level_lookback_days is None:
+        level_lookback_days = 3 * trend_window_days
+    elif level_lookback_days * 2 < trend_window_days:
         raise ValueError(
             f"level_lookback_days ({level_lookback_days}) must be at least half of "
             f"trend_window_days ({trend_window_days}), or every level is refused"

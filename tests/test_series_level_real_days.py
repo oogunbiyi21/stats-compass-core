@@ -165,7 +165,11 @@ class TestFallbackKeepsItsAccount:
         )
         result = verdict(dec, period * y.mean(), kind="money")
         assert isinstance(result, Insufficient)
-        assert result.reason in ("RECENT_DAYS_FILLED", "TOO_SHORT")
+        assert (result.reason, result.needs, result.has) == (
+            "RECENT_DAYS_FILLED",
+            14,
+            13,
+        )
 
     def test_timestamp_exclusion_bounds_are_returned_not_raised(self):
         y, bounds = self._young_store_with_gaps(as_timestamps=True)
@@ -174,6 +178,27 @@ class TestFallbackKeepsItsAccount:
             [bounds[0].date().isoformat(), bounds[1].date().isoformat()]
         ]
         dec.without_annual()  # raised ValueError on the Timestamp's string form
+        from stats_compass_core.series import forecast, its_lift
+
+        period = pd.Series(
+            y.mean(), index=pd.date_range(y.index[-1] + pd.Timedelta(days=1), periods=7)
+        )
+        verdict(dec, period, kind="money")
+        forecast(dec)
+        its_lift(
+            y,
+            (bounds[0], bounds[0] + pd.Timedelta(days=10)),
+            kind="money",
+            method="fourier",
+        )
+
+    def test_a_bound_with_a_time_of_day_covers_its_whole_day(self):
+        """Both the fit and its fallback must exclude the same days."""
+        y = _demo().iloc[-400:]
+        start, end = pd.Timestamp("2025-12-04 12:00"), pd.Timestamp("2025-12-24 12:00")
+        dec = decompose(y, method="fourier", exclude=[(start, end)])
+        assert len(dec.excluded) == 21
+        assert len(dec.without_annual().excluded) == 21
 
     def test_too_little_history_outranks_filled_recent_days(self):
         """When both apply, the history shortage is the reason that matters."""
@@ -192,3 +217,20 @@ class TestFallbackKeepsItsAccount:
     def test_a_lookback_shorter_than_half_a_window_is_a_caller_error(self):
         with pytest.raises(ValueError, match="level_lookback_days"):
             decompose(_demo(), method="fourier", level_lookback_days=10)
+
+    def test_long_windows_that_worked_in_0_1_37_still_work(self):
+        """The lookback defaults to three windows, so a long window is not a contradiction."""
+        from stats_compass_core.series import its_lift
+
+        y = _demo()
+        dec = decompose(y, method="fourier", trend_window_days=180)
+        assert dec.params["level_lookback_days"] == 540
+        decompose(y, method="fourier", trend_ahead="linear", trend_window_days=180)
+        its_lift(
+            y,
+            (date(2026, 5, 14), date(2026, 5, 24)),
+            kind="money",
+            method="fourier",
+            baseline_days=180,
+            baseline_lookback_days=365,
+        )

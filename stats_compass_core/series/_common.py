@@ -81,7 +81,9 @@ def prepare_daily(
 
     excluded_mask = pd.Series(False, index=series.index)
     for start, end in exclude:
-        excluded_mask.loc[pd.Timestamp(start) : pd.Timestamp(end)] = True
+        # A bound names a day: a time of day on it still covers the whole day.
+        first, last = pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize()
+        excluded_mask.loc[first:last] = True
 
     missing = series.isna() & ~excluded_mask
     longest = _longest_run(missing)
