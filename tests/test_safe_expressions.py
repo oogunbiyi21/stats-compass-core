@@ -153,6 +153,17 @@ class TestSizeIsBounded:
             "[1] * 10 ** 9",
             "region * 1000000000",
             "price + " * 400 + "price",
+            # the exponent cap alone does not bound the base
+            "((((2 ** 64) ** 64) ** 64) ** 64) ** 64",
+            # arguments are bounded per method, by keyword and by position
+            "price.value_counts(bins=10 ** 9)",
+            "price.value_counts(False, True, False, 10 ** 9)",
+            "region.str.contains('(a+)+$', True, 0, None, True)",
+            "round(price, 10 ** 9)",
+            "price.round(10 ** 9)",
+            "np.round(price, decimals=10 ** 9)",
+            "price.head(5, 6)",
+            "np.log(price, price)",
         ],
     )
     def test_refused(self, state, no_pandas_eval, payload):

@@ -60,7 +60,11 @@ does, so `price > 100 & region == 'US'` means both conditions, as it did.
 Keyword arguments are allowed only where `FUNCTION_KWARGS` names them, and must
 be constants. `np` and `pd` are table prefixes, never the modules.
 
-**Methods**, with constant or column arguments:
+**Methods**, with constant or column arguments. Each method lists how many
+positional arguments it takes and which keywords (`METHOD_ARGS`, `STR_ARGS`,
+`DT_ARGS`). Listing the arguments matters as much as listing the methods:
+`value_counts(bins=10**9)`, or the same `bins` passed by position, asks pandas
+for a billion bins.
 
 | On | Methods |
 |---|---|
@@ -85,7 +89,11 @@ be constants. `np` and `pd` are table prefixes, never the modules.
 
 **Bounded:**
 - 2,000 characters and 300 syntax nodes;
-- a power of two constants may have an exponent up to 64;
+- a power of two constants may have an exponent up to 64, and a whole-number
+  result is capped at 65,536 bits. The exponent cap alone does not bound the
+  base: `((2**64)**64)**64` keeps every exponent at 64;
+- positional and keyword arguments per function and method, as listed;
+- `round` takes up to 15 decimals. A billion took over a second;
 - no multiplying a string, a list or a text column, and no `%` formatting of
   text. Each of these can allocate gigabytes from a few characters.
 

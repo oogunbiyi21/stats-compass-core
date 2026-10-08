@@ -41,6 +41,8 @@ import pandas as pd
 MAX_LENGTH = 2000
 MAX_NODES = 300
 MAX_SCALAR_EXPONENT = 64
+MAX_INT_BITS = 65536
+MAX_DECIMALS = 15
 
 _BACKTICK_PREFIX = "_sc_backtick_"
 
@@ -82,6 +84,12 @@ FUNCTIONS: dict[str, Any] = {
     "pd.Timestamp": pd.Timestamp,
 }
 
+# How many positional arguments a function in FUNCTIONS may take (None: any).
+FUNCTION_POSITIONAL: dict[str, int | None] = {
+    "round": 2, "np.round": 2, "np.where": 3, "np.clip": 3, "np.maximum": 2,
+    "np.minimum": 2, "min": None, "max": None,
+}
+
 # Keyword arguments a function in FUNCTIONS may take, all constants.
 FUNCTION_KWARGS: dict[str, set[str]] = {
     "round": {"ndigits"},
@@ -100,30 +108,56 @@ CONSTANTS: dict[str, Any] = {
     "pd.NaT": pd.NaT,
 }
 
-# Methods on a column. None of them takes a callable or touches a file; their
-# arguments must be constants or columns.
-SERIES_METHODS = {
-    "isna", "notna", "isnull", "notnull", "isin", "between", "abs", "round",
-    "fillna", "clip", "astype",
-    "mean", "median", "sum", "min", "max", "std", "var", "count", "nunique",
-    "quantile", "any", "all", "idxmin", "idxmax",
-    "unique", "value_counts", "describe", "head", "tail", "tolist", "to_list",
+# Methods on a column or frame, each with how many positional arguments it may
+# take and which keywords. None of them takes a callable or touches a file;
+# arguments must be constants or columns. Listing the arguments matters as much
+# as listing the methods: value_counts(bins=10**9), or the same bins passed by
+# position, asks pandas for a billion bins.
+_REDUCE = {"skipna", "numeric_only"}
+METHOD_ARGS: dict[str, tuple[int, set[str]]] = {
+    "isna": (0, set()), "notna": (0, set()), "isnull": (0, set()), "notnull": (0, set()),
+    "isin": (1, {"values"}),
+    "between": (2, {"left", "right", "inclusive"}),
+    "abs": (0, set()),
+    "round": (1, {"decimals"}),
+    "fillna": (1, {"value"}),
+    "clip": (2, {"lower", "upper"}),
+    "astype": (1, {"dtype"}),
+    "mean": (0, _REDUCE), "median": (0, _REDUCE), "sum": (0, _REDUCE),
+    "min": (0, _REDUCE), "max": (0, _REDUCE),
+    "std": (0, _REDUCE | {"ddof"}), "var": (0, _REDUCE | {"ddof"}),
+    "count": (0, {"numeric_only"}), "nunique": (0, {"dropna"}),
+    "quantile": (1, {"q"}), "any": (0, {"skipna"}), "all": (0, {"skipna"}),
+    "idxmin": (0, {"skipna"}), "idxmax": (0, {"skipna"}),
+    "unique": (0, set()),
+    "value_counts": (0, {"normalize", "dropna", "ascending", "sort"}),
+    "describe": (0, {"include", "exclude"}),
+    "head": (1, {"n"}), "tail": (1, {"n"}),
+    "tolist": (0, set()), "to_list": (0, set()),
 }
+SERIES_METHODS = set(METHOD_ARGS)
 FRAME_METHODS = {
     "mean", "median", "sum", "min", "max", "std", "var", "count", "nunique",
     "describe", "head", "tail", "isna", "notna",
 }
 FRAME_PROPERTIES = {"shape", "columns", "dtypes", "empty", "size"}
 SERIES_PROPERTIES = {"dtype", "size", "empty", "name"}
-STR_METHODS = {
-    "contains", "startswith", "endswith", "lower", "upper", "strip", "lstrip",
-    "rstrip", "len", "title", "isdigit", "isnumeric", "isalpha",
+STR_ARGS: dict[str, tuple[int, set[str]]] = {
+    "contains": (1, {"pat", "case", "na"}),  # regex is always False
+    "startswith": (1, {"pat", "na"}), "endswith": (1, {"pat", "na"}),
+    "lower": (0, set()), "upper": (0, set()), "title": (0, set()), "len": (0, set()),
+    "strip": (1, {"to_strip"}), "lstrip": (1, {"to_strip"}), "rstrip": (1, {"to_strip"}),
+    "isdigit": (0, set()), "isnumeric": (0, set()), "isalpha": (0, set()),
 }
+STR_METHODS = set(STR_ARGS)
 DT_PROPERTIES = {
     "year", "month", "day", "hour", "minute", "second", "dayofweek", "weekday",
     "dayofyear", "quarter", "date", "is_month_start", "is_month_end",
 }
-DT_METHODS = {"day_name", "month_name", "normalize"}
+DT_ARGS: dict[str, tuple[int, set[str]]] = {
+    "day_name": (0, set()), "month_name": (0, set()), "normalize": (0, set()),
+}
+DT_METHODS = set(DT_ARGS)
 ASTYPE_TARGETS = {
     "int", "int32", "int64", "float", "float32", "float64", "str", "string",
     "bool", "category", "object", "datetime64[ns]",
@@ -257,9 +291,17 @@ class _Evaluator:
                 raise ExpressionError(
                     f"A power of two constants may have an exponent up to {MAX_SCALAR_EXPONENT}."
                 )
+            # The exponent cap alone does not bound the base: ((2**64)**64)**64
+            # keeps every exponent at 64 while the number grows to millions of bits.
+            if isinstance(left, int) and isinstance(right, int) and right > 0:
+                if abs(left).bit_length() * right > MAX_INT_BITS:
+                    raise ExpressionError("That power is too large to compute.")
         if isinstance(node.op, (ast.BitAnd, ast.BitOr)):
             return op(_as_bool(left), _as_bool(right))
-        return op(left, right)
+        result = op(left, right)
+        if isinstance(result, int) and result.bit_length() > MAX_INT_BITS:
+            raise ExpressionError("That number is too large to compute.")
+        return result
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> Any:
         value = self.visit(node.operand)
@@ -374,6 +416,9 @@ class _Evaluator:
         raise ExpressionError(f"{_describe(func)} cannot be called.")
 
     def _call_function(self, name: str, node: ast.Call) -> Any:
+        limit = FUNCTION_POSITIONAL.get(name, 1)
+        if limit is not None and len(node.args) > limit:
+            raise ExpressionError(f"{name}() takes at most {limit} positional argument(s) here.")
         args = [self.visit(a) for a in node.args]
         allowed = FUNCTION_KWARGS.get(name, set())
         kwargs = {}
@@ -384,6 +429,8 @@ class _Evaluator:
         for arg in args:
             if isinstance(arg, (pd.DataFrame, _Accessor)) and name != "len":
                 raise ExpressionError(f"{name}() works on columns and single values.")
+        if name in ("round", "np.round"):
+            _check_decimals(args[1:] + list(kwargs.values()))
         return FUNCTIONS[name](*args, **kwargs)
 
     def _call_method(self, target: Any, method: str, node: ast.Call) -> Any:
@@ -397,8 +444,11 @@ class _Evaluator:
             raise ExpressionError(f"'.{method}()' is not available here.")
         if method not in allowed:
             raise ExpressionError(f"'.{method}()' is not available here.")
+        _check_signature(method, node, METHOD_ARGS[method])
         args = [self._argument(a) for a in node.args]
         kwargs = {k.arg: self._argument(k.value) for k in node.keywords}
+        if method == "round":
+            _check_decimals(args + list(kwargs.values()))
         if method == "astype":
             targets = args + list(kwargs.values())
             if len(targets) != 1 or targets[0] not in ASTYPE_TARGETS:
@@ -407,14 +457,14 @@ class _Evaluator:
 
     def _call_accessor(self, accessor: _Accessor, method: str, node: ast.Call) -> Any:
         if accessor.kind == "str" and method in STR_METHODS:
+            _check_signature(f"str.{method}", node, STR_ARGS[method])
             args = [self._constant(a) for a in node.args]
             kwargs = {k.arg: self._constant(k.value) for k in node.keywords}
             if method == "contains":
-                if kwargs.get("regex"):
-                    raise ExpressionError(".str.contains() matches text literally here.")
                 kwargs["regex"] = False
             return getattr(accessor.series.str, method)(*args, **kwargs)
         if accessor.kind == "dt" and method in DT_METHODS:
+            _check_signature(f"dt.{method}", node, DT_ARGS[method])
             args = [self._constant(a) for a in node.args]
             return getattr(accessor.series.dt, method)(*args)
         raise ExpressionError(f"'.{accessor.kind}.{method}()' is not available here.")
@@ -431,6 +481,22 @@ class _Evaluator:
 
 
 # -- helpers ---------------------------------------------------------------
+
+
+def _check_signature(name: str, node: ast.Call, signature: tuple[int, set[str]]) -> None:
+    positional, keywords = signature
+    if len(node.args) > positional:
+        raise ExpressionError(f".{name}() takes at most {positional} positional argument(s) here.")
+    for k in node.keywords:
+        if k.arg not in keywords:
+            allowed = ", ".join(sorted(keywords)) or "none"
+            raise ExpressionError(f".{name}() does not take '{k.arg}' here (allowed: {allowed}).")
+
+
+def _check_decimals(values: list) -> None:
+    for value in values:
+        if not isinstance(value, int) or isinstance(value, bool) or abs(value) > MAX_DECIMALS:
+            raise ExpressionError(f"round() takes a whole number of decimals up to {MAX_DECIMALS}.")
 
 
 def _is_scalar(value: Any) -> bool:
