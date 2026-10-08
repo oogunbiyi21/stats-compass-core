@@ -95,7 +95,13 @@ for a billion bins.
 - positional and keyword arguments per function and method, as listed;
 - `round` takes up to 15 decimals. A billion took over a second;
 - no multiplying a string, a list or a text column, and no `%` formatting of
-  text. Each of these can allocate gigabytes from a few characters.
+  text. Each of these can allocate gigabytes from a few characters;
+- no powers on a column that is not numeric, and `astype("object")` is not a
+  cast target. An object column, whether cast or loaded from mixed data, does
+  integer arithmetic with Python's unbounded integers, so
+  `2 ** (col + 10**9)` built a 125 MB number per row (pre-release review F1,
+  8 Oct 2026). A numeric column cannot do this: pandas refuses Python integers
+  too large for it.
 
 **Behaviour changes for callers:**
 - `@name` references, `pd.`/`np.` functions outside the table, and arbitrary

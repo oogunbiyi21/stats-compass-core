@@ -171,6 +171,51 @@ class TestSizeIsBounded:
             add_column(state, AddColumnInput(column_name="x", expression=payload))
 
 
+OBJECT_POWERS = [
+    # pre-release review F1: a column of Python objects raises each element with
+    # arbitrary-precision integers, so the scalar bounds never applied
+    "2 ** (index.astype('object') + 1000000000) > 0",
+    "(price.astype('object') + 3) ** 64 > 0",
+    "2 ** (mixed + 1000000000) > 0",
+    "(mixed + 3) ** 64 ** 2 > 0",
+]
+
+
+class TestObjectColumnsCannotGrowWithoutBound:
+    """Data with mixed types arrives as object dtype too, so the cast is not the only way in."""
+
+    @pytest.fixture
+    def mixed_state(self, state):
+        df = state.get_dataframe("sales").copy()
+        # whole numbers held as Python objects, as a column of mixed input can arrive
+        df["mixed"] = pd.Series([10, 20, 30, 40], dtype=object)
+        state.set_dataframe(df, name="sales", operation="test")
+        return state
+
+    @pytest.mark.parametrize("payload", OBJECT_POWERS)
+    def test_filter_dataframe(self, mixed_state, payload):
+        with pytest.raises(ValueError):
+            filter_dataframe(mixed_state, FilterDataFrameInput(query=payload))
+
+    @pytest.mark.parametrize("payload", OBJECT_POWERS)
+    def test_add_column(self, mixed_state, payload):
+        with pytest.raises(ValueError):
+            add_column(mixed_state, AddColumnInput(column_name="x", expression=payload))
+
+    @pytest.mark.parametrize("payload", OBJECT_POWERS)
+    def test_inspect_data(self, mixed_state, payload):
+        with pytest.raises(ValueError):
+            inspect_data(mixed_state, InspectDataInput(expression=payload))
+
+    def test_object_is_not_a_cast_target(self, state):
+        with pytest.raises(ValueError, match="astype"):
+            add_column(state, AddColumnInput(column_name="x", expression="price.astype('object')"))
+
+    def test_text_columns_still_concatenate(self, mixed_state):
+        add_column(mixed_state, AddColumnInput(column_name="x", expression="region + '!'"))
+        assert mixed_state.get_dataframe("sales")["x"].tolist()[0] == "US!"
+
+
 class TestFiltersStillWork:
     @pytest.mark.parametrize(
         "query, prices",

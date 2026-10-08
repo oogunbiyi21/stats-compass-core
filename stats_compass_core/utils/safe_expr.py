@@ -23,8 +23,11 @@ recognises. Anything else is refused before it runs:
 
 ``.str.contains`` matches literally: a caller-supplied regular expression can
 backtrack for as long as it likes. Size is bounded too: the text's length, its
-number of parts, the exponent of a power of two constants, and no repeating a
-string, a list or a text column by multiplying it.
+number of parts, the exponent and result size of a power of two constants, the
+arguments each function and method takes, and no power, repetition or ``%``
+formatting on a column that is not numeric. An object column holds Python
+integers of any size, so it cannot be cast to (``astype("object")`` is refused)
+and is refused as an operand of those operators.
 """
 
 from __future__ import annotations
@@ -158,9 +161,11 @@ DT_ARGS: dict[str, tuple[int, set[str]]] = {
     "day_name": (0, set()), "month_name": (0, set()), "normalize": (0, set()),
 }
 DT_METHODS = set(DT_ARGS)
+# Not "object": a column of Python objects does integer arithmetic with
+# arbitrary precision, so no size bound holds on it (pre-release review F1).
 ASTYPE_TARGETS = {
     "int", "int32", "int64", "float", "float32", "float64", "str", "string",
-    "bool", "category", "object", "datetime64[ns]",
+    "bool", "category", "datetime64[ns]",
 }
 
 _BINOPS = {
@@ -286,6 +291,13 @@ class _Evaluator:
             raise ExpressionError("Text cannot be repeated by multiplying it.")
         if isinstance(node.op, ast.Mod) and _is_text(left):
             raise ExpressionError("Text cannot be formatted with '%'.")
+        if isinstance(node.op, ast.Pow) and (_is_text(left) or _is_text(right)):
+            # An object column (cast, or mixed data) raises each element with
+            # Python's unbounded integers: 2 ** (col + 10**9) builds a 125 MB
+            # number per row (pre-release review F1).
+            raise ExpressionError(
+                "Powers work on numeric columns only; convert with pd.to_numeric first."
+            )
         if isinstance(node.op, ast.Pow) and _is_scalar(left) and _is_scalar(right):
             if not isinstance(right, (int, float)) or abs(right) > MAX_SCALAR_EXPONENT:
                 raise ExpressionError(
