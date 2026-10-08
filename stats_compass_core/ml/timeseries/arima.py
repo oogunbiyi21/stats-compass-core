@@ -7,11 +7,9 @@ Requires the [timeseries] extra: pip install stats-compass-core[timeseries]
 import base64
 import io
 import itertools
-import os
 import time
 from typing import Any, Literal
 
-import joblib
 import numpy as np
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -26,6 +24,7 @@ from stats_compass_core.results import (
     ToolWarning,
 )
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.file_safety import safe_save
 
 # forecast_arima never produces more steps than this.
 MAX_FORECAST_STEPS = 365
@@ -679,11 +678,10 @@ def fit_arima(
         # Calculate residual std
         residual_std = float(np.std(fitted_model.resid))
 
-        # Save model to disk if requested
+        # Save model to disk if requested: through safe_save and the session's
+        # write root, like every other write (security scan F5).
         if params.save_path:
-            filepath = os.path.expanduser(params.save_path)
-            os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-            joblib.dump(fitted_model, filepath)
+            safe_save(fitted_model, params.save_path, "model", root=state.file_policy.write_root)
 
         # Create summary message
         if seasonal_order:

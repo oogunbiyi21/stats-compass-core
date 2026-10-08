@@ -67,6 +67,9 @@ def generate_model_save_path(
     return os.path.join(tempfile.gettempdir(), filename)
 
 
+RESERVED_KEYS = frozenset({"dataframe_name", "target_column", "feature_columns", "save_path"})
+
+
 def build_training_params(
     *,
     input_schema: type,
@@ -87,7 +90,11 @@ def build_training_params(
 
     Merge order is load-bearing: config.hyperparameters override the common
     params, and the schema filter then drops anything this particular trainer
-    does not accept. Unknown hyperparameter keys are dropped silently, which
+    does not accept. Except the keys the workflow sets itself (RESERVED_KEYS):
+    a hyperparameter naming one is refused, because ``save_path`` there wrote a
+    model wherever the caller chose, even with ``save_model=False`` (security
+    scan F4, F7), and the column keys would train on something other than what
+    the workflow prepared. Unknown hyperparameter keys are dropped silently, which
     test_model_tuning_params.py relies on.
 
     Args:
@@ -97,6 +104,13 @@ def build_training_params(
         feature_columns: Feature names, already translated through any encoding.
         config: ClassificationConfig or RegressionConfig.
     """
+    reserved = sorted(RESERVED_KEYS & set(config.hyperparameters or {}))
+    if reserved:
+        raise ValueError(
+            f"hyperparameters cannot set {', '.join(reserved)}: the workflow sets "
+            "these itself (use save_model and model_save_path for the model file)."
+        )
+
     save_path = None
     if config.save_model:
         save_path = generate_model_save_path(

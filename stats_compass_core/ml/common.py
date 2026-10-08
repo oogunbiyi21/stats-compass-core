@@ -1,14 +1,13 @@
 """Common models and utilities for ML tools."""
 
-import os
 from typing import Any
 
-import joblib
 import numpy as np
 import pandas as pd
 
 from stats_compass_core.results import ModelTrainingResult, ToolWarning
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.file_safety import safe_save
 
 
 def prepare_ml_data(
@@ -224,11 +223,11 @@ def create_training_result(
         source_dataframe=source_name,
     )
 
-    # Save model to disk if requested
+    # Save model to disk if requested: through safe_save and the session's
+    # write root, like every other write. A raw joblib.dump here let a caller
+    # create or overwrite any file the process could write (security scan F4).
     if save_path:
-        filepath = os.path.expanduser(save_path)
-        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-        joblib.dump(model, filepath)
+        safe_save(model, save_path, "model", root=state.file_policy.write_root)
 
     # Build metrics dict
     metrics: dict[str, float] = {"train_score": train_score}
