@@ -7,9 +7,9 @@ and validate paths to avoid dangerous operations.
 On a laptop a caller's path is the user's own choice, and that is the default.
 A server confines each session with a ``FilePolicy`` on its ``DataFrameState``
 (or the STATS_COMPASS_WRITE_ROOT / STATS_COMPASS_READ_ROOTS environment
-variables for every state): writes land, by base name only, inside the write
-root with an extension that fits the file, and reads must resolve inside a read
-root. Containment is checked on the real path, so a symlink cannot lead out
+variables for every state): writes land inside the write root (a path outside
+it is moved in by base name) with an extension that fits the file, and reads
+must resolve inside a read root. Containment is checked on the real path, so a symlink cannot lead out
 (security scan F6, F8, 8 Oct 2026). The system-folder denylist below stays as a
 second line for unconfined use; the root is the control.
 """
@@ -30,7 +30,7 @@ class UnsafePathError(ValueError):
 class FilePolicy:
     """Where a session's tools may write and read. None means unconfined.
 
-    ``write_root``: every write lands here, by base name. ``read_roots``: every
+    ``write_root``: every write lands inside it. ``read_roots``: every
     read and listing must resolve inside one of these; a relative path is taken
     relative to the first.
     """
@@ -241,9 +241,9 @@ def safe_write_path(
     Args:
         filepath: The target path
         create_dirs: If True, create parent directories if they don't exist
-        root: If given, the file lands in this folder under the path's base
-            name, whatever folders the path named, and its extension must fit
-            ``file_type``.
+        root: If given, the file lands inside this folder: a path inside it
+            keeps its folders, anything else is moved in by base name. Its
+            extension must fit ``file_type``.
         file_type: "csv", "model" or "figure"; checked against
             ALLOWED_EXTENSIONS when ``root`` is given.
         
@@ -278,7 +278,14 @@ def safe_write_path(
 
 
 def _write_path_in_root(filepath: str, root: str | os.PathLike, file_type: str | None) -> str:
-    """The base name of ``filepath``, inside ``root``, checked on the real path."""
+    """Where ``filepath`` may be written under ``root``, checked on the real path.
+
+    A relative path is taken relative to the root. If it then lies inside the
+    root, its folders are kept, so a server's own layout (``data/``,
+    ``models/``) survives. Anything that would land outside, through an
+    absolute path, ``..`` or a symlinked folder, is written to the root under
+    its base name instead.
+    """
     name = Path(os.path.expanduser(str(filepath))).name
     if name in ("", ".", ".."):
         raise UnsafePathError(f"'{filepath}' does not name a file.")
@@ -293,10 +300,15 @@ def _write_path_in_root(filepath: str, root: str | os.PathLike, file_type: str |
             )
     root_real = os.path.realpath(os.path.expanduser(str(root)))
     os.makedirs(root_real, exist_ok=True)
-    is_safe, error = is_path_safe(os.path.join(root_real, name))
+    expanded = os.path.expanduser(str(filepath))
+    requested = expanded if os.path.isabs(expanded) else os.path.join(root_real, expanded)
+    requested_real = os.path.realpath(requested)
+    target = requested_real if _inside(requested_real, root_real) else os.path.join(root_real, name)
+    is_safe, error = is_path_safe(target)
     if not is_safe:
         raise UnsafePathError(error)
-    candidate = get_unique_filepath(os.path.join(root_real, name))
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    candidate = get_unique_filepath(target)
     # A symlink planted in the root, even a dangling one, would lead the write out.
     while os.path.islink(candidate):
         stem, ext = os.path.splitext(candidate)
@@ -397,8 +409,9 @@ def safe_save(
             - "figure": matplotlib Figure
         filepath: Desired output path
         file_type: One of "csv", "model", or "figure"
-        root: If given, the file lands in this folder by base name, with an
-            extension that fits ``file_type`` (a session's FilePolicy.write_root)
+        root: If given, the file lands inside this folder (a path outside it
+            is moved in by base name), with an extension that fits
+            ``file_type`` (a session's FilePolicy.write_root)
         **kwargs: Additional arguments for the underlying save:
             - csv: index (bool, default False), plus any df.to_csv() args
             - model: compress (int, default 0), plus any joblib.dump() args
@@ -441,12 +454,11 @@ def safe_save(
 
     # Validate and get safe path (auto-increments if exists)
     safe_path = safe_write_path(filepath, create_dirs=True, root=root, file_type=file_type)
-    requested = (
-        os.path.join(os.path.realpath(os.path.expanduser(str(root))), Path(os.path.expanduser(original_filepath)).name)
-        if root is not None
-        else os.path.abspath(os.path.expanduser(original_filepath))
-    )
-    was_renamed = safe_path != requested
+    if root is None:
+        was_renamed = safe_path != os.path.abspath(os.path.expanduser(original_filepath))
+    else:
+        # Renamed means the name changed (a _1 suffix), not that it was moved into the root.
+        was_renamed = os.path.basename(safe_path) != Path(os.path.expanduser(original_filepath)).name
 
     # Save based on file type
     if file_type == "csv":

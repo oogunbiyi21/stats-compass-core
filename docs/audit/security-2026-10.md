@@ -116,9 +116,16 @@ can be assigned later as `state.file_policy`. Without one, the state reads
 user's own paths keep working.
 
 **Under a write root:**
-- Every write lands in the root under the path's base name, whatever folders the
-  path named: `save_csv`, `save_model`, plot `save_path`, trainer and ARIMA
-  `save_path`, and workflow model files.
+- Every write lands inside the root: `save_csv`, `save_model`, plot
+  `save_path`, trainer and ARIMA `save_path`, and workflow model files.
+  - A relative path is taken relative to the root.
+  - A path that then lies inside the root keeps its folders, so a server's own
+    layout (`data/`, `models/`) survives.
+  - Anything that would land outside, through an absolute path, `..` or a
+    symlinked folder, is written to the root under its base name instead.
+  - The first version of this branch used the base name for everything; the
+    MCP server's per-category export folders needed the change. Only tests
+    added on this branch changed with it.
 - The extension must fit the file:
   - CSV: `.csv`, `.tsv`, `.txt`;
   - model: `.joblib`, `.pkl`, `.pickle`;

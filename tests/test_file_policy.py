@@ -3,8 +3,8 @@
 On a laptop a caller's path is the user's own choice, and that stays the
 default. A server sets a FilePolicy on each session's state, or the
 STATS_COMPASS_WRITE_ROOT / STATS_COMPASS_READ_ROOTS environment variables for
-every state: writes then land, by base name only, inside the write root, with
-an extension that fits the file; reads and listings must resolve inside a read
+every state: writes then land inside the write root (a path outside it moves
+in by base name), with an extension that fits the file; reads and listings must resolve inside a read
 root. Containment is checked on the real path, so a symlink cannot lead out.
 """
 
@@ -48,12 +48,26 @@ def _everything_under(root):
 class TestWritesStayInTheRoot:
     @pytest.mark.parametrize(
         "requested",
-        ["out.csv", "sub/dir/out.csv", "../out.csv", "/tmp/out.csv", "~/out.csv"],
+        ["out.csv", "../out.csv", "/tmp/out.csv", "~/out.csv", "sub/../../out.csv"],
     )
-    def test_save_csv_lands_in_the_root_by_base_name(self, confined, dirs, requested):
+    def test_a_path_outside_the_root_lands_in_it_by_base_name(self, confined, dirs, requested):
         result = save_csv(confined, SaveCSVInput(dataframe_name="scores", filepath=requested))
         assert os.path.dirname(result["filepath"]) == os.path.realpath(dirs["exports"])
         assert os.path.basename(result["filepath"]) == "out.csv"
+        assert _everything_under(dirs["elsewhere"]) == ["secret.csv"]
+
+    @pytest.mark.parametrize("requested", ["data/out.csv", "{exports}/data/out.csv"])
+    def test_a_path_inside_the_root_keeps_its_folders(self, confined, dirs, requested):
+        """A server's own layout (exports/<session>/data/...) survives."""
+        result = save_csv(
+            confined, SaveCSVInput(dataframe_name="scores", filepath=requested.format(**dirs))
+        )
+        assert result["filepath"] == os.path.join(os.path.realpath(dirs["exports"]), "data", "out.csv")
+
+    def test_a_symlinked_folder_in_the_root_cannot_lead_out(self, confined, dirs):
+        (dirs["exports"] / "linked").symlink_to(dirs["elsewhere"])
+        result = save_csv(confined, SaveCSVInput(dataframe_name="scores", filepath="linked/out.csv"))
+        assert result["filepath"] == os.path.join(os.path.realpath(dirs["exports"]), "out.csv")
         assert _everything_under(dirs["elsewhere"]) == ["secret.csv"]
 
     def test_plot_save_path_lands_in_the_root(self, confined, dirs):
