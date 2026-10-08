@@ -1,11 +1,13 @@
 """
-Tool for filtering a DataFrame using a pandas query expression.
+Tool for filtering a DataFrame with a condition on its columns.
 """
 
 from __future__ import annotations
 
 import hashlib
 
+import numpy as np
+import pandas as pd
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
@@ -15,6 +17,7 @@ from stats_compass_core.results import (
     dataframe_to_json_safe_records,
 )
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.safe_expr import evaluate
 
 
 class FilterDataFrameInput(StrictToolInput):
@@ -25,7 +28,13 @@ class FilterDataFrameInput(StrictToolInput):
         description="Name of DataFrame to operate on. Uses active if not specified.",
     )
     query: str = Field(
-        description="pandas.DataFrame.query expression, e.g., `price > 100 and region == 'US'`"
+        description=(
+            "A true/false condition on the columns, in pandas query style, e.g. "
+            "`price > 100 and region == 'US'`, `region in ['US', 'UK']`, "
+            "`` `order date` >= '2024-01-01' ``, `name.str.contains('Ltd')`. "
+            "Columns by name (backticks if they have spaces), constants, arithmetic, "
+            "comparisons, and/or/not (or & | ~). No '@' references or other methods."
+        )
     )
     limit: int | None = Field(
         default=None, ge=1, description="Optional row limit after filtering"
@@ -38,13 +47,17 @@ class FilterDataFrameInput(StrictToolInput):
 @registry.register(
     category="transforms",
     input_schema=FilterDataFrameInput,
-    description="Filter a DataFrame using a pandas query expression",
+    description="Filter a DataFrame with a condition on its columns (pandas query style)",
 )
 def filter_dataframe(
     state: DataFrameState, params: FilterDataFrameInput
 ) -> DataFrameQueryResult:
     """
-    Filter a DataFrame using pandas.query and save result to state.
+    Filter a DataFrame with a condition and save the result to state.
+
+    The condition is read by ``utils.safe_expr``, never by ``df.query``: pandas'
+    own evaluator reaches attributes, calls and the caller's locals, which on a
+    shared server is anyone who signs up (security scan F1, 8 Oct 2026).
 
     Args:
         state: DataFrameState containing the DataFrame to operate on
@@ -60,9 +73,20 @@ def filter_dataframe(
     source_name = params.dataframe_name or state.get_active_dataframe_name()
 
     try:
-        filtered = df.query(params.query)
-    except Exception as exc:
+        mask = evaluate(params.query, df)
+    except ValueError as exc:
         raise ValueError(f"Query failed: {exc}") from exc
+    if isinstance(mask, (bool, np.bool_)):
+        mask = pd.Series(bool(mask), index=df.index)
+    if not (
+        isinstance(mask, (pd.Series, np.ndarray))
+        and pd.api.types.is_bool_dtype(mask.dtype)
+        and len(mask) == len(df)
+    ):
+        raise ValueError(
+            f"Query failed: '{params.query}' is not a true/false condition on each row."
+        )
+    filtered = df[mask]
 
     if params.limit:
         filtered = filtered.head(params.limit)

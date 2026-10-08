@@ -2,16 +2,13 @@
 Tool for adding or transforming columns in a DataFrame.
 """
 
-import re
-
-import numpy as np
-import pandas as pd
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameMutationResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.safe_expr import evaluate
 
 
 class AddColumnInput(StrictToolInput):
@@ -27,11 +24,13 @@ class AddColumnInput(StrictToolInput):
     expression: str | None = Field(
         default=None,
         description=(
-            "Python/Pandas expression to compute the column value. "
-            "You can use: "
-            "1. Column names directly as variables (e.g., 'price * quantity') "
-            "2. The dataframe as 'df' (e.g., 'df[\"price\"] * 1.1') "
-            "3. Pandas/Numpy functions (e.g., 'pd.to_numeric(bathrooms)', 'np.log(price)') "
+            "Expression to compute the column value. You can use: "
+            "1. Column names directly (e.g. 'price * quantity'; backticks for names with spaces) "
+            "2. The dataframe as 'df' for selection (e.g. 'df[\"price\"] * 1.1') "
+            "3. Listed functions: np.log, np.sqrt, np.exp, np.where, np.round, abs, round, "
+            "pd.to_numeric(x, errors='coerce'), pd.to_datetime, pd.isna "
+            "4. Column methods such as price.mean(), name.str.lower(), date.dt.month. "
+            "Other attributes, methods and '@' references are refused. "
             "Either expression or value must be provided."
         ),
     )
@@ -56,7 +55,7 @@ class AddColumnInput(StrictToolInput):
 @registry.register(
     category="data",
     input_schema=AddColumnInput,
-    description="Add a new column or transform an existing column using a Python expression or constant value",
+    description="Add a new column or transform an existing column using an expression on the columns or a constant value",
 )
 def add_column(
     state: DataFrameState, params: AddColumnInput
@@ -65,7 +64,9 @@ def add_column(
     Add a new column or transform an existing column.
 
     Supports two modes:
-    1. Expression mode: Compute column using a Python expression with access to df, pd, np.
+    1. Expression mode: compute the column with an expression read by
+       ``utils.safe_expr`` (columns, constants, arithmetic, listed functions).
+       It never reaches pandas' own evaluator (security scan F2, 8 Oct 2026).
        Example: expression="pd.to_numeric(bathrooms, errors='coerce')"
        Example: expression="price * quantity"
     2. Constant mode: Assign the same value to all rows
@@ -94,44 +95,9 @@ def add_column(
     is_new_column = params.column_name not in df.columns
 
     if params.expression is not None:
-        # Security check for dangerous patterns
-        dangerous_patterns = [
-            r"\bimport\b",
-            r"\bexec\b",
-            r"\beval\b",
-            r"\bopen\b",
-            r"\.to_csv",
-            r"\.to_excel",
-            r"\b__.*?__\b",
-            r"\bdel\b",
-        ]
-        if any(re.search(p, params.expression, re.IGNORECASE) for p in dangerous_patterns):
-            raise ValueError("Unsafe operation detected in expression")
-
-        # Create namespace with safe globals and column variables
-        namespace = {
-            "df": result_df,
-            "pd": pd,
-            "np": np,
-            "__builtins__": {},  # Restrict builtins
-        }
-
-        # Transform bare column names to df['column'] syntax for pd.eval()
-        expr = params.expression
-        for col in result_df.columns:
-            if isinstance(col, str) and col.isidentifier():
-                # Replace bare column name with df['column'] syntax
-                # Use word boundaries to avoid partial matches
-                expr = re.sub(rf"\b{re.escape(col)}\b", f"df['{col}']", expr)
-
         try:
-            # Use pandas.eval() for safe expression evaluation
-            result_df[params.column_name] = pd.eval(
-                expr,
-                local_dict={"df": result_df},
-                engine="python",
-            )
-        except Exception as e:
+            result_df[params.column_name] = evaluate(params.expression, result_df)
+        except ValueError as e:
             raise ValueError(
                 f"Invalid expression '{params.expression}': {str(e)}. "
                 f"Use column names directly (e.g., price * quantity)"

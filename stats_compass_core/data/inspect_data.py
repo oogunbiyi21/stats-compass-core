@@ -2,16 +2,15 @@
 Tool for evaluating read-only pandas expressions to inspect data.
 """
 
-import re
 from typing import Any
 
-import numpy as np
 import pandas as pd
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.safe_expr import evaluate
 
 
 class InspectDataInput(StrictToolInput):
@@ -23,12 +22,15 @@ class InspectDataInput(StrictToolInput):
     )
     expression: str = Field(
         description=(
-            "Python/Pandas expression to evaluate. "
+            "Read-only expression on the columns. "
             "Examples: "
             "1. 'df[\"col\"].unique()' "
-            "2. 'df[\"col\"].mean()' "
+            "2. 'col.mean()' "
             "3. 'len(df[df[\"col\"] > 5])' "
-            "4. 'df.groupby(\"cat\")[\"val\"].sum()'"
+            "4. 'region.value_counts()' "
+            "Columns, constants, arithmetic, comparisons, listed functions and column "
+            "summaries (mean, median, sum, min, max, std, count, nunique, unique, "
+            "value_counts, describe, head, tail). Use groupby_aggregate for group sums."
         )
     )
 
@@ -51,45 +53,10 @@ def inspect_data(state: DataFrameState, params: InspectDataInput) -> dict[str, A
     """
     df = state.get_dataframe(params.dataframe_name)
 
-    # Security check for dangerous patterns
-    dangerous_patterns = [
-        r"\bimport\b",
-        r"\bexec\b",
-        r"\beval\b",
-        r"\bopen\b",
-        r"\.to_csv",
-        r"\.to_excel",
-        r"\.to_pickle",
-        r"\b__.*?__\b",
-        r"\bdel\b",
-        r"=",  # Prevent assignment/modification
-    ]
-    if any(re.search(p, params.expression, re.IGNORECASE) for p in dangerous_patterns):
-        raise ValueError("Unsafe operation or assignment detected. This tool is for read-only inspection.")
-
-    # Create namespace with safe globals and column variables
-    namespace = {
-        "df": df,
-        "pd": pd,
-        "np": np,
-        "__builtins__": {},  # Restrict builtins
-    }
-
-    # Transform bare column names to df['column'] syntax for pd.eval()
-    expr = params.expression
-    for col in df.columns:
-        if isinstance(col, str) and col.isidentifier():
-            # Replace bare column name with df['column'] syntax
-            # Use word boundaries to avoid partial matches
-            expr = re.sub(rf"\b{re.escape(col)}\b", f"df['{col}']", expr)
-
+    # Read by utils.safe_expr, never by pd.eval: pandas' own evaluator reached
+    # file readers through pd and np (security scan F3, 8 Oct 2026).
     try:
-        # Use pandas.eval() for safe expression evaluation
-        result = pd.eval(
-            expr,
-            local_dict={"df": df},
-            engine="python",
-        )
+        result = evaluate(params.expression, df)
 
         # Format result for output
         if isinstance(result, (pd.DataFrame, pd.Series)):
@@ -114,5 +81,5 @@ def inspect_data(state: DataFrameState, params: InspectDataInput) -> dict[str, A
     except Exception as e:
         raise ValueError(
             f"Invalid expression '{params.expression}': {str(e)}. "
-            f"Available variables: df, pd, np, and columns."
+            f"Available: df, the columns, listed functions and column summaries."
         ) from e
