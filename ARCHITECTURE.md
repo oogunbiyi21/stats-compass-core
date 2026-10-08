@@ -475,6 +475,23 @@ land in the remainder.
 Each module's docstring records what was measured on patternless data and why
 the design is what it is.
 
+## Caller input on a shared server
+
+Every tool's arguments come from whoever calls it. On a laptop that is the user;
+on the MCP server it is anyone who signs up, or a model steered by text in a
+dataset. Two rules follow, both from the 8 October 2026 security scan
+([docs/audit/security-2026-10.md](docs/audit/security-2026-10.md)):
+
+- **Expressions are read, not executed.** `filter_dataframe`, `add_column` and
+  `inspect_data` go through `utils/safe_expr.py`, a small allow-listed
+  evaluator: columns, constants, arithmetic, comparisons, a fixed table of
+  functions and column methods. Never `df.query` or `pd.eval`.
+- **Files go where the session's `FilePolicy` allows.** Every write goes through
+  `safe_save`/`safe_write_path` (one place calls `joblib.dump`, and a test holds
+  it there). Every read goes through `check_read_path`. Unconfined by default;
+  a server sets `write_root` and `read_roots` per session, or the
+  `STATS_COMPASS_WRITE_ROOT` / `STATS_COMPASS_READ_ROOTS` environment variables.
+
 ## Memory Management
 
 `DataFrameState` enforces a configurable memory limit (default 500MB):
