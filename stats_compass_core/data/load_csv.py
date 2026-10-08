@@ -12,6 +12,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameLoadResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.file_safety import check_read_path
 
 
 class LoadCSVInput(StrictToolInput):
@@ -65,8 +66,9 @@ def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult
         FileNotFoundError: If the file doesn't exist
         ValueError: If the file cannot be parsed as CSV
     """
-    # Resolve path (handle ~ for home directory)
-    file_path = os.path.expanduser(params.file_path)
+    # Resolve path (handle ~ for home directory). Under a session's FilePolicy
+    # the real path must lie inside a read root (security scan F8).
+    file_path = check_read_path(params.file_path, state.file_policy.read_roots)
 
     # Validate file exists
     if not os.path.isfile(file_path):
@@ -77,7 +79,7 @@ def load_csv(state: DataFrameState, params: LoadCSVInput) -> DataFrameLoadResult
         df_name = params.name
     else:
         # Use filename without extension
-        df_name = os.path.splitext(os.path.basename(file_path))[0]
+        df_name = os.path.splitext(os.path.basename(os.path.expanduser(params.file_path)))[0]
 
     # Load the CSV
     try:

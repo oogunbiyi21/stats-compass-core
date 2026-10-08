@@ -21,6 +21,8 @@ from typing import Any
 import pandas as pd
 from pydantic import BaseModel
 
+from stats_compass_core.utils.file_safety import FilePolicy
+
 
 class DataFrameInfo(BaseModel):
     """Metadata about a stored DataFrame."""
@@ -71,13 +73,22 @@ class DataFrameState:
         state.store_model(model, "linear_regression", "price", features, "sales_data")
     """
 
-    def __init__(self, memory_limit_mb: float = 500.0) -> None:
+    def __init__(
+        self,
+        memory_limit_mb: float = 500.0,
+        file_policy: FilePolicy | None = None,
+    ) -> None:
         """
         Initialize state manager.
 
         Args:
             memory_limit_mb: Maximum total memory for all DataFrames (default 500MB)
+            file_policy: Where this session's tools may write and read. Defaults
+                to the STATS_COMPASS_WRITE_ROOT / STATS_COMPASS_READ_ROOTS
+                environment variables, and to unconfined when they are unset.
+                A server serving many users sets one per session.
         """
+        self.file_policy: FilePolicy = file_policy if file_policy is not None else FilePolicy.from_env()
         self._dataframes: dict[str, pd.DataFrame] = {}
         self._dataframe_metadata: dict[str, DataFrameInfo] = {}
         self._models: dict[str, Any] = {}

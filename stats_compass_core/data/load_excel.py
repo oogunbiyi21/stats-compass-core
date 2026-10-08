@@ -12,6 +12,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import DataFrameLoadResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.file_safety import check_read_path
 
 
 class LoadExcelInput(StrictToolInput):
@@ -62,8 +63,9 @@ def load_excel(state: DataFrameState, params: LoadExcelInput) -> DataFrameLoadRe
     Returns:
         DataFrameLoadResult with load summary
     """
-    # Expand user path
-    file_path = os.path.expanduser(params.file_path)
+    # Expand user path. Under a session's FilePolicy the real path must lie
+    # inside a read root (security scan F8).
+    file_path = check_read_path(params.file_path, state.file_policy.read_roots)
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
@@ -75,7 +77,7 @@ def load_excel(state: DataFrameState, params: LoadExcelInput) -> DataFrameLoadRe
     if params.name:
         df_name = params.name
     else:
-        base_name = os.path.basename(file_path)
+        base_name = os.path.basename(os.path.expanduser(params.file_path))
         df_name = os.path.splitext(base_name)[0]
         # Simple sanitization
         df_name = "".join(c if c.isalnum() or c == "_" else "_" for c in df_name)

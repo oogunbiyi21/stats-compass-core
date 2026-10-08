@@ -41,7 +41,7 @@ def save_model(state: DataFrameState, input_data: SaveModelInput) -> dict[str, s
         raise ValueError(f"Model '{input_data.model_id}' not found.")
 
     # Use unified safe_save
-    result = safe_save(model, input_data.filepath, "model")
+    result = safe_save(model, input_data.filepath, "model", root=state.file_policy.write_root)
 
     return {
         "message": f"Model '{input_data.model_id}' saved to '{result['filepath']}'",

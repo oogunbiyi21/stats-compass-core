@@ -40,7 +40,9 @@ def save_csv(state: DataFrameState, input_data: SaveCSVInput) -> dict[str, str]:
     if df is None:
         raise ValueError(f"DataFrame '{input_data.dataframe_name}' not found.")
 
-    result = safe_save(df, input_data.filepath, "csv", index=input_data.index)
+    result = safe_save(
+        df, input_data.filepath, "csv", root=state.file_policy.write_root, index=input_data.index
+    )
 
     return {
         "message": f"DataFrame '{input_data.dataframe_name}' saved to '{result['filepath']}'",

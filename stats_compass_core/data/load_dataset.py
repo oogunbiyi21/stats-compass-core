@@ -2,6 +2,7 @@
 Tool for loading built-in sample datasets.
 """
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -14,6 +15,7 @@ from stats_compass_core.state import DataFrameState
 
 # Path to datasets directory (inside the package)
 _DATASETS_DIR = Path(__file__).parent.parent / "datasets"
+_DATASET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_\-]*")
 
 
 def _list_available_datasets() -> list[str]:
@@ -53,14 +55,21 @@ def load_dataset(state: DataFrameState, params: LoadDatasetInput) -> DataFrameLo
     Returns:
         DataFrameLoadResult with details about the loaded DataFrame.
     """
+    # Handle potential .csv extension in name
+    name = params.name
+    if name.lower().endswith(".csv"):
+        name = name[:-4]
+
+    # A name, not a path: it may not leave the datasets folder.
+    if not _DATASET_NAME.fullmatch(name):
+        raise ValueError(
+            f"'{params.name}' is not a dataset name. Available: {', '.join(_list_available_datasets())}"
+        )
+    file_path = _DATASETS_DIR / f"{name}.csv"
+    if file_path.resolve().parent != _DATASETS_DIR.resolve():
+        raise ValueError(f"'{params.name}' is not a dataset name.")
+
     try:
-        # Handle potential .csv extension in name
-        name = params.name
-        if name.lower().endswith(".csv"):
-            name = name[:-4]
-
-        file_path = _DATASETS_DIR / f"{name}.csv"
-
         if not file_path.exists():
             raise FileNotFoundError(f"Dataset file not found: {file_path}")
 

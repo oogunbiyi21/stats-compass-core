@@ -6,9 +6,12 @@ from .spreadsheet_safety import (
     sanitize_dataframe,
 )
 from .file_safety import (
+    ALLOWED_EXTENSIONS,
     PROTECTED_EXTENSIONS,
     SAFE_OUTPUT_EXTENSIONS,
+    FilePolicy,
     UnsafePathError,
+    check_read_path,
     get_unique_filepath,
     is_path_safe,
     safe_save,
@@ -23,6 +26,9 @@ __all__ = [
     "sanitize_dataframe",
     # File safety
     "UnsafePathError",
+    "FilePolicy",
+    "ALLOWED_EXTENSIONS",
+    "check_read_path",
     "is_path_safe",
     "get_unique_filepath",
     "safe_write_path",

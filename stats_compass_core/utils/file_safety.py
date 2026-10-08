@@ -3,15 +3,58 @@ File Safety Utilities.
 
 Provides safe file operations that prevent accidental overwrites
 and validate paths to avoid dangerous operations.
+
+On a laptop a caller's path is the user's own choice, and that is the default.
+A server confines each session with a ``FilePolicy`` on its ``DataFrameState``
+(or the STATS_COMPASS_WRITE_ROOT / STATS_COMPASS_READ_ROOTS environment
+variables for every state): writes land, by base name only, inside the write
+root with an extension that fits the file, and reads must resolve inside a read
+root. Containment is checked on the real path, so a symlink cannot lead out
+(security scan F6, F8, 8 Oct 2026). The system-folder denylist below stays as a
+second line for unconfined use; the root is the control.
 """
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 
-class UnsafePathError(Exception):
-    """Raised when a path is deemed unsafe (e.g., system directories, sensitive locations)."""
-    pass
+class UnsafePathError(ValueError):
+    """Raised when a path is deemed unsafe (e.g., system directories, sensitive locations).
+
+    A ValueError, so callers that treat bad input as ValueError catch it too.
+    """
+
+
+@dataclass(frozen=True)
+class FilePolicy:
+    """Where a session's tools may write and read. None means unconfined.
+
+    ``write_root``: every write lands here, by base name. ``read_roots``: every
+    read and listing must resolve inside one of these; a relative path is taken
+    relative to the first.
+    """
+
+    write_root: Path | None = None
+    read_roots: tuple[Path, ...] | None = None
+
+    @classmethod
+    def from_env(cls) -> "FilePolicy":
+        """STATS_COMPASS_WRITE_ROOT, and STATS_COMPASS_READ_ROOTS separated by os.pathsep."""
+        write = os.getenv("STATS_COMPASS_WRITE_ROOT") or None
+        reads = os.getenv("STATS_COMPASS_READ_ROOTS") or None
+        return cls(
+            write_root=Path(write) if write else None,
+            read_roots=tuple(Path(p) for p in reads.split(os.pathsep) if p) if reads else None,
+        )
+
+
+# What each kind of file may be called when written under a root.
+ALLOWED_EXTENSIONS: dict[str, set[str]] = {
+    "csv": {".csv", ".tsv", ".txt"},
+    "model": {".joblib", ".pkl", ".pickle"},
+    "figure": {".png", ".svg", ".pdf", ".jpg", ".jpeg"},
+}
 
 
 # Paths that should never be written to
@@ -108,24 +151,31 @@ def is_path_safe(filepath: str) -> tuple[bool, str | None]:
         Tuple of (is_safe, error_message)
         If safe, error_message is None
     """
-    # Expand and resolve path
+    # Expand and resolve path. Both the plain and the real path are checked, against
+    # both forms of each forbidden folder: a symlink is judged by where it leads, and
+    # on macOS /etc itself is a link to /private/etc.
     expanded = os.path.expanduser(filepath)
     resolved = os.path.abspath(expanded)
     path = Path(resolved)
+    candidates = {resolved, os.path.realpath(expanded)}
 
     # Check for forbidden parent directories
     for forbidden in FORBIDDEN_PATHS:
-        forbidden_path = Path(forbidden)
-        try:
-            # Check if resolved path is under a forbidden directory
-            if forbidden_path.exists() and resolved.startswith(str(forbidden_path) + os.sep):
-                # Allow if it's deep enough (user subdirectory)
-                relative = path.relative_to(forbidden_path)
-                # Must be at least 2 levels deep to be considered safe
-                if len(relative.parts) < 2:
-                    return False, f"Cannot write to system directory: {forbidden}"
-        except (ValueError, OSError):
-            pass
+        for forbidden_form in {forbidden, os.path.realpath(forbidden)}:
+            forbidden_path = Path(forbidden_form)
+            if not forbidden_path.exists():
+                continue
+            for candidate in candidates:
+                try:
+                    # Check if the path is under a forbidden directory
+                    if candidate.startswith(str(forbidden_path) + os.sep):
+                        # Allow if it's deep enough (user subdirectory)
+                        relative = Path(candidate).relative_to(forbidden_path)
+                        # Must be at least 2 levels deep to be considered safe
+                        if len(relative.parts) < 2:
+                            return False, f"Cannot write to system directory: {forbidden}"
+                except (ValueError, OSError):
+                    pass
 
     # Check file extension
     suffix = path.suffix.lower()
@@ -178,6 +228,9 @@ def get_unique_filepath(filepath: str) -> str:
 def safe_write_path(
     filepath: str,
     create_dirs: bool = True,
+    *,
+    root: str | os.PathLike | None = None,
+    file_type: str | None = None,
 ) -> str:
     """
     Validate and prepare a path for safe writing.
@@ -188,6 +241,11 @@ def safe_write_path(
     Args:
         filepath: The target path
         create_dirs: If True, create parent directories if they don't exist
+        root: If given, the file lands in this folder under the path's base
+            name, whatever folders the path named, and its extension must fit
+            ``file_type``.
+        file_type: "csv", "model" or "figure"; checked against
+            ALLOWED_EXTENSIONS when ``root`` is given.
         
     Returns:
         The resolved absolute path (may have _N suffix if original existed)
@@ -195,6 +253,9 @@ def safe_write_path(
     Raises:
         UnsafePathError: If the path is in a forbidden location or has a protected extension
     """
+    if root is not None:
+        return _write_path_in_root(filepath, root, file_type)
+
     # Expand and resolve
     expanded = os.path.expanduser(filepath)
     resolved = os.path.abspath(expanded)
@@ -216,9 +277,69 @@ def safe_write_path(
     return resolved
 
 
+def _write_path_in_root(filepath: str, root: str | os.PathLike, file_type: str | None) -> str:
+    """The base name of ``filepath``, inside ``root``, checked on the real path."""
+    name = Path(os.path.expanduser(str(filepath))).name
+    if name in ("", ".", ".."):
+        raise UnsafePathError(f"'{filepath}' does not name a file.")
+    suffix = Path(name).suffix.lower()
+    if file_type is not None:
+        allowed = ALLOWED_EXTENSIONS.get(file_type)
+        if allowed is None:
+            raise ValueError(f"Unknown file_type: '{file_type}'")
+        if suffix not in allowed:
+            raise UnsafePathError(
+                f"A {file_type} file must end in one of {', '.join(sorted(allowed))}; got '{name}'."
+            )
+    root_real = os.path.realpath(os.path.expanduser(str(root)))
+    os.makedirs(root_real, exist_ok=True)
+    is_safe, error = is_path_safe(os.path.join(root_real, name))
+    if not is_safe:
+        raise UnsafePathError(error)
+    candidate = get_unique_filepath(os.path.join(root_real, name))
+    # A symlink planted in the root, even a dangling one, would lead the write out.
+    while os.path.islink(candidate):
+        stem, ext = os.path.splitext(candidate)
+        candidate = get_unique_filepath(f"{stem}_1{ext}")
+    if not _inside(os.path.realpath(candidate), root_real):
+        raise UnsafePathError(f"'{filepath}' resolves outside the output folder.")
+    return candidate
+
+
+def check_read_path(
+    filepath: str,
+    roots: tuple[str | os.PathLike, ...] | list | None,
+) -> str:
+    """The path to read, or UnsafePathError if a policy confines reads and it leaves the roots.
+
+    With no roots, the path is only ``~``-expanded, as before. With roots, a
+    relative path is taken relative to the first root, and the real path (after
+    symlinks and ``..``) must lie inside one of them.
+    """
+    expanded = os.path.expanduser(str(filepath))
+    if not roots:
+        return expanded
+    reals = [os.path.realpath(os.path.expanduser(str(r))) for r in roots]
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(reals[0], expanded)
+    real = os.path.realpath(expanded)
+    if not any(_inside(real, r) for r in reals):
+        raise UnsafePathError(f"'{filepath}' is outside the folders this session may read.")
+    return real
+
+
+def _inside(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # different drives on Windows
+        return False
+
+
 def safe_save_figure(
     fig,
     save_path: str | None,
+    *,
+    root: str | os.PathLike | None = None,
     **savefig_kwargs,
 ) -> str | None:
     """
@@ -241,7 +362,7 @@ def safe_save_figure(
         return None
 
     # Validate and prepare path (auto-increments if exists)
-    filepath = safe_write_path(save_path, create_dirs=True)
+    filepath = safe_write_path(save_path, create_dirs=True, root=root, file_type="figure")
 
     # Save with sensible defaults
     defaults = {"bbox_inches": "tight"}
@@ -259,6 +380,8 @@ def safe_save(
     data,
     filepath: str,
     file_type: FileType,
+    *,
+    root: str | os.PathLike | None = None,
     **kwargs,
 ) -> dict:
     """
@@ -274,6 +397,8 @@ def safe_save(
             - "figure": matplotlib Figure
         filepath: Desired output path
         file_type: One of "csv", "model", or "figure"
+        root: If given, the file lands in this folder by base name, with an
+            extension that fits ``file_type`` (a session's FilePolicy.write_root)
         **kwargs: Additional arguments for the underlying save:
             - csv: index (bool, default False), plus any df.to_csv() args
             - model: compress (int, default 0), plus any joblib.dump() args
@@ -309,9 +434,19 @@ def safe_save(
 
     original_filepath = filepath
 
+    if file_type not in ("csv", "model", "figure"):
+        raise ValueError(
+            f"Unknown file_type: '{file_type}'. Must be 'csv', 'model', or 'figure'"
+        )
+
     # Validate and get safe path (auto-increments if exists)
-    safe_path = safe_write_path(filepath, create_dirs=True)
-    was_renamed = safe_path != os.path.abspath(os.path.expanduser(original_filepath))
+    safe_path = safe_write_path(filepath, create_dirs=True, root=root, file_type=file_type)
+    requested = (
+        os.path.join(os.path.realpath(os.path.expanduser(str(root))), Path(os.path.expanduser(original_filepath)).name)
+        if root is not None
+        else os.path.abspath(os.path.expanduser(original_filepath))
+    )
+    was_renamed = safe_path != requested
 
     # Save based on file type
     if file_type == "csv":

@@ -10,6 +10,7 @@ from stats_compass_core.base import StrictToolInput
 from stats_compass_core.registry import registry
 from stats_compass_core.results import FileListResult
 from stats_compass_core.state import DataFrameState
+from stats_compass_core.utils.file_safety import UnsafePathError, check_read_path
 
 
 class ListFilesInput(StrictToolInput):
@@ -32,15 +33,16 @@ def list_files(state: DataFrameState, params: ListFilesInput) -> FileListResult:
     List files in a local directory.
 
     Args:
-        state: The DataFrameState object (unused but required by signature).
+        state: The DataFrameState object; its file_policy confines the listing.
         params: Parameters for listing files.
 
     Returns:
         FileListResult with list of files.
     """
     try:
-        # Resolve directory path (handle ~ for home directory)
-        directory = Path(params.directory).expanduser().resolve()
+        # Resolve directory path (handle ~ for home directory). Under a
+        # session's FilePolicy it must lie inside a read root (security scan F8).
+        directory = Path(check_read_path(params.directory, state.file_policy.read_roots)).resolve()
 
         if not directory.exists():
             raise FileNotFoundError(f"Directory not found: {directory}")
@@ -64,5 +66,7 @@ def list_files(state: DataFrameState, params: ListFilesInput) -> FileListResult:
             message=f"Found {len(files)} files in {directory}",
         )
 
+    except UnsafePathError:
+        raise
     except Exception as e:
         raise RuntimeError(f"Failed to list files in '{params.directory}': {str(e)}")
