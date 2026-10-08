@@ -57,18 +57,22 @@ def sanitize_cell(value: str) -> str:
 
 def sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Sanitize all string values in a DataFrame to prevent CSV injection.
+    Sanitize everything a CSV export writes as text, to prevent CSV injection.
     
-    Creates a copy of the DataFrame with all string cells that start
-    with formula trigger characters prefixed with a single quote.
+    Creates a copy of the DataFrame in which every string that starts with a
+    formula trigger character is prefixed with a single quote: cells in object,
+    ``string`` and ``category`` columns, column headers, row labels and index
+    names. Only object columns were covered before; a header or a typed text
+    column reached the file as written (security scan F9, 8 Oct 2026).
     
-    Non-string columns are left unchanged.
+    Numeric values and missing values are left unchanged. A ``category``
+    column comes back as object, since quoting can merge or split categories.
     
     Args:
         df: The DataFrame to sanitize.
         
     Returns:
-        A new DataFrame with sanitized string values.
+        A new DataFrame with sanitized string values and labels.
         
     Examples:
         >>> import pandas as pd
@@ -84,13 +88,38 @@ def sanitize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     # Work on a copy to avoid modifying the original
     df_safe = df.copy()
-    
-    # Only process object (string) columns
-    for col in df_safe.columns:
-        if df_safe[col].dtype == "object":
-            # Apply sanitization only to string values
-            df_safe[col] = df_safe[col].apply(
-                lambda x: sanitize_cell(x) if isinstance(x, str) else x
-            )
-    
+
+    # Cells, by position so repeated column names are handled too
+    for i in range(df_safe.shape[1]):
+        column = df_safe.iloc[:, i]
+        dtype = column.dtype
+        if dtype == "object":
+            df_safe.isetitem(i, column.apply(_sanitize_label))
+        elif isinstance(dtype, pd.StringDtype):
+            df_safe.isetitem(i, column.astype(object).apply(_sanitize_label).astype(dtype))
+        elif isinstance(dtype, pd.CategoricalDtype):
+            df_safe.isetitem(i, column.astype(object).apply(_sanitize_label))
+
+    # Labels: headers, row labels (written when index=True) and their names
+    df_safe.columns = _sanitize_index(df_safe.columns)
+    df_safe.index = _sanitize_index(df_safe.index)
+
     return df_safe
+
+
+def _sanitize_label(value):
+    """A string, or each string in a tuple label; anything else unchanged."""
+    if isinstance(value, str):
+        return sanitize_cell(value)
+    if isinstance(value, tuple):
+        return tuple(_sanitize_label(v) for v in value)
+    return value
+
+
+def _sanitize_index(index: pd.Index) -> pd.Index:
+    names = [_sanitize_label(n) for n in index.names]
+    if isinstance(index, pd.MultiIndex) or index.dtype == "object" or isinstance(
+        index.dtype, (pd.StringDtype, pd.CategoricalDtype)
+    ):
+        index = index.map(_sanitize_label)
+    return index.set_names(names)
