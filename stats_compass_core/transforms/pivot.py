@@ -13,6 +13,7 @@ from stats_compass_core.results import (
 )
 from stats_compass_core.state import DataFrameState
 from stats_compass_core.transforms._keys import null_key_warning
+from stats_compass_core.transforms.groupby_aggregate import AggregationName
 
 
 class PivotInput(StrictToolInput):
@@ -27,7 +28,7 @@ class PivotInput(StrictToolInput):
         default=None,
         description="Column(s) to use for values. If None, uses all remaining columns",
     )
-    aggfunc: str = Field(
+    aggfunc: AggregationName = Field(
         default="mean", description="Aggregation function if multiple values per group"
     )
     fill_value: float | None = Field(

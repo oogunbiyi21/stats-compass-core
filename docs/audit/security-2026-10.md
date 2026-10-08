@@ -20,9 +20,14 @@ planted in a dataset.
 | F8 | MEDIUM | `load_csv`, `load_excel`, `list_files` read any path | `FilePolicy.read_roots` | `bfc01ed` |
 | F9 | LOW | CSV sanitiser skipped headers, row labels, `string` and `category` columns | all of them sanitised | `6288598` |
 
-Found on the way and fixed with F8: `load_dataset` built its path from the
-dataset name, so `../../x` read any `.csv` on disk. A name must now match
-`[A-Za-z0-9][A-Za-z0-9_-]*` and resolve inside the datasets folder.
+Found on the way:
+- Fixed with F8: `load_dataset` built its path from the dataset name, so
+  `../../x` read any `.csv` on disk. A name must now match
+  `[A-Za-z0-9][A-Za-z0-9_-]*` and resolve inside the datasets folder.
+- `groupby_aggregate` defined `VALID_AGGS` but never checked it, and `pivot`'s
+  `aggfunc` took any string. pandas calls a group's method by the name it is
+  given, so `plot` ran. Both schemas now accept only the listed names
+  (`AggregationName`), which also shows them to clients.
 
 ## 1. Expressions are read, not executed
 

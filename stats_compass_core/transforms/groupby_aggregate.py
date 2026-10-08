@@ -2,6 +2,8 @@
 Tool for grouping and aggregating DataFrame data.
 """
 
+from typing import Literal, get_args
+
 from pydantic import Field
 
 from stats_compass_core.base import StrictToolInput, ToolComponent
@@ -15,10 +17,13 @@ from stats_compass_core.state import DataFrameState
 from stats_compass_core.transforms._keys import null_key_warning
 from stats_compass_core.utils.text_values import numeric_as_text
 
-# Valid aggregation functions supported by this tool
+# Valid aggregation functions supported by this tool (and pivot)
 # This is a deliberately constrained list to ensure deterministic behavior
-# Contributors can expand this list by adding new pandas aggregation functions
-VALID_AGGS = [
+# Contributors can expand this list by adding new pandas aggregation functions.
+# It is enforced by the input schemas: pandas calls a group's method by the
+# name it is given, so an unchecked name ran whatever method the caller chose
+# (found with the 8 Oct 2026 security scan).
+AggregationName = Literal[
     "sum",
     "mean",
     "median",
@@ -31,12 +36,13 @@ VALID_AGGS = [
     "last",
     "nunique",
 ]
+VALID_AGGS = list(get_args(AggregationName))
 
 
 class ColumnAggregation(ToolComponent):
     """Aggregation configuration for a single column."""
     column: str = Field(description="Column to aggregate")
-    functions: list[str] = Field(description="List of aggregation functions (e.g. ['mean', 'sum'])")
+    functions: list[AggregationName] = Field(description="List of aggregation functions (e.g. ['mean', 'sum'])")
 
 
 class GroupByAggregateInput(StrictToolInput):
