@@ -150,7 +150,11 @@ def run_step(
         func: The tool function to execute
         state: DataFrameState to pass to the function
         params: Parameters to pass to the function
-        summary_template: Template string for the summary (can use {result})
+        summary_template: The step's summary, used exactly as given. Callers
+            build it with column names and the date column in it, which come
+            from data, so it is never passed to str.format: braces in a column
+            header became format fields, and a width allocated as much memory
+            as it asked for (re-scan F6, 9 Oct 2026).
     
     Returns:
         WorkflowStepResult with status, timing, and result data
@@ -211,7 +215,7 @@ def run_step(
             step_index=step_index,
             status="success",
             duration_ms=duration_ms,
-            summary=summary_template.format(result=result),
+            summary=summary_template,
             result=result_data,
             dataframe_produced=df_produced,
             image_base64=image_base64,
