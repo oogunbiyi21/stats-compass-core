@@ -461,6 +461,8 @@ class _Evaluator:
         kwargs = {k.arg: self._argument(k.value) for k in node.keywords}
         if method == "round":
             _check_decimals(args + list(kwargs.values()))
+        if method == "describe":
+            _check_dtype_names(list(kwargs.values()))
         if method == "astype":
             targets = args + list(kwargs.values())
             if len(targets) != 1 or targets[0] not in ASTYPE_TARGETS:
@@ -503,6 +505,20 @@ def _check_signature(name: str, node: ast.Call, signature: tuple[int, set[str]])
         if k.arg not in keywords:
             allowed = ", ".join(sorted(keywords)) or "none"
             raise ExpressionError(f".{name}() does not take '{k.arg}' here (allowed: {allowed}).")
+
+
+DESCRIBE_DTYPE_NAMES = {"all", "number", "object", "category", "datetime", "bool", "string", "timedelta"}
+
+
+def _check_dtype_names(values: list) -> None:
+    """describe's include/exclude, from the same list as the describe tool: a free
+    string reaches pandas' dtype parsing, which can backtrack (re-scan F8)."""
+    for value in values:
+        names = value if isinstance(value, list) else [value]
+        if len(names) > 8 or any(n not in DESCRIBE_DTYPE_NAMES for n in names):
+            raise ExpressionError(
+                f"describe() takes include/exclude from: {', '.join(sorted(DESCRIBE_DTYPE_NAMES))}."
+            )
 
 
 def _check_decimals(values: list) -> None:

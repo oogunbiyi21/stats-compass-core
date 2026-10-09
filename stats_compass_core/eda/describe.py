@@ -2,7 +2,7 @@
 Tool for generating descriptive statistics of DataFrame columns.
 """
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 import pandas as pd
 from pydantic import Field
@@ -14,6 +14,13 @@ from stats_compass_core.state import DataFrameState
 from stats_compass_core.utils.text_values import numeric_as_text
 
 
+# The names pandas' describe understands, and nothing else: a free string went
+# to pandas' dtype parsing, whose datetime pattern backtracks quadratically on
+# 'M8[' + ', ' * N (re-scan F8, 9 Oct 2026).
+DtypeName = Literal["all", "number", "object", "category", "datetime", "bool", "string", "timedelta"]
+DtypeNames = Annotated[list[DtypeName], Field(max_length=8)]
+
+
 class DescribeInput(StrictToolInput):
     """Input schema for describe tool."""
 
@@ -23,15 +30,15 @@ class DescribeInput(StrictToolInput):
     percentiles: list[float] | None = Field(
         default=None, description="List of percentiles to include (between 0 and 1)"
     )
-    include: str | list[str] | None = Field(
+    include: DtypeName | DtypeNames | None = Field(
         default=None,
         description=(
-            "Data types to include "
-            "('all', 'number', 'object', 'category', 'datetime')"
+            "Data types to include: 'all', 'number', 'object', 'category', "
+            "'datetime', 'bool', 'string' or 'timedelta', or a list of them"
         ),
     )
-    exclude: str | list[str] | None = Field(
-        default=None, description="Data types to exclude"
+    exclude: DtypeName | DtypeNames | None = Field(
+        default=None, description="Data types to exclude (same names as include)"
     )
 
 
