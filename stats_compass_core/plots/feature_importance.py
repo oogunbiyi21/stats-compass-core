@@ -169,7 +169,7 @@ def feature_importance(state: DataFrameState, params: FeatureImportanceInput) ->
 
     # Save to file if requested (never overwrites, auto-increments)
     if params.save_path:
-        safe_save(fig, params.save_path, "figure")
+        safe_save(fig, params.save_path, "figure", root=state.file_policy.write_root)
 
     # Convert to base64 PNG
     buf = BytesIO()

@@ -153,7 +153,7 @@ def scatter_plot(state: DataFrameState, params: ScatterPlotInput) -> ChartResult
 
     # Safe file saving (never overwrites, auto-increments filename if exists)
     if params.save_path:
-        safe_save(fig, params.save_path, "figure")
+        safe_save(fig, params.save_path, "figure", root=state.file_policy.write_root)
 
     # Convert to base64 PNG
     buf = BytesIO()

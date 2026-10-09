@@ -144,7 +144,7 @@ def histogram(state: DataFrameState, params: HistogramInput) -> ChartResult:
 
     # Safe file saving (never overwrites, auto-increments filename if exists)
     if params.save_path:
-        safe_save(fig, params.save_path, "figure", dpi=params.dpi)
+        safe_save(fig, params.save_path, "figure", root=state.file_policy.write_root, dpi=params.dpi)
 
     # Convert figure to base64 PNG
     buf = BytesIO()

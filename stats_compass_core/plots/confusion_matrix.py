@@ -332,7 +332,7 @@ def confusion_matrix_plot(
 
     # Save to file if requested (never overwrites, auto-increments)
     if params.save_path:
-        safe_save(fig, params.save_path, "figure")
+        safe_save(fig, params.save_path, "figure", root=state.file_policy.write_root)
 
     return ChartResult(
         chart_type="confusion_matrix",

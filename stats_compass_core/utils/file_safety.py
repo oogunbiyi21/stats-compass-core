@@ -49,6 +49,27 @@ class FilePolicy:
         )
 
 
+class _FromEnvironment:
+    """The default for ``root``: STATS_COMPASS_WRITE_ROOT, or unconfined if unset.
+
+    A caller that names no root gets the environment's, never "anywhere": six
+    plot tools once called safe_save without the session's root and wrote
+    wherever the caller said (re-scan, 9 Oct 2026, F1-F5, F7). Tools pass
+    ``state.file_policy.write_root`` explicitly; ``root=None`` is unconfined
+    by decision.
+    """
+
+    def __repr__(self) -> str:
+        return "FROM_ENVIRONMENT"
+
+
+FROM_ENVIRONMENT = _FromEnvironment()
+
+
+def _resolve_root(root):
+    return FilePolicy.from_env().write_root if root is FROM_ENVIRONMENT else root
+
+
 # What each kind of file may be called when written under a root.
 ALLOWED_EXTENSIONS: dict[str, set[str]] = {
     "csv": {".csv", ".tsv", ".txt"},
@@ -229,7 +250,7 @@ def safe_write_path(
     filepath: str,
     create_dirs: bool = True,
     *,
-    root: str | os.PathLike | None = None,
+    root: str | os.PathLike | None | _FromEnvironment = FROM_ENVIRONMENT,
     file_type: str | None = None,
 ) -> str:
     """
@@ -253,6 +274,7 @@ def safe_write_path(
     Raises:
         UnsafePathError: If the path is in a forbidden location or has a protected extension
     """
+    root = _resolve_root(root)
     if root is not None:
         return _write_path_in_root(filepath, root, file_type)
 
@@ -351,7 +373,7 @@ def safe_save_figure(
     fig,
     save_path: str | None,
     *,
-    root: str | os.PathLike | None = None,
+    root: str | os.PathLike | None | _FromEnvironment = FROM_ENVIRONMENT,
     **savefig_kwargs,
 ) -> str | None:
     """
@@ -393,7 +415,7 @@ def safe_save(
     filepath: str,
     file_type: FileType,
     *,
-    root: str | os.PathLike | None = None,
+    root: str | os.PathLike | None | _FromEnvironment = FROM_ENVIRONMENT,
     **kwargs,
 ) -> dict:
     """
@@ -451,6 +473,7 @@ def safe_save(
         raise ValueError(
             f"Unknown file_type: '{file_type}'. Must be 'csv', 'model', or 'figure'"
         )
+    root = _resolve_root(root)
 
     # Validate and get safe path (auto-increments if exists)
     safe_path = safe_write_path(filepath, create_dirs=True, root=root, file_type=file_type)

@@ -194,6 +194,49 @@ serving more than one user:
   straight through. Its network mode must set the policy, or this switch does
   nothing there.
 
+## 5a. Re-scan of 0.1.39, 9 October 2026
+
+A full re-scan of `main` at `eb3391f` found eight issues: six MEDIUM and two
+LOW. Fixed for 0.1.40.
+
+| Finding | Where | Fix |
+|---|---|---|
+| F1–F5, F7 | `histogram`, `lineplot`, `scatter_plot`, `bar_chart`, `confusion_matrix_plot` and `feature_importance` called `safe_save` without the session's write root | see below |
+| F6 | `run_step` called `summary_template.format(result=...)` on text that already held column names | the summary is used exactly as given |
+| F8 | `describe`'s `include`/`exclude` were free strings reaching pandas' dtype parsing | a fixed list of names |
+
+**F1–F5, F7: the plot tools ignored the write root.**
+- The first pass checked these tools with a search whose output was cut off
+  after 40 lines. Six plot tools were past the cut, so in a confined session a
+  caller's `save_path` still wrote figures anywhere writable.
+- Hosted's guard blocked this; self-hosted `serve` did not.
+- All six now pass `root=state.file_policy.write_root`.
+- An omitted `root` no longer means "anywhere": `safe_save`, `safe_write_path`
+  and `safe_save_figure` default to `FROM_ENVIRONMENT`, which is
+  `STATS_COMPASS_WRITE_ROOT`, or unconfined when that is unset. Passing
+  `root=None` is a decision.
+- `tests/test_every_writer_is_confined.py` keeps it that way:
+  - it calls every registered tool with a `save_path` or `filepath` field under
+    a write root, and checks the file lands inside;
+  - it fails if a new writer is not in its table;
+  - it checks that every save call in the package names its root.
+
+**F6: column names became format strings.**
+- Callers build summaries with column names and the date column in them, and
+  those come from data: CSV and Sheet headers, `rename_columns`,
+  `date_column`.
+- Braces in a header became format fields. A field that walks attributes to a
+  plain string takes a width; dev-95 measured 100 MB in 0.19 s from one
+  histogram step on production.
+- No template used `{result}`, so `run_step` no longer formats at all.
+
+**F8: describe's type names backtracked.**
+- `describe` now accepts only `all`, `number`, `object`, `category`,
+  `datetime`, `bool`, `string` and `timedelta`, or a list of up to eight.
+- `.describe()` in the expression language takes the same names.
+- The free string reached pandas' dtype parsing, whose datetime pattern
+  backtracks quadratically on `M8[` followed by `, ` repeated.
+
 ## 6. Not covered
 
 - **Size of the data.** A long computation over a large frame is bounded by the
