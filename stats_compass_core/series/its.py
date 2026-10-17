@@ -33,6 +33,15 @@ The interval is at ``level`` and the band at ``band_level``; a 90% interval can
 exclude zero while the lift is still ``expected``. Both levels are in
 ``params`` so a caller does not print one beside the other as a contradiction.
 
+- **Series, for a chart (optional).** With ``series_days_before`` or
+  ``series_days_after``, each day around the window with its observed value
+  and the counterfactual: the same level, plus the seasonal read one period
+  earlier on that day. Over the window's days with data, observed minus
+  expected sums to the lift exactly, so the gap between the lines is the lift.
+  ``low`` and ``high`` are a range for one day's value: the ``level`` ranked
+  |error| of this estimator applied to single days, measured like the lift's
+  reference. It is not the lift's interval, which is for the window's total.
+
 Not measured: pull-forward. Customers who would have bought after the window
 but bought inside it inflate the lift, and the dip they leave is excluded from
 the fit rather than netted off.
@@ -63,6 +72,22 @@ MIN_REFERENCE_WINDOWS = 20
 
 
 @dataclass(frozen=True)
+class CounterfactualDay:
+    """One day around a window: what happened, and what was expected without it.
+
+    ``actual`` is None on a day with no data. ``low`` and ``high`` bound a
+    single day's value at the lift's ``level``; see the module notes.
+    """
+
+    date: date
+    actual: float | None
+    expected: float
+    low: float
+    high: float
+    in_window: bool
+
+
+@dataclass(frozen=True)
 class LiftFacts:
     """A window's lift over its counterfactual, with an interval and a verdict.
 
@@ -86,6 +111,7 @@ class LiftFacts:
     method: str
     params: dict[str, Any]
     warnings: list[ToolWarning]
+    series: tuple[CounterfactualDay, ...] | None = None
 
 
 def its_lift(
@@ -107,6 +133,8 @@ def its_lift(
     real_change_alpha: float = 0.05,
     min_baseline_share: float = 0.8,
     min_reference: int = 20,
+    series_days_before: int | None = None,
+    series_days_after: int | None = None,
     **decompose_options: Any,
 ) -> LiftFacts | Insufficient:
     """Estimate one window's lift on one daily series.
@@ -133,6 +161,9 @@ def its_lift(
         min_baseline_share: Share of ``baseline_days`` that must hold real
             data.
         min_reference: Fewest past positions to measure the error against.
+        series_days_before, series_days_after: Ask for ``series``: each day
+            from this many days before the window to this many after, clipped
+            to the history. Both None (the default) leaves ``series`` None.
         **decompose_options: Passed to ``decompose`` (``max_gap_days``,
             ``annual_smoothing_days``, ``fourier_terms``, ``robust``).
 
@@ -146,6 +177,10 @@ def its_lift(
         raise ValueError(f"unknown kind {kind!r}")
     if noise_band not in ("prior_window", "none"):
         raise ValueError(f"unknown noise_band {noise_band!r}")
+    want_series = series_days_before is not None or series_days_after is not None
+    days_before, days_after = series_days_before or 0, series_days_after or 0
+    if days_before < 0 or days_after < 0:
+        raise ValueError("series days cannot be negative")
     start, end = pd.Timestamp(window[0]), pd.Timestamp(window[1])
     if end < start:
         raise ValueError("window ends before it starts")
@@ -216,7 +251,7 @@ def its_lift(
                 annual_fallback = True
     if isinstance(estimate, Insufficient):
         return estimate
-    observed_total, counterfactual_total, baseline_info = estimate
+    observed_total, counterfactual_total, cf_level, baseline_info = estimate
     lift_abs = observed_total - counterfactual_total
     lift_pct = (
         100 * lift_abs / counterfactual_total if counterfactual_total > 0 else None
@@ -307,6 +342,22 @@ def its_lift(
         **baseline_info,
         **prior_info,
     }
+    series: tuple[CounterfactualDay, ...] | None = None
+    if want_series:
+        day_errors = dec.expectation_errors(1, delete_after_days=post_days)
+        half = _ranked_half_width(day_errors["error"].to_numpy(), level)
+        series = _series(
+            dec, observed_series, start, end, cf_level, half, days_before, days_after
+        )
+        params.update(
+            series_days_before=days_before,
+            series_days_after=days_after,
+            series_band_half_width=half,
+            series_band_level=level,
+            series_band_basis="single_day_abs_error_quantile",
+            series_band_reference=day_errors.attrs["reference"],
+            series_band_n_reference=int(len(day_errors)),
+        )
     return LiftFacts(
         estimate_abs=float(lift_abs),
         interval_abs=interval_abs,
@@ -324,7 +375,47 @@ def its_lift(
         method=f"{dec.method}+its_empirical_windows",
         params=params,
         warnings=list(dec.warnings),
+        series=series,
     )
+
+
+def _series(
+    dec: Decomposition,
+    values: pd.Series,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    level: float,
+    half: float,
+    days_before: int,
+    days_after: int,
+) -> tuple[CounterfactualDay, ...]:
+    """Each day around the window, observed against the counterfactual.
+
+    Clipped to the history, and to the days the seasonal can be read one
+    period back on: before that there is no counterfactual to draw.
+    """
+    lagged = dec._lagged_seasonal_daily()
+    first = max(start - pd.Timedelta(days=days_before), lagged.index[0])
+    last = min(end + pd.Timedelta(days=days_after), values.index.max(), lagged.index[-1])
+    days = pd.date_range(first, last)
+    seasonal = lagged.reindex(days)
+    observed = values.reindex(days).astype(float)
+    rows = []
+    for day, s, obs in zip(days, seasonal.to_numpy(), observed.to_numpy()):
+        if not np.isfinite(s):
+            continue
+        expected = level + float(s)
+        rows.append(
+            CounterfactualDay(
+                date=day.date(),
+                actual=float(obs) if np.isfinite(obs) else None,
+                expected=expected,
+                low=expected - half,
+                high=expected + half,
+                in_window=bool(start <= day <= end),
+            )
+        )
+    return tuple(rows)
 
 
 def _estimate(
@@ -335,8 +426,8 @@ def _estimate(
     baseline_days: int,
     lookback_days: int,
     min_share: float = MIN_BASELINE_SHARE,
-) -> tuple[float, float, dict[str, Any]] | Insufficient:
-    """Observed and counterfactual totals over the window's days with data.
+) -> tuple[float, float, float, dict[str, Any]] | Insufficient:
+    """Observed and counterfactual totals over the window's days with data, and the level.
 
     The estimator ``expectation_errors`` measures: seasonal read one period
     earlier, level from the adjusted baseline. The baseline walks back past
@@ -374,7 +465,7 @@ def _estimate(
         "baseline_real_days": len(chosen),
         "baseline_first_day": min(chosen).date().isoformat(),
     }
-    return observed, counterfactual, info
+    return observed, counterfactual, level, info
 
 
 def _prior_lift(
@@ -402,7 +493,7 @@ def _prior_lift(
             and not np.isfinite(dec._lagged_seasonal_daily().get(start, np.nan))
             else estimate.reason
         )
-    observed_total, counterfactual_total, _ = estimate
+    observed_total, counterfactual_total, _, _ = estimate
     if counterfactual_total <= 0:
         return "NONPOSITIVE_COUNTERFACTUAL"
     lift = 100 * (observed_total - counterfactual_total) / counterfactual_total

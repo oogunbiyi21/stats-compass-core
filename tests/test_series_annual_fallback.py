@@ -93,6 +93,18 @@ class TestRunsAndLifts:
         assert isinstance(facts, LiftFacts)
         assert facts.params["annual_fallback"] is True
 
+    def test_the_series_uses_the_fallbacks_counterfactual(self):
+        y = _demo().loc["2025-04-15":"2026-06-30"]
+        facts = its_lift(
+            y, (date(2026, 5, 14), date(2026, 5, 24)), kind="money", method="fourier",
+            series_days_before=28, series_days_after=21,
+        )
+        assert facts.params["annual_fallback"] is True
+        days = [d for d in facts.series if d.in_window and d.actual is not None]
+        assert sum(d.actual - d.expected for d in days) == pytest.approx(
+            facts.estimate_abs, rel=1e-9
+        )
+
 
 class TestSeasonalityStillNeedsTheYear:
     def test_month_effects_do_not_fall_back(self):
