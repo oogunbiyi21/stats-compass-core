@@ -17,7 +17,12 @@ import pytest
 
 pytest.importorskip("statsmodels")
 
-from stats_compass_core.series import Insufficient, LiftFacts, its_lift  # noqa: E402
+from stats_compass_core.series import (  # noqa: E402
+    CounterfactualDay,
+    Insufficient,
+    LiftFacts,
+    its_lift,
+)
 
 DEMO = Path(__file__).parent / "fixtures" / "demo_store_daily.csv"
 SUMMER30 = (date(2026, 5, 14), date(2026, 5, 24))
@@ -300,3 +305,109 @@ class TestUnitsAndContract:
         result = its_lift(series, SUMMER30, kind="money")
         assert isinstance(result, Insufficient)
         assert result.reason == "TOO_FEW_POINTS"
+
+
+# =============================================================================
+# The series a chart draws: observed against the counterfactual, day by day
+# =============================================================================
+
+
+def _gap(facts: LiftFacts) -> tuple[float, float]:
+    """Observed minus expected, and expected, summed over the window's days with data."""
+    days = [d for d in facts.series if d.in_window and d.actual is not None]
+    return (
+        sum(d.actual - d.expected for d in days),
+        sum(d.expected for d in days),
+    )
+
+
+class TestCounterfactualSeries:
+    def test_not_computed_unless_asked_for(self):
+        facts = its_lift(_demo("net_revenue"), SUMMER30, kind="money")
+        assert facts.series is None
+        assert "series_band_half_width" not in facts.params
+
+    @pytest.mark.parametrize("method", ["fourier", "mstl"])
+    def test_the_gap_between_the_lines_is_the_lift(self, method):
+        facts = its_lift(
+            _demo("net_revenue"), SUMMER30, kind="money", method=method,
+            series_days_before=28, series_days_after=21,
+        )
+        gap, expected = _gap(facts)
+        assert gap == pytest.approx(facts.estimate_abs, rel=1e-9)
+        assert expected == pytest.approx(facts.counterfactual_total, rel=1e-9)
+
+    def test_each_day_from_28_before_to_21_after(self):
+        facts = its_lift(
+            _demo("net_revenue"), SUMMER30, kind="money",
+            series_days_before=28, series_days_after=21,
+        )
+        dates = [d.date for d in facts.series]
+        assert dates[0] == date(2026, 4, 16) and dates[-1] == date(2026, 6, 14)
+        assert len(dates) == 28 + 11 + 21  # every day, none skipped
+        assert [d.date for d in facts.series if d.in_window] == list(
+            pd.date_range(*SUMMER30).date
+        )
+        assert all(isinstance(d, CounterfactualDay) for d in facts.series)
+
+    def test_actual_is_the_series_itself(self):
+        values = _demo("net_revenue")
+        facts = its_lift(values, SUMMER30, kind="money", series_days_before=7)
+        for day in facts.series:
+            assert day.actual == values.loc[pd.Timestamp(day.date)]
+
+    def test_the_band_is_one_days_range_at_the_lifts_level(self):
+        facts = its_lift(
+            _demo("net_revenue"), SUMMER30, kind="money", method="fourier",
+            series_days_before=28, series_days_after=21,
+        )
+        half = facts.params["series_band_half_width"]
+        assert facts.params["series_band_level"] == facts.params["interval_level"] == 0.9
+        assert facts.params["series_band_reference"] == "out_of_sample_exact"
+        for day in facts.series:
+            assert day.low == pytest.approx(day.expected - half)
+            assert day.high == pytest.approx(day.expected + half)
+        # A day's range, not the window's: narrower than the lift's interval.
+        lo, hi = facts.interval_abs
+        assert 0 < 2 * half < hi - lo
+        # About nine days in ten of the lead-in fall inside it.
+        before = [d for d in facts.series if d.date < SUMMER30[0]]
+        inside = sum(d.low <= d.actual <= d.high for d in before)
+        assert inside >= 0.75 * len(before)
+
+    def test_it_ends_at_the_last_day_of_data(self):
+        values = _demo("net_revenue").loc[:"2026-06-01"]
+        facts = its_lift(values, SUMMER30, kind="money", series_days_after=21)
+        assert facts.series[-1].date == date(2026, 6, 1)
+        assert facts.series[0].date == SUMMER30[0]  # nothing before was asked for
+
+    def test_a_day_with_no_data_has_no_actual_and_stays_out_of_the_gap(self):
+        values = _demo("net_revenue").copy()
+        values.loc["2026-05-16":"2026-05-17"] = np.nan
+        facts = its_lift(values, SUMMER30, kind="money", series_days_before=3)
+        missing = [d for d in facts.series if d.actual is None]
+        assert [d.date for d in missing] == [date(2026, 5, 16), date(2026, 5, 17)]
+        assert all(np.isfinite(d.expected) for d in missing)
+        gap, expected = _gap(facts)
+        assert gap == pytest.approx(facts.estimate_abs, rel=1e-9)
+        assert expected == pytest.approx(facts.counterfactual_total, rel=1e-9)
+
+    def test_asking_for_it_changes_nothing_else(self):
+        plain = its_lift(_demo("net_revenue"), SUMMER30, kind="money")
+        drawn = its_lift(
+            _demo("net_revenue"), SUMMER30, kind="money",
+            series_days_before=28, series_days_after=21,
+        )
+        assert (plain.estimate_abs, plain.interval_abs, plain.p_value, plain.verdict) == (
+            drawn.estimate_abs, drawn.interval_abs, drawn.p_value, drawn.verdict,
+        )
+        extra = set(drawn.params) - set(plain.params)
+        assert extra == {
+            "series_days_before", "series_days_after", "series_band_half_width",
+            "series_band_level", "series_band_basis", "series_band_reference",
+            "series_band_n_reference",
+        }
+
+    def test_negative_days_are_refused(self):
+        with pytest.raises(ValueError, match="negative"):
+            its_lift(_demo("net_revenue"), SUMMER30, kind="money", series_days_before=-1)

@@ -453,7 +453,7 @@ statistics out. They are built to run with nobody checking the output, so:
 | `month_effects` | each calendar month's effect in percent of trend, with an interval |
 | `verdict` | is a period expected, noise, or a real change (bands first, then a test fitting the kind) |
 | `forecast` | daily points and monthly totals ahead, with intervals that never narrow |
-| `its_lift` | a window's lift over its counterfactual (interrupted time series) |
+| `its_lift` | a window's lift over its counterfactual (interrupted time series); optionally each day around it, observed against expected, for a chart |
 | `detect_run` | a run of same-direction weekly moves, judged against the series' own history |
 | `repeat_rate`, `median_gap` | a cohort's repeat share with an exact interval; the typical gap between orders |
 

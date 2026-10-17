@@ -28,7 +28,7 @@ from stats_compass_core.series.forecast import (
     ForecastPoint,
     forecast,
 )
-from stats_compass_core.series.its import LiftFacts, its_lift
+from stats_compass_core.series.its import CounterfactualDay, LiftFacts, its_lift
 from stats_compass_core.series.runs import RunFacts, detect_run
 from stats_compass_core.series.seasonality import (
     MonthEffect,
@@ -38,6 +38,7 @@ from stats_compass_core.series.seasonality import (
 from stats_compass_core.series.verdict import VerdictFacts, verdict
 
 __all__ = [
+    "CounterfactualDay",
     "Decomposition",
     "ForecastFacts",
     "ForecastMonth",
