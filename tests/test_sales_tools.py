@@ -154,7 +154,7 @@ class TestVerdict:
         ))
         row = next(r for r in result.rows if r.group == "Tesco · Mint 100g")
         assert row.verdict == "insufficient" and row.insufficient_reason == "TOO_FEW_POINTS"
-        assert row.summary == "The period has data for 0 weeks; it needs at least 1 week."
+        assert row.summary == "There are no sales in this period: the last row is for the week ending 12 September 2026."
         daily = pd.read_csv(DEMO)
         daily = pd.concat([daily.assign(shop="A"), daily.assign(shop="B").iloc[:-10]])
         rows = sales_verdict(state_with(d=daily), SalesVerdictInput(
@@ -167,7 +167,10 @@ class TestVerdict:
         result = sales_verdict(state_with(short=short), SalesVerdictInput(dataframe_name="short", date_column="w", value_column="v"))
         row = result.rows[0]
         assert row.verdict == "insufficient" and row.label == "Not enough data"
-        assert "needs at least 76 weeks of history; there are 59 weeks" in row.summary
+        assert row.summary == (
+            "Too early to say what to expect: a week is first judged once there are about 77 weeks of data; "
+            "there are 60 weeks."
+        )
 
     def test_a_period_given(self):
         state = state_with(sales=sell_out())

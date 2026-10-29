@@ -15,7 +15,11 @@ edit:
 - **Promotions.** A list of windows (name, first day, last day, and which
   group), a flag column whose consecutive flagged dates become windows, or a
   promotion calendar (a second table with start and end columns, and the
-  group columns by the same names).
+  group columns by the same names). A group value of "all", "*" or blank
+  means every group. All three tools take promotions the same way: the lift
+  measures them, the verdict and seasonality leave them out of the fit.
+- **Money as text.** A value column written as text ("£1,234.56",
+  "1,234.56", "(£12.00)" for a negative, "-" for none) is read as numbers.
 
 The expected shape for consumer-goods brands, still to be confirmed: weekly
 rows by week ending × retailer × product, with units and sales value, and a
@@ -24,6 +28,7 @@ promotion calendar (retailer, product, start, end, mechanic, trade spend).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -90,19 +95,56 @@ class SalesColumns(StrictToolInput):
     )
 
 
+# A group value meaning "every group": a calendar's Prime Day row with ASIN "all".
+WILDCARDS = {"", "all", "*", "nan", "none"}
+
+
+def is_wildcard(value) -> bool:
+    return value is None or (isinstance(value, float) and np.isnan(value)) or str(value).strip().lower() in WILDCARDS
+
+
 class PromotionWindow(BaseModel):
     """One promotion: its days, and which group it ran in."""
 
     name: str | None = Field(default=None, description="What to call it, such as 'Summer 2 for 1'.")
     start: date = Field(description="Its first day.")
     end: date = Field(description="Its last day.")
-    group: dict[str, str] | None = Field(
+    group: dict[str, str | None] | None = Field(
         default=None,
         description=(
             "Which group it ran in, by the group_by columns, for example "
-            "{'retailer': 'Tesco'}. Omitted: every group."
+            "{'retailer': 'Tesco'}. Omitted, or 'all': every group."
         ),
     )
+
+
+class PromotionColumns(StrictToolInput):
+    """How the promotions are given: the same three ways for every sales tool."""
+
+    windows: list[PromotionWindow] | None = Field(
+        default=None,
+        description="The promotions, each with a first and last day, and optionally a name and group.",
+    )
+    promo_column: str | None = Field(
+        default=None,
+        description=(
+            "A column flagging promotion rows (1, true or yes). Each group's run of "
+            "consecutive flagged dates is one promotion."
+        ),
+    )
+    calendar_dataframe: str | None = Field(
+        default=None,
+        description=(
+            "A DataFrame with one row per promotion (a promotion calendar). Its group "
+            "columns are matched with group_by by name; 'all', '*' or blank means every group."
+        ),
+    )
+    calendar_start_column: str = Field(default="start", description="The calendar's first-day column.")
+    calendar_end_column: str = Field(default="end", description="The calendar's last-day column.")
+    calendar_name_column: str | None = Field(default=None, description="The calendar's name column, if any.")
+
+    def promotion_sources(self) -> int:
+        return sum(x is not None for x in (self.windows, self.promo_column, self.calendar_dataframe))
 
 
 @dataclass
@@ -124,6 +166,8 @@ class SalesSeries:
     n_groups_found: int
     group_by: list[str] = field(default_factory=list)
     week_label: WeekLabel = "end"
+    # An example of money written as text, when the value column was parsed.
+    parsed_text: str | None = None
 
 
 def build_series(df: pd.DataFrame, cols: SalesColumns) -> SalesSeries:
@@ -145,8 +189,8 @@ def build_series(df: pd.DataFrame, cols: SalesColumns) -> SalesSeries:
         raise ValueError(
             f"{len(bad)} dates in '{cols.date_column}' couldn't be read, for example '{bad.iloc[0]}'."
         )
-    values = pd.to_numeric(df[cols.value_column], errors="coerce")
-    bad = df.loc[values.isna() & df[cols.value_column].notna(), cols.value_column]
+    values, parsed_text = to_numbers(df[cols.value_column])
+    bad = df.loc[values.isna() & ~is_blank(df[cols.value_column]), cols.value_column]
     if len(bad):
         if len(bad) == 1:
             raise ValueError(f"1 value in '{cols.value_column}' isn't a number: '{bad.iloc[0]}'.")
@@ -181,7 +225,55 @@ def build_series(df: pd.DataFrame, cols: SalesColumns) -> SalesSeries:
         n_groups_found=found,
         group_by=group_by,
         week_label=cols.week_label,
+        parsed_text=parsed_text,
     )
+
+
+# Money as text: an optional sign or brackets, a currency symbol, digits with
+# thousands commas, and pence.
+_MONEY = re.compile(r"^(?P<neg>-)?\s*[£$€]?\s*(?P<num>\d{1,3}(,\d{3})+(\.\d+)?|\d+(\.\d+)?|\.\d+)$")
+_NONE = {"-", "\u2013", "\u2014", ""}
+
+
+def is_blank(column: pd.Series) -> pd.Series:
+    """Missing, or a bare dash: no figure for that row."""
+    return column.isna() | column.map(lambda v: isinstance(v, str) and v.strip() in _NONE)
+
+
+def to_numbers(column: pd.Series) -> tuple[pd.Series, str | None]:
+    """The column as numbers, and an example of the text read, if any was.
+
+    Numbers pass through. Text such as "£1,234.56", "1,234.56", "-£3.50" and
+    "(£12.00)" (a negative, as accounts write it) is read; "-" alone, or a
+    blank, is missing, never zero. Anything else stays missing here and is
+    reported by the caller as not a number.
+    """
+    if pd.api.types.is_numeric_dtype(column):
+        return column.astype(float), None
+    example = None
+
+    def parse(v):
+        nonlocal example
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return np.nan
+        if isinstance(v, (int, float, np.integer, np.floating)):
+            return float(v)
+        text = str(v).strip()
+        if text in _NONE:
+            return np.nan
+        try:
+            return float(text)  # a plain number stored as text
+        except ValueError:
+            pass
+        negative = text.startswith("(") and text.endswith(")")
+        match = _MONEY.match((text[1:-1] if negative else text).replace(" ", ""))
+        if not match:
+            return np.nan
+        example = example or text
+        number = float(match["num"].replace(",", ""))
+        return -number if (negative or match["neg"]) else number
+
+    return column.map(parse).astype(float), example
 
 
 def detect_freq(dates: pd.DatetimeIndex) -> Freq:
@@ -272,6 +364,8 @@ def windows_from_calendar(
         raise ValueError(missing_columns(missing, calendar.columns, where=" in the promotion calendar"))
     group_by = [c for c in (cols.group_by or []) if c in calendar.columns]
     windows = []
+    # A group column whose value is "all", "*" or blank leaves that column
+    # out of the match: the promotion ran in every value of it.
     for _, row in calendar.iterrows():
         start, end = pd.to_datetime(row[start_column], errors="coerce"), pd.to_datetime(row[end_column], errors="coerce")
         if pd.isna(start) or pd.isna(end):
@@ -283,7 +377,7 @@ def windows_from_calendar(
                 name=None if not name_column or pd.isna(row[name_column]) else str(row[name_column]),
                 start=start.date(),
                 end=end.date(),
-                group={c: str(row[c]) for c in group_by} or None,
+                group={c: str(row[c]) for c in group_by if not is_wildcard(row[c])} or None,
             )
         )
     return windows
@@ -294,8 +388,22 @@ def windows_for(group: GroupSeries, windows: list[PromotionWindow], group_by: li
     labels = dict(zip(group_by, group.key))
     return [
         w for w in windows
-        if not w.group or all(labels.get(c) == str(v) for c, v in w.group.items())
+        if not w.group or all(is_wildcard(v) or labels.get(c) == str(v) for c, v in w.group.items())
     ]
+
+
+def promotions(state, df: pd.DataFrame, params, series: SalesSeries) -> list[PromotionWindow] | None:
+    """The promotions given to a tool, however given; None when none were."""
+    if params.windows is not None:
+        return list(params.windows)
+    if params.promo_column is not None:
+        return windows_from_flags(df, params, params.promo_column, series.freq)
+    if params.calendar_dataframe is not None:
+        return windows_from_calendar(
+            state.get_dataframe(params.calendar_dataframe), params,
+            params.calendar_start_column, params.calendar_end_column, params.calendar_name_column,
+        )
+    return None
 
 
 def missing_columns(missing: list[str], columns, where: str = "") -> str:

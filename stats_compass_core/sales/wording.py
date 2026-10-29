@@ -28,6 +28,10 @@ VERDICT_LABEL = {
 # Weekly input, from the calibration (scripts/calibrate_weekly.py): a week is
 # first judged at 77 weeks of history, four weeks or a promotion at 83 to 93,
 # and 2 years and 3 found about as much.
+# A week first gets a verdict with this many weeks of data (the history and
+# the week itself): the weekly calibration's floor.
+WEEKLY_VERDICT_FLOOR = 77
+
 WEEKLY_HISTORY_NOTE = (
     "Weekly data needs about 18 months of history before a week can be judged, "
     "and works best with 2 years or more."
@@ -239,9 +243,17 @@ def seasonality_sentence(rows: list[Any]) -> str:
 def insufficient(reason: str, needs: Any, has: Any, unit: str, *, context: str, weeks_of_history: int | None = None) -> str:
     """Why there's no verdict, and what it needs, in plain words.
 
-    ``context`` is "period", "promotion" or "seasonality".
+    ``context`` is "period", "promotion" or "seasonality". For a weekly
+    period, ``weeks_of_history`` is the weeks of data including the period:
+    any shortage of history is then said as the calibrated floor, when a week
+    is first judged, rather than the fit's own 52 weeks.
     """
     u = unit
+    if reason == "TOO_SHORT" and context == "period" and u == "weeks" and weeks_of_history is not None:
+        return (
+            f"Too early to say what to expect: a week is first judged once there are about "
+            f"{WEEKLY_VERDICT_FLOOR} weeks of data; there are {history(weeks_of_history, u)}."
+        )
     if reason == "TOO_SHORT" and context == "promotion" and weeks_of_history is not None and needs is not None and has is not None:
         # The lift's TOO_SHORT counts past positions to compare with; say it as history.
         more = max(int(needs) - int(has), 1)
@@ -280,9 +292,66 @@ def insufficient(reason: str, needs: Any, has: Any, unit: str, *, context: str, 
         text = "The history stops before the period starts, leaving out data in between."
     else:
         text = f"Not enough data ({reason})."
-    if u == "weeks" and reason in ("TOO_SHORT", "BASELINE_TOO_SHORT", "NO_SEASONAL_BEFORE"):
+    if u == "weeks" and context != "seasonality" and reason in ("TOO_SHORT", "BASELINE_TOO_SHORT", "NO_SEASONAL_BEFORE"):
         text += " " + WEEKLY_HISTORY_NOTE
     return text
+
+
+def no_rows_since(last: date, weekly: bool, week_label: str) -> str:
+    """For a group whose rows stopped before the period: a delisted product."""
+    when = f"the week {'ending' if week_label == 'end' else 'starting'} {day(last)}" if weekly else day(last)
+    return f"There are no sales in this period: the last row is for {when}."
+
+
+def promotions_in_period(names: list[str], weekly_period: bool) -> str:
+    """"This week had a promotion: Prime Day 2026."."""
+    what = "This week" if weekly_period else "The period"
+    if len(names) == 1:
+        return f"{what} had a promotion: {names[0]}."
+    return f"{what} had promotions: {', '.join(names[:-1])} and {names[-1]}."
+
+
+def after_promotion(pct: float | None, difference: float, steps: int, unit: str, beyond: bool, kind: str, currency: str | None) -> str:
+    """What happened in the weeks just after a promotion: a dip, if customers stocked up.
+
+    ``beyond`` says whether the difference is larger than those weeks usually
+    vary; only then is a reason offered.
+    """
+    span_text = f"the {steps} {unit[:-1] if steps == 1 else unit} after"
+    if not beyond:
+        return f"In {span_text}, sales were about as expected."
+    size = f"{abs(round(pct))}% " if pct is not None else ""
+    if difference < 0:
+        return (
+            f"In {span_text}, sales ran {size}below expected ({amount(abs(difference), kind, currency)} less): "
+            f"customers may have stocked up."
+        )
+    return f"In {span_text}, sales stayed {size}above expected ({amount(difference, kind, currency)} more)."
+
+
+PROMOTIONS_LEFT_OUT = "Promotion weeks, and the 3 weeks after each, were left out of what's expected."
+PROMOTION_DAYS_LEFT_OUT = "Promotion days, and the 21 days after each, were left out of what's expected."
+
+
+# The weekly calibration's highest false-alarm rate for a week's verdict
+# (docs/calibration-weekly.md): what chance alone gives across many products.
+WEEKLY_FALSE_ALARM_RATE = 0.03
+
+
+def chance_note(judged: int, real_changes: int) -> str | None:
+    """With many products judged, a real change or two is expected by chance alone."""
+    expected = round(judged * WEEKLY_FALSE_ALARM_RATE)
+    if judged < 10 or expected < 1 or real_changes == 0:
+        return None
+    return (
+        f"With {judged} groups judged, about {expected} could show a real change by chance alone: "
+        f"look for a cause before acting on one."
+    )
+
+
+def money_parsed(column: str, example: str) -> str:
+    """"Money written as text in 'Shipped COGS' (for example '£1,234.56') was read as numbers."."""
+    return f"Money written as text in '{column}' (for example '{example}') was read as numbers."
 
 
 def is_finite(x: Any) -> bool:

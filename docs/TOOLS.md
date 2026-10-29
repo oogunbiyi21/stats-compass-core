@@ -23,6 +23,13 @@ product. Each result has a sentence in the app's words and the figures behind
 it. Weekly data needs about 18 months of history before a week can be judged,
 and works best with 2 years or more.
 
+All three take promotions the same way: a list, a flag column, or a promotion
+calendar, where a group value of "all", "*" or blank means every group. The
+lift measures them and checks the 3 weeks after each for a dip (customers
+stocking up); the verdict and seasonality leave them, and the 3 weeks after,
+out of what's expected, as the app does. Money written as text ("£1,234.56",
+"(£12.00)", "-" for none) is read as numbers, and the result says so.
+
 | Tool | Description | Use Case |
 |------|-------------|----------|
 | `sales_verdict` | Expected, Real change, Noise or Not enough data, for a period against the history before it | "Is this week's sell-out at Tesco unusual?" |
