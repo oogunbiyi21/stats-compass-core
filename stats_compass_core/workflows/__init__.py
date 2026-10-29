@@ -30,8 +30,17 @@ from stats_compass_core.workflows.results import (
     WorkflowStepResult,
 )
 from stats_compass_core.workflows.timeseries import run_timeseries_forecast
+from stats_compass_core.workflows.sales import (
+    promotion_lift,
+    sales_seasonality,
+    sales_verdict,
+)
 
 __all__ = [
+    # Sales tools
+    "sales_verdict",
+    "sales_seasonality",
+    "promotion_lift",
     # Result types
     "WorkflowStepResult",
     "WorkflowResult",
