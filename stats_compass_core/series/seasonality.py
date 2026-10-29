@@ -97,10 +97,14 @@ def month_effects(
         - dec.trend
         - (dec.seasonal_by_period.get(7, 0.0) if daily else 0.0)
     )
+    # A week counts towards the month of its middle day: three days after a
+    # Monday-start label (the ``stl`` grain, and weekly input labelled by its
+    # first day), three days before a week-ending label.
+    middle = -3 if dec.params.get("week_label") == "end" else 3
     months = (
         dec.observed.index.month
         if daily
-        else (dec.observed.index + pd.Timedelta(days=3)).month
+        else (dec.observed.index + pd.Timedelta(days=middle)).month
     )
     lags = hac_lags if daily else 0
     days_per_unit = 1 if daily else 7

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, Sequence
+from typing import Any, Literal, Sequence
 
 import pandas as pd
 
-Unit = Literal["days", "months", "orders", "customers"]
+Unit = Literal["days", "weeks", "months", "orders", "customers"]
+Freq = Literal["D", "W"]
+# Which day a weekly row's date names: the week's first day or its last.
+# Retailer sell-out data is usually labelled by the week ending.
+WeekLabel = Literal["start", "end"]
+
+_WEEKDAY = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 
 
 @dataclass(frozen=True)
@@ -98,6 +104,99 @@ def prepare_daily(
     if imputed or excluded:
         series = series.interpolate(method="time", limit_direction="both")
     series.index.freq = "D"
+    return Prepared(values=series, imputed=imputed, excluded=excluded, trimmed=trimmed)
+
+
+def week_days(label: pd.Timestamp, week_label: WeekLabel) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """The first and last day of the week a weekly row's date names."""
+    if week_label == "end":
+        return label - pd.Timedelta(days=6), label
+    return label, label + pd.Timedelta(days=6)
+
+
+def weeks_overlapping(
+    index: pd.DatetimeIndex, start: Any, end: Any, week_label: WeekLabel
+) -> pd.DatetimeIndex:
+    """The weeks in ``index`` with at least one day inside ``[start, end]``.
+
+    A promotion given in days covers every week it touches: a week it ran for
+    two days of is a promotion week, since those days moved its total.
+    """
+    first, last = pd.Timestamp(start).normalize(), pd.Timestamp(end).normalize()
+    lo = index - pd.Timedelta(days=6) if week_label == "end" else index
+    hi = index if week_label == "end" else index + pd.Timedelta(days=6)
+    return index[(hi >= first) & (lo <= last)]
+
+
+def weekly_freq(index: pd.DatetimeIndex) -> str:
+    """The pandas frequency of a weekly index, anchored on its weekday.
+
+    Raises if the dates are not all on one weekday: weekly data is one row per
+    week, and a mix of weekdays means it is not.
+    """
+    days = sorted(set(index.dayofweek))
+    if len(days) != 1:
+        names = ", ".join(_WEEKDAY[d].title() for d in days)
+        raise ValueError(
+            f"weekly values must all fall on the same weekday, one row per week; "
+            f"these fall on {names}"
+        )
+    return f"W-{_WEEKDAY[days[0]]}"
+
+
+def prepare_weekly(
+    values: pd.Series,
+    max_gap_weeks: int,
+    exclude: Sequence[tuple[date, date]] = (),
+    week_label: WeekLabel = "end",
+) -> Prepared | Insufficient:
+    """One value per week, short gaps filled, and every change named.
+
+    ``prepare_daily`` at a weekly step: the same rules, counted in weeks. A
+    missing week is no data, never zero; interior gaps up to ``max_gap_weeks``
+    are filled by interpolation, a longer one makes the series insufficient,
+    and missing weeks at either end are trimmed. A week is excluded when any of
+    its days falls inside an ``exclude`` window (see ``weeks_overlapping``).
+    Every date is a week label; ``week_label`` says which day of its week it
+    names.
+    """
+    if not isinstance(values, pd.Series) or not isinstance(
+        values.index, pd.DatetimeIndex
+    ):
+        raise TypeError("values must be a pandas Series with a DatetimeIndex")
+    if week_label not in ("start", "end"):
+        raise ValueError(f"unknown week_label {week_label!r}; use 'start' or 'end'")
+    series = values.sort_index().astype(float)
+    series.index = series.index.normalize()
+    if series.index.has_duplicates:
+        raise ValueError("values has repeated weeks; pass one value per week")
+    if series.notna().sum() == 0:
+        return Insufficient(needs=1, has=0, unit="weeks", reason="NO_DATA")
+    freq = weekly_freq(series.index)
+
+    full = pd.date_range(series.index.min(), series.index.max(), freq=freq)
+    series = series.reindex(full)
+    first, last = series.first_valid_index(), series.last_valid_index()
+    trimmed = [week.date() for week in full if week < first or week > last]
+    series = series.loc[first:last]
+
+    excluded_mask = pd.Series(False, index=series.index)
+    for start, end in exclude:
+        excluded_mask.loc[weeks_overlapping(series.index, start, end, week_label)] = True
+
+    missing = series.isna() & ~excluded_mask
+    longest = _longest_run(missing)
+    if longest > max_gap_weeks:
+        return Insufficient(
+            needs=max_gap_weeks, has=longest, unit="weeks", reason="GAP_TOO_LONG"
+        )
+
+    imputed = [week.date() for week in series.index[missing]]
+    excluded = [week.date() for week in series.index[excluded_mask]]
+    series = series.mask(excluded_mask)
+    if imputed or excluded:
+        series = series.interpolate(method="time", limit_direction="both")
+    series.index.freq = freq
     return Prepared(values=series, imputed=imputed, excluded=excluded, trimmed=trimmed)
 
 

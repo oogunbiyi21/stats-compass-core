@@ -99,7 +99,10 @@ def verdict(
         dec: A decomposition of the history before ``period``. It should end
             the day before the period starts; days in between are allowed
             only if they were trimmed for having no data.
-        period: The period's daily values; NaN means no data.
+        period: The period's daily values; NaN means no data. For a weekly
+            decomposition (``decompose(freq="W")``), the period's weekly
+            values, labelled as the history is; ``min_points`` then counts
+            weeks, and a single week (``min_points=1``) can be judged.
         kind: ``"count"``, ``"money"`` or ``"ratio"``. Chooses the test.
         weights: Daily denominators (``n``), over at least the prior period
             and the period. Required for ``ratio``; weights a ``mean``.
@@ -132,7 +135,9 @@ def verdict(
     if kind == "count" and aggregate != "sum":
         raise ValueError("a count is judged as a total: pass aggregate='sum'")
 
-    period = _daily(period)
+    weekly = dec.unit == "week"
+    unit = "weeks" if weekly else "days"
+    period = _weekly(period, dec) if weekly else _daily(period)
     start, end = period.index[0], period.index[-1]
     history_end = pd.Timestamp(dec.params["end"])
     if history_end >= start:
@@ -140,13 +145,12 @@ def verdict(
             f"the decomposition must end before the period starts: it ends "
             f"{history_end.date()}, the period starts {start.date()}"
         )
-    between = pd.date_range(
-        history_end + pd.Timedelta(days=1), start - pd.Timedelta(days=1)
-    )
+    step = pd.Timedelta(days=7 if weekly else 1)
+    between = pd.date_range(history_end + step, start - step, freq=step)
     if len(between) and not set(between.date) <= set(dec.trimmed):
         # A day with data the history left out: the caller cut it short.
         return Insufficient(
-            needs=None, has=None, unit="days", reason="HISTORY_ENDS_EARLY"
+            needs=None, has=None, unit=unit, reason="HISTORY_ENDS_EARLY"
         )
     length = len(period)
 
@@ -164,6 +168,8 @@ def verdict(
         "decomposition_method": dec.method,
         "days_read_across": len(between),
     }
+    if weekly:
+        params["input_freq"] = "W"
     warnings: list[ToolWarning] = []
 
     present = period.notna()
@@ -171,11 +177,11 @@ def verdict(
         return Insufficient(
             needs=min_points,
             has=int(present.sum()),
-            unit="days",
+            unit=unit,
             reason="TOO_FEW_POINTS",
         )
     if kind == "ratio" and weights is None:
-        return Insufficient(needs=length, has=0, unit="days", reason="NO_DENOMINATOR")
+        return Insufficient(needs=length, has=0, unit=unit, reason="NO_DENOMINATOR")
 
     errors = dec.expectation_errors(length)
     params["annual_fallback"] = False
@@ -192,9 +198,9 @@ def verdict(
     params["reference"] = errors.attrs["reference"]
     if len(errors) < min_reference:
         return Insufficient(
-            needs=len(dec.daily) + min_reference - len(errors),
-            has=len(dec.daily),
-            unit="days",
+            needs=len(dec.base) + min_reference - len(errors),
+            has=len(dec.base),
+            unit=unit,
             reason="TOO_SHORT",
         )
     if dec.params["trend_ahead"] == "level":
@@ -202,13 +208,17 @@ def verdict(
         real_days = int(dec.params.get("level_real_days", window))
         if real_days * 2 < window:
             return Insufficient(
-                needs=math.ceil(window / 2),
-                has=real_days,
-                unit="days",
+                needs=dec._steps(math.ceil(window / 2)) if weekly else math.ceil(window / 2),
+                has=dec._steps(real_days),
+                unit=unit,
                 reason="RECENT_DAYS_FILLED",
             )
 
-    expected_daily = dec.expected_daily(start.date(), end.date())
+    expected_daily = (
+        dec.expected_steps(period.index)
+        if weekly
+        else dec.expected_daily(start.date(), end.date())
+    )
     period_w = _weights_for(weights, period.index)
     if (
         aggregate == "mean"
@@ -233,7 +243,7 @@ def verdict(
         expected + seasonal_band_z * sigma_expected,
     )
 
-    prior_days = dec.daily.iloc[-length:]
+    prior_days = dec.base.iloc[-length:]
     prior = _aggregate(prior_days, _weights_for(weights, prior_days.index), aggregate)
     sigma_change = _change_sigma(dec, length, robust_scale) * scale
     noise_range = (
@@ -309,6 +319,25 @@ def _daily(values: pd.Series) -> pd.Series:
     return values.reindex(full)
 
 
+def _weekly(values: pd.Series, dec: Decomposition) -> pd.Series:
+    """A weekly period on the history's own weeks: one value per week, gaps NaN."""
+    if not isinstance(values, pd.Series) or not isinstance(
+        values.index, pd.DatetimeIndex
+    ):
+        raise TypeError("period must be a pandas Series with a DatetimeIndex")
+    if len(values) == 0:
+        raise ValueError("period is empty")
+    values = values.sort_index().astype(float)
+    values.index = values.index.normalize()
+    weekday = pd.Timestamp(dec.params["end"]).dayofweek
+    if set(values.index.dayofweek) != {weekday}:
+        raise ValueError(
+            "the period's weeks must be labelled on the same weekday as the history's"
+        )
+    full = pd.date_range(values.index[0], values.index[-1], freq="7D")
+    return values.reindex(full)
+
+
 def _weights_for(weights: pd.Series | None, index: pd.DatetimeIndex) -> pd.Series:
     if weights is None:
         return pd.Series(1.0, index=index)
@@ -329,7 +358,8 @@ def _aggregate(values: pd.Series, weights: pd.Series, how: Aggregate) -> float:
 def _change_sigma(dec: Decomposition, length: int, robust: bool = False) -> float:
     """Spread of the change between consecutive seasonally adjusted periods."""
     adjusted = (dec.observed - dec.seasonal).to_numpy()
-    if dec.grain == "day":
+    if dec.grain == "day" or dec.unit == "week":
+        # Weekly input: ``length`` counts weeks, and so do the blocks.
         blocks = len(adjusted) // length
         totals = (
             adjusted[len(adjusted) - blocks * length :]

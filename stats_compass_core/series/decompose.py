@@ -33,7 +33,14 @@ import numpy as np
 import pandas as pd
 
 from stats_compass_core.results import ToolWarning
-from stats_compass_core.series._common import Insufficient, prepare_daily, week_start
+from stats_compass_core.series._common import (
+    Freq,
+    Insufficient,
+    WeekLabel,
+    prepare_daily,
+    prepare_weekly,
+    week_start,
+)
 
 Method = Literal["mstl", "stl", "fourier"]
 TrendAhead = Literal["level", "flat", "linear"]
@@ -85,7 +92,33 @@ class Decomposition:
     linear: dict[str, Any] | None = field(default=None, repr=False)
     trimmed: list[date] = field(default_factory=list)
 
+    # -- the step ------------------------------------------------------------
+
+    @property
+    def unit(self) -> Literal["day", "week"]:
+        """The step of the series the expectation is measured on.
+
+        ``"day"`` for daily input, whatever the grain (the ``stl`` method sums
+        daily input into weeks but still measures on days). ``"week"`` for
+        weekly input (``decompose(freq="W")``): there are no days to measure
+        on, so every count of days in ``params`` is read in whole weeks.
+        """
+        return "week" if self.params.get("input_freq") == "W" else "day"
+
+    @property
+    def base(self) -> pd.Series:
+        """The input at its own step: ``daily`` for daily input, else the weeks."""
+        return self.observed if self.unit == "week" else self.daily
+
+    def _steps(self, days: int) -> int:
+        """A count of days in ``params``, as a count of the input's steps."""
+        return days if self.unit == "day" else days // 7
+
     # -- expectation ---------------------------------------------------------
+
+    def expected_steps(self, labels: pd.DatetimeIndex) -> pd.Series:
+        """Trend + seasonal at each of the input's own steps (weekly input)."""
+        return pd.Series([self._expected_at(label) for label in labels], index=labels)
 
     def expected_daily(self, start: date, end: date) -> pd.Series:
         """Trend + seasonal for each day in ``[start, end]``, in-sample or ahead.
@@ -101,6 +134,10 @@ class Decomposition:
         weekly-grain decomposition apportions each week's expectation over its
         days by the store's day-of-week shares.
         """
+        if self.unit == "week":
+            raise ValueError(
+                "weekly input has no daily expectation; use expected_steps"
+            )
         days = pd.date_range(pd.Timestamp(start), pd.Timestamp(end), freq="D")
         if len(days) == 0:
             return pd.Series(dtype=float)
@@ -152,6 +189,8 @@ class Decomposition:
             # The same adjustment expectation_errors makes at past positions:
             # the seasonal read one period earlier, per day.
             daily_level, _ = self._level_from_real_days()
+            if self.unit == "week":
+                return daily_level  # read from weeks, so already a week's level
             return daily_level if self.grain == "day" else 7 * daily_level
         recent = self.trend.iloc[-window:]
         if self.params["trend_ahead"] == "flat":
@@ -180,9 +219,9 @@ class Decomposition:
         are. On a growing store that makes the level slightly stale (about 1%
         of level on the demo's growth with a full lookback).
         """
-        days = int(self.params["trend_window_days"])
-        lookback = int(self.params.get("level_lookback_days", 3 * days))
-        adjusted = self.daily - self._lagged_seasonal_daily()
+        days = self._steps(int(self.params["trend_window_days"]))
+        lookback = self._steps(int(self.params.get("level_lookback_days", 3 * days)))
+        adjusted = self.base - self._lagged_seasonal_daily()
         filled = set(self.imputed) | set(self.excluded)
         chosen = []
         recent = zip(
@@ -199,8 +238,8 @@ class Decomposition:
         return float(np.mean(chosen)), len(chosen)
 
     def _fitted_daily(self) -> pd.Series:
-        """In-sample trend + seasonal, per day, whatever the grain."""
-        if self.grain == "day":
+        """In-sample trend + seasonal, per day, whatever the grain (per week for weekly input)."""
+        if self.grain == "day" or self.unit == "week":
             return self.trend + self.seasonal
         days = self.daily.index
         weekly = (self.trend + self.seasonal).reindex(week_start(days)).to_numpy()
@@ -208,8 +247,8 @@ class Decomposition:
         return pd.Series(weekly * shares, index=days)
 
     def _seasonal_daily(self) -> pd.Series:
-        """The in-sample seasonal pattern, per day, whatever the grain."""
-        if self.grain == "day":
+        """The in-sample seasonal pattern, per day, whatever the grain (per week for weekly input)."""
+        if self.grain == "day" or self.unit == "week":
             return self.seasonal
         days = self.daily.index
         weekly = self.seasonal.reindex(week_start(days)).to_numpy()
@@ -217,12 +256,15 @@ class Decomposition:
         return pd.Series(weekly * shares, index=days)
 
     def _lagged_seasonal_daily(self) -> pd.Series:
-        """The seasonal pattern as a forecast reads it: one period earlier, per day."""
-        days = self.daily.index
+        """The seasonal pattern as a forecast reads it: one period earlier, per day.
+
+        Per week for weekly input.
+        """
+        days = self.base.index
         lagged = pd.Series(0.0, index=days)
         for period, component in self.seasonal_by_period.items():
             shifted = component.shift(period)
-            if self.grain == "day":
+            if self.grain == "day" or self.unit == "week":
                 lagged = lagged + shifted.reindex(days).to_numpy()
             else:
                 shares = np.asarray(self.day_of_week_share)[days.dayofweek]
@@ -257,19 +299,23 @@ class Decomposition:
         Returns one row per window start, with ``error`` and ``expected``.
         Positions whose baseline or window touches an excluded day are left
         out.
+
+        For weekly input every count is in weeks: ``ndays`` and
+        ``delete_after_days`` are numbers of weeks, and the baseline is
+        ``trend_window_days`` read in whole weeks.
         """
         if ndays < 1:
             raise ValueError("ndays must be at least 1")
-        baseline = int(self.params["trend_window_days"])
+        baseline = self._steps(int(self.params["trend_window_days"]))
         lagged = self._lagged_seasonal_daily()
-        adjusted = self.daily - lagged
+        adjusted = self.base - lagged
         level = adjusted.rolling(baseline).mean().shift(1)
         ahead = lambda s: s.rolling(ndays).sum().shift(-(ndays - 1))  # noqa: E731
         expected = ndays * level + ahead(lagged)
-        error = ahead(self.daily) - expected
+        error = ahead(self.base) - expected
         frame = pd.DataFrame({"error": error, "expected": expected})
         if self.excluded:
-            touched = pd.Series(0.0, index=self.daily.index)
+            touched = pd.Series(0.0, index=self.base.index)
             touched.loc[pd.DatetimeIndex(self.excluded)] = 1.0
             span = touched.rolling(baseline + ndays).sum().shift(-(ndays - 1))
             frame = frame[span.fillna(1.0) == 0]
@@ -305,7 +351,7 @@ class Decomposition:
         """
         Z = self.linear["Z"]
         n = len(Z)
-        positions = self.daily.index.get_indexer(starts)
+        positions = self.base.index.get_indexer(starts)
         shifts = np.empty(len(positions))
         for j, p in enumerate(positions):
             g = ndays * Z[p - baseline : p].mean(axis=0) - Z[p : p + ndays].sum(axis=0)
@@ -396,7 +442,8 @@ class Decomposition:
         """
         if ndays < 1:
             raise ValueError("ndays must be at least 1")
-        if self.grain == "day":
+        if self.grain == "day" or self.unit == "week":
+            # Weekly input: ``ndays`` counts weeks, as everywhere for it.
             return _spread(self.remainder.rolling(ndays).sum().dropna(), robust)
         if ndays % 7 == 0:
             return _spread(self.remainder.rolling(ndays // 7).sum().dropna(), robust)
@@ -440,8 +487,10 @@ def decompose(
     exclude: Sequence[tuple[date, date]] = (),
     exclude_iterations: int = 3,
     level_lookback_days: int | None = None,
+    freq: Freq = "D",
+    week_label: WeekLabel = "end",
 ) -> Decomposition | Insufficient:
-    """Decompose a daily series into trend, seasonal components and remainder.
+    """Decompose a daily (or weekly) series into trend, seasonal components and remainder.
 
     Args:
         values: One value per day, on a DatetimeIndex. NaN means no data, never
@@ -476,11 +525,39 @@ def decompose(
             their neighbours, which is as noisy as the two days it joins. They
             are then replaced by the fit's own trend + seasonal and refitted,
             this many times.
+        freq: ``"D"`` for one value per day (the default), ``"W"`` for one
+            value per week, such as retailer sell-out data. Weekly input fits
+            the annual pattern only (``periods`` is 52 weeks), with
+            ``"fourier"`` (one year of history) or ``"stl"`` (two); every
+            ``*_days`` argument must be whole weeks and is read in weeks. See
+            ``_decompose_weekly``.
+        week_label: For weekly input, which day of its week each date names:
+            ``"end"`` (the week ending, usual for sell-out data) or
+            ``"start"``. It decides which weeks an ``exclude`` window touches
+            and which month each week falls in.
 
     Returns:
         A ``Decomposition``, or ``Insufficient`` when there is too little
         history for the method (``TOO_SHORT``) or a gap too long to fill.
     """
+    if freq == "W":
+        return _decompose_weekly(
+            values,
+            method=method,
+            periods=periods,
+            max_gap_days=max_gap_days,
+            annual_smoothing_days=annual_smoothing_days,
+            fourier_terms=fourier_terms,
+            trend_ahead=trend_ahead,
+            trend_window_days=trend_window_days,
+            robust=robust,
+            exclude=exclude,
+            exclude_iterations=exclude_iterations,
+            level_lookback_days=level_lookback_days,
+            week_label=week_label,
+        )
+    if freq != "D":
+        raise ValueError(f"unknown freq {freq!r}; use 'D' or 'W'")
     if level_lookback_days is None:
         level_lookback_days = 3 * trend_window_days
     elif level_lookback_days * 2 < trend_window_days:
@@ -614,6 +691,145 @@ def decompose(
     return dec
 
 
+def _decompose_weekly(
+    values: pd.Series,
+    *,
+    method: Method,
+    periods: Sequence[int],
+    max_gap_days: int,
+    annual_smoothing_days: int,
+    fourier_terms: int,
+    trend_ahead: TrendAhead,
+    trend_window_days: int,
+    robust: bool,
+    exclude: Sequence[tuple[date, date]],
+    exclude_iterations: int,
+    level_lookback_days: int | None,
+    week_label: WeekLabel,
+) -> Decomposition | Insufficient:
+    """``decompose`` for one value per week.
+
+    The same decomposition and the same reference machinery, at a weekly step:
+    every ``*_days`` count is whole weeks (28 days is a four-week baseline),
+    and ``Decomposition.unit`` is ``"week"`` so that the expectation, its
+    errors and the level are all measured on weeks. Only the annual pattern
+    is fitted, as 52 weeks: there is no day-of-week pattern in weekly totals.
+
+    ``"fourier"`` needs one year (52 weeks), since one full cycle fixes the
+    harmonics, and its reference is exactly out of sample; ``"stl"`` needs two
+    (104 weeks). ``"mstl"`` with one period is STL, so it is refused rather
+    than offered twice. Daily input never reaches this function, so nothing
+    here can move a daily result.
+    """
+    if method not in ("fourier", "stl"):
+        raise ValueError(
+            f"weekly input: use method 'fourier' (recommended) or 'stl', not {method!r}"
+        )
+    if sorted({int(p) for p in periods}) not in ([7, 365], [WEEKLY_PERIOD]):
+        raise ValueError(
+            f"weekly input fits the annual pattern only: periods=({WEEKLY_PERIOD},)"
+        )
+    periods = [WEEKLY_PERIOD]
+    if level_lookback_days is None:
+        level_lookback_days = 3 * trend_window_days
+    for name, days in (
+        ("max_gap_days", max_gap_days),
+        ("trend_window_days", trend_window_days),
+        ("level_lookback_days", level_lookback_days),
+    ):
+        if days % 7:
+            raise ValueError(
+                f"weekly input counts whole weeks: {name} must be a multiple of 7, "
+                f"not {days}"
+            )
+    if trend_window_days < 7:
+        raise ValueError("weekly input: trend_window_days must be at least 7")
+    if level_lookback_days * 2 < trend_window_days:
+        raise ValueError(
+            f"level_lookback_days ({level_lookback_days}) must be at least half of "
+            f"trend_window_days ({trend_window_days}), or every level is refused"
+        )
+
+    prepared = prepare_weekly(values, max_gap_days // 7, exclude, week_label)
+    if isinstance(prepared, Insufficient):
+        return prepared
+    y, imputed = prepared.values, prepared.imputed
+    needs = WEEKLY_PERIOD if method == "fourier" else 2 * WEEKLY_PERIOD
+    if len(y) < needs:
+        return Insufficient(needs=needs, has=len(y), unit="weeks", reason="TOO_SHORT")
+
+    params: dict[str, Any] = {
+        "method": method,
+        "periods": periods,
+        "periods_used": periods,
+        "input_freq": "W",
+        "week_label": week_label,
+        "max_gap_days": max_gap_days,
+        "annual_smoothing_days": annual_smoothing_days,
+        "fourier_terms": fourier_terms,
+        "trend_ahead": trend_ahead,
+        "trend_window_days": trend_window_days,
+        "robust": robust,
+        "exclude_iterations": exclude_iterations,
+        "level_lookback_days": level_lookback_days,
+        "exclude": [[_iso(start), _iso(end)] for start, end in exclude],
+        "start": y.index[0].date().isoformat(),
+        "end": y.index[-1].date().isoformat(),
+        "n_weeks": len(y),
+        "n_imputed": len(imputed),
+        "n_excluded": len(prepared.excluded),
+        "n_trimmed": len(prepared.trimmed),
+    }
+    columns = [str(values.name)] if values.name is not None else []
+    warnings: list[ToolWarning] = []
+    if prepared.trimmed:
+        warnings.append(
+            ToolWarning(
+                code="TRIMMED_WEEKS",
+                columns=columns,
+                message=(
+                    f"{len(prepared.trimmed)} week(s) with no data before the first "
+                    f"value or after the last were left out: there is nothing on one "
+                    f"side to fill them from. The series runs {y.index[0].date()} to "
+                    f"{y.index[-1].date()}."
+                ),
+            )
+        )
+    if imputed:
+        warnings.append(
+            ToolWarning(
+                code="IMPUTED_WEEKS",
+                columns=columns,
+                message=(
+                    f"{len(imputed)} week(s) with no data were filled by linear "
+                    f"interpolation before decomposing; the longest gap allowed is "
+                    f"{max_gap_days // 7} week(s)."
+                ),
+            )
+        )
+
+    def fit(series: pd.Series) -> Decomposition:
+        if method == "stl":
+            return _stl_input_weekly(
+                series, imputed, params, warnings, annual_smoothing_days, robust
+            )
+        return _fourier(
+            series, periods, imputed, params, warnings, fourier_terms, step_days=7
+        )
+
+    dec = fit(y)
+    if prepared.excluded:
+        excluded_weeks = pd.DatetimeIndex(prepared.excluded)
+        for _ in range(exclude_iterations):
+            refilled = y.copy()
+            refilled.loc[excluded_weeks] = dec._fitted_daily().loc[excluded_weeks]
+            y = refilled
+            dec = fit(y)
+    dec = _account_for(dec, prepared.excluded, prepared.trimmed)
+    _record_level(dec, columns)
+    return dec
+
+
 def _iso(day: Any) -> str:
     """A date, datetime or Timestamp as a plain ISO date."""
     return pd.Timestamp(day).date().isoformat()
@@ -627,6 +843,9 @@ def _record_level(dec: Decomposition, columns: list[str]) -> None:
     """
     window = int(dec.params["trend_window_days"])
     _, real_days = dec._level_from_real_days()
+    if dec.unit == "week":
+        _record_level_weekly(dec, columns, window, real_days)
+        return
     dec.params["level_real_days"] = real_days
     dec.warnings[:] = [w for w in dec.warnings if w.code != "RECENT_DAYS_FILLED"]
     if real_days * 2 < window:
@@ -645,6 +864,32 @@ def _record_level(dec: Decomposition, columns: list[str]) -> None:
         )
 
 
+def _record_level_weekly(
+    dec: Decomposition, columns: list[str], window: int, real_weeks: int
+) -> None:
+    """``_record_level`` for weekly input: counted in weeks, kept in days.
+
+    ``params["level_real_days"]`` stays in days (real weeks × 7), so that
+    every reader compares it with ``trend_window_days`` as before.
+    """
+    dec.params["level_real_days"] = real_weeks * 7
+    dec.warnings[:] = [w for w in dec.warnings if w.code != "RECENT_DAYS_FILLED"]
+    if real_weeks * 2 < window // 7:
+        dec.warnings.append(
+            ToolWarning(
+                code="RECENT_DAYS_FILLED",
+                columns=columns,
+                message=(
+                    f"Only {real_weeks} real week(s) in the last "
+                    f"{dec.params['level_lookback_days'] // 7} were available to read "
+                    f"the current level from (fewer than half of {window // 7}); the "
+                    f"rest were excluded, filled or have no seasonal a year back. "
+                    f"Expectations ahead are not to be trusted."
+                ),
+            )
+        )
+
+
 def _account_for(
     dec: Decomposition, excluded: list[date], trimmed: list[date]
 ) -> Decomposition:
@@ -652,7 +897,7 @@ def _account_for(
     remainder = dec.remainder
     if excluded:
         days = pd.DatetimeIndex(excluded)
-        hit = days if dec.grain == "day" else week_start(days).unique()
+        hit = days if dec.grain == "day" or dec.unit == "week" else week_start(days).unique()
         remainder = remainder.copy()
         remainder.loc[remainder.index.isin(hit)] = np.nan
     return replace(dec, remainder=remainder, excluded=excluded, trimmed=trimmed)
@@ -772,7 +1017,47 @@ def _stl_weekly(
     )
 
 
-def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposition:
+def _stl_input_weekly(
+    y, imputed, params, warnings, annual_smoothing_days, robust
+) -> Decomposition:
+    """STL with period 52 on weekly input: ``_stl_weekly`` without the days."""
+    _, STL = _require_statsmodels()
+    fit = STL(y, period=WEEKLY_PERIOD, robust=robust).fit()
+    smoothing_weeks = (
+        max(1, round(annual_smoothing_days / 7)) if annual_smoothing_days > 1 else 1
+    )
+    if smoothing_weeks > 1 and smoothing_weeks % 2 == 0:
+        smoothing_weeks += 1
+    annual = _smooth(fit.seasonal, smoothing_weeks)
+    remainder = fit.resid + (fit.seasonal - annual)
+    params.update(
+        weekly_period=WEEKLY_PERIOD,
+        annual_smoothing_weeks=smoothing_weeks,
+        statsmodels_version=_statsmodels_version(),
+    )
+    return Decomposition(
+        method="stl",
+        grain="week",
+        params=params,
+        observed=y.rename(None),
+        trend=fit.trend.rename(None),
+        seasonal=annual.rename(None),
+        remainder=remainder.rename(None),
+        seasonal_by_period={WEEKLY_PERIOD: annual.rename(None)},
+        imputed=imputed,
+        warnings=warnings,
+    )
+
+
+def _fourier(
+    y, periods, imputed, params, warnings, fourier_terms, step_days: int = 1
+) -> Decomposition:
+    """Least squares on a trend, day-of-week effects and annual harmonics.
+
+    ``step_days`` is 7 for weekly input: time is still counted in days, so the
+    annual harmonics have their true 365.25-day cycle, while "one period
+    earlier" is 52 rows (364 days) back, as the reference reads it.
+    """
     t = (y.index - y.index[0]).days.to_numpy(dtype=float)
     columns: dict[str, np.ndarray] = {"const": np.ones(len(y)), "t": t / 365.25}
     weekly = 7 in periods
@@ -781,8 +1066,9 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
             columns[f"dow{dow}"] = (y.index.dayofweek == dow).astype(float)
     annual_periods = [p for p in periods if p != 7]
     for period in annual_periods:
+        cycle = _annual_cycle(period, step_days)
         for k in range(1, fourier_terms + 1):
-            angle = 2 * np.pi * k * t / (365.25 if period == 365 else period)
+            angle = 2 * np.pi * k * t / cycle
             columns[f"sin{period}_{k}"] = np.sin(angle)
             columns[f"cos{period}_{k}"] = np.cos(angle)
     X = pd.DataFrame(columns, index=y.index)
@@ -799,8 +1085,8 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
         for dow in range(1, 7):
             Z[:, names.index(f"dow{dow}")] = (y.index.dayofweek == dow) - 1 / 7
     for period in annual_periods:
-        cycle = 365.25 if period == 365 else period
-        back = t - period
+        cycle = _annual_cycle(period, step_days)
+        back = t - period * step_days
         for k in range(1, fourier_terms + 1):
             angle = 2 * np.pi * k * back / cycle
             Z[:, names.index(f"sin{period}_{k}")] = np.where(
@@ -835,10 +1121,10 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
     remainder = y - trend - seasonal
     return Decomposition(
         method="fourier",
-        grain="day",
+        grain="day" if step_days == 1 else "week",
         params=params,
         observed=y.rename(None),
-        daily=y.rename(None),
+        daily=y.rename(None) if step_days == 1 else pd.Series(dtype=float),
         trend=trend.rename(None),
         seasonal=seasonal.rename(None),
         remainder=remainder.rename(None),
@@ -847,3 +1133,10 @@ def _fourier(y, periods, imputed, params, warnings, fourier_terms) -> Decomposit
         warnings=warnings,
         linear=linear,
     )
+
+
+def _annual_cycle(period: int, step_days: int) -> float:
+    """A seasonal period's cycle in days: the annual one is 365.25 days."""
+    if step_days == 1:
+        return 365.25 if period == 365 else period
+    return 365.25 if period == WEEKLY_PERIOD else period * step_days
