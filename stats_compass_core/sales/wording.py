@@ -3,8 +3,10 @@
 The app's wording is the model (stats-compass-commerce): the verdict labels
 from ``packages/ui/src/badge.ts``, the period sentences from
 ``packages/ui/src/headline.ts``, the lift lines from
-``apps/web/src/promotions.ts``. The copy rules: "expected" is the baseline
-word, contractions, a true minus (−), no em dashes. Figures come from the
+``apps/web/src/promotions.ts``, date ranges from ``packages/ui/src/dates.ts``,
+and the seasonality chart's "the year's average". The copy rules: "expected"
+is the baseline word, contractions, a true minus (−), numerals ("2 years"),
+no em dashes. Figures come from the
 statistics; nothing here computes one.
 """
 
@@ -25,10 +27,10 @@ VERDICT_LABEL = {
 
 # Weekly input, from the calibration (scripts/calibrate_weekly.py): a week is
 # first judged at 77 weeks of history, four weeks or a promotion at 83 to 93,
-# and two years and three found about as much.
+# and 2 years and 3 found about as much.
 WEEKLY_HISTORY_NOTE = (
     "Weekly data needs about 18 months of history before a week can be judged, "
-    "and works best with two years or more."
+    "and works best with 2 years or more."
 )
 
 MONTHS = (
@@ -77,19 +79,20 @@ def day(d: date) -> str:
 
 
 def span(first: date, last: date) -> str:
-    """"14 May to 3 June 2026", "28 December 2025 to 3 January 2026"."""
+    """As the app writes them: "21–27 September 2026", "14 May – 3 June 2026",
+    "28 December 2025 – 3 January 2026": an en dash, spaced across months."""
     if first == last:
         return day(first)
     if first.year == last.year and first.month == last.month:
-        return f"{first.day} to {day(last)}"
+        return f"{first.day}–{day(last)}"
     if first.year == last.year:
         head = f"{first.day} {MONTHS[first.month - 1]}"
-        return f"{head} to {day(last)}"
-    return f"{day(first)} to {day(last)}"
+        return f"{head} – {day(last)}"
+    return f"{day(first)} – {day(last)}"
 
 
 def period_name(first: date, last: date, weekly: bool, week_label: str) -> str:
-    """"Week ending 24 October 2026", "Weeks ending 3 to 24 October 2026", "18 to 24 October 2026"."""
+    """"Week ending 24 October 2026", "Weeks ending 3–24 October 2026", "18–24 October 2026"."""
     if not weekly:
         return span(first, last)
     which = "ending" if week_label == "end" else "starting"
@@ -110,15 +113,33 @@ def history(n: int, unit: str) -> str:
 # -- a period's verdict ---------------------------------------------------------
 
 
-def period_sentence(verdict: str, observed: float, kind: str, currency: str | None, weekly_period: bool) -> str:
-    """The app's headline sentence, for any sales figure."""
+def period_sentence(
+    verdict: str,
+    observed: float,
+    expected: float,
+    kind: str,
+    currency: str | None,
+    weekly_period: bool,
+) -> str:
+    """The app's headline sentence, for any sales figure.
+
+    A real change says which way and how far, as the app's finding titles do.
+    """
     what = f"sales of {amount(observed, kind, currency)}"
+    movement = "week-to-week movement" if weekly_period else "movement from one period to the next"
     if verdict == "expected":
         return f"Nothing here looks unusual: {what} are within the expected range for this time of year."
     if verdict == "noise":
-        movement = "week-to-week movement" if weekly_period else "movement from one period to the next"
         return f"Nothing here looks unusual: {what} are within the expected {movement}."
-    return f"{what[0].upper()}{what[1:]} are outside the expected range for this time of year."
+    side = "above" if observed >= expected else "below"
+    if expected > 0:
+        size = f"{abs(round(100 * (observed - expected) / expected))}%"
+    else:
+        size = amount(abs(observed - expected), kind, currency)
+    return (
+        f"{what[0].upper()}{what[1:]} are {size} {side} what this time of year usually brings: "
+        f"more than the usual {movement}, and unlikely to be chance."
+    )
 
 
 def period_detail(
@@ -130,13 +151,13 @@ def period_detail(
     currency: str | None,
     prior_name: str,
 ) -> str:
-    """"Expected about £11,900, in a range of £10,800 to £13,000. +4% on the previous week."."""
+    """"Expected about £11,900, in a range of £10,800 to £13,000. +4% vs the previous week."."""
     text = (
         f"Expected about {amount(expected, kind, currency)}, in a range of "
         f"{amount(max(low, 0.0), kind, currency)} to {amount(high, kind, currency)}."
     )
     if change_pct is not None:
-        text += f" {signed_pct(change_pct)} on the previous {prior_name}."
+        text += f" {signed_pct(change_pct)} vs the previous {prior_name}."
     return text
 
 
@@ -177,7 +198,7 @@ def lift_range(
 
 
 def lift_sentence(name: str, first: date, last: date, value: str, amount_text: str, range_text: str | None, verdict: str) -> str:
-    """"SUMMER40, 14 May to 3 June 2026: +32%, £9,144 more than expected; likely between +13% and +51%. Real change."."""
+    """"SUMMER40, 14 May – 3 June 2026: +32%, £9,144 more than expected; likely between +13% and +51%. Real change."."""
     middle = f"{value}, {amount_text}" + (f"; {range_text}" if range_text else "")
     return f"{name}, {span(first, last)}: {middle}. {VERDICT_LABEL[verdict]}."
 
@@ -186,13 +207,13 @@ def lift_sentence(name: str, first: date, last: date, value: str, amount_text: s
 
 
 def month_line(month: int, effect: float, lower: float, upper: float) -> str:
-    """"December: about 33% above the underlying level, likely between +25% and +41%."."""
+    """"December: about 33% above the year's average, likely between +25% and +41%."."""
     name = MONTHS[month - 1]
     if lower <= 0 <= upper:
-        return f"{name}: about the same as the underlying level ({signed_pct(effect)}, likely between {signed_pct(lower)} and {signed_pct(upper)})."
+        return f"{name}: about the same as the year's average ({signed_pct(effect)}, likely between {signed_pct(lower)} and {signed_pct(upper)})."
     side = "above" if effect > 0 else "below"
     return (
-        f"{name}: about {abs(round(effect))}% {side} the underlying level, likely between "
+        f"{name}: about {abs(round(effect))}% {side} the year's average, likely between "
         f"{signed_pct(lower)} and {signed_pct(upper)}."
     )
 
@@ -201,12 +222,12 @@ def seasonality_sentence(rows: list[Any]) -> str:
     """The highest and lowest months, where the range clears zero."""
     clear = [r for r in rows if not (r.lower <= 0 <= r.upper)]
     if not clear:
-        return "No month runs clearly above or below the underlying level: there's no seasonal pattern to speak of."
+        return "No month runs clearly above or below the year's average: there's no seasonal pattern to speak of."
     high = max(clear, key=lambda r: r.effect_pct)
     low = min(clear, key=lambda r: r.effect_pct)
     parts = []
     if high.effect_pct > 0:
-        parts.append(f"highest in {MONTHS[high.month - 1]} (about {round(high.effect_pct)}% above the underlying level)")
+        parts.append(f"highest in {MONTHS[high.month - 1]} (about {round(high.effect_pct)}% above the year's average)")
     if low.effect_pct < 0:
         parts.append(f"lowest in {MONTHS[low.month - 1]} (about {abs(round(low.effect_pct))}% below)")
     return "Sales usually run " + " and ".join(parts) + "."
@@ -230,7 +251,9 @@ def insufficient(reason: str, needs: Any, has: Any, unit: str, *, context: str, 
         )
     elif reason == "TOO_SHORT":
         what = {"period": "say what to expect", "promotion": "measure this promotion", "seasonality": "find the seasonal pattern"}[context]
-        text = f"Too early to {what}: it needs at least {history(int(needs), u)} of history; there are {history(int(has), u)}."
+        need = history(int(needs), u)
+        floor = need if need.startswith("about") else f"at least {need}"
+        text = f"Too early to {what}: it needs {floor} of history; there are {history(int(has), u)}."
     elif reason == "GAP_TOO_LONG":
         text = f"There's a gap of {history(int(has), u)} with no data. Gaps of up to {history(int(needs), u)} are filled in; longer ones aren't."
     elif reason == "TOO_FEW_POINTS":
@@ -248,7 +271,7 @@ def insufficient(reason: str, needs: Any, has: Any, unit: str, *, context: str, 
     elif reason == "NONPOSITIVE_LEVEL":
         text = "The underlying level is zero or below in some month, so a percentage of it means nothing."
     elif reason == "NO_ANNUAL":
-        text = f"The seasonal pattern needs about two years of daily data; there are {history(int(has), u)}."
+        text = f"The seasonal pattern needs about 2 years of daily data; there are {history(int(has), u)}."
     elif reason == "RECENT_DAYS_FILLED":
         text = f"Too few recent {u} have real data to read the current level from: it needs {needs}; there are {has}."
     elif reason == "NO_DATA":

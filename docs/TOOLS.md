@@ -21,12 +21,12 @@ daily or weekly rows (detected from the dates; weekly rows may be labelled by
 the week ending or starting), one series or one per group such as retailer and
 product. Each result has a sentence in the app's words and the figures behind
 it. Weekly data needs about 18 months of history before a week can be judged,
-and works best with two years or more.
+and works best with 2 years or more.
 
 | Tool | Description | Use Case |
 |------|-------------|----------|
 | `sales_verdict` | Expected, Real change, Noise or Not enough data, for a period against the history before it | "Is this week's sell-out at Tesco unusual?" |
-| `sales_seasonality` | Each month's effect above or below the underlying level, with a likely range | "What does December usually bring?" |
+| `sales_seasonality` | Each month's effect above or below the year's average, with a likely range | "What does December usually bring?" |
 | `promotion_lift` | What each promotion added against what would have sold without it, with a likely range and a verdict; promotions from a list, a flag column or a promotion calendar | "Did the 2 for £3 pay?" |
 
 ## Data Tools (`stats_compass_core.data`)

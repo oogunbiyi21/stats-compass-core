@@ -77,14 +77,14 @@ class PeriodRow(BaseModel):
     verdict: Outcome
     label: str = Field(description="Expected, Real change, Noise or Not enough data.")
     summary: str = Field(description="The verdict in a sentence, in the app's words.")
-    detail: str | None = Field(default=None, description="The expected figure and range, and the change on the previous period.")
+    detail: str | None = Field(default=None, description="The expected figure and range, and the change vs the previous period.")
     period_start: str
     period_end: str
     observed: float | None = None
     expected: float | None = None
     expected_low: float | None = None
     expected_high: float | None = None
-    change_pct: float | None = Field(default=None, description="Percent change on the previous period of the same length.")
+    change_pct: float | None = Field(default=None, description="Percent change vs the previous period of the same length.")
     p_value: float | None = None
     insufficient_reason: str | None = None
     warnings: list[str] = Field(default_factory=list)
@@ -115,7 +115,10 @@ def judge_period(
         if len(labels) == 0:
             raise ValueError(f"No week in the data falls in {wording.span(period[0], period[1])}.")
         period_values = values.reindex(labels)
-        history = values[values.index < labels[0]]
+        # On the full weekly grid up to the week before the period: a group
+        # whose rows stop early (a delisted product) has missing weeks there,
+        # which are trimmed, not read as data left out.
+        history = values.reindex(grid[grid < labels[0]])
         first, last = labels[0], labels[-1]
         min_points = 1
         weekly_period = len(labels) == 1
@@ -123,7 +126,7 @@ def judge_period(
     else:
         days = pd.date_range(start, end)
         period_values = values.reindex(days)
-        history = values[values.index < start]
+        history = values.reindex(pd.date_range(values.index.min(), start - pd.Timedelta(days=1)))
         first, last = days[0], days[-1]
         min_points = min(5, len(days))
         weekly_period = len(days) == 7
@@ -146,7 +149,7 @@ def judge_period(
     return base.model_copy(update={
         "verdict": facts.verdict,
         "label": wording.VERDICT_LABEL[facts.verdict],
-        "summary": wording.period_sentence(facts.verdict, facts.observed, kind, currency, weekly_period),
+        "summary": wording.period_sentence(facts.verdict, facts.observed, facts.expected, kind, currency, weekly_period),
         "detail": wording.period_detail(facts.expected, low, high, change_pct, kind, currency, prior_name),
         "observed": facts.observed,
         "expected": facts.expected,
@@ -166,7 +169,7 @@ def judge_period(
 class MonthRow(BaseModel):
     month: int
     name: str
-    effect_pct: float = Field(description="How far the month runs above (+) or below (−) the underlying level, in percent.")
+    effect_pct: float = Field(description="How far the month runs above (+) or below (−) the year's average, in percent.")
     lower: float
     upper: float
     line: str

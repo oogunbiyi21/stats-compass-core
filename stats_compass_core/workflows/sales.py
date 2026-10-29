@@ -141,7 +141,7 @@ class SalesSeasonalityResult(BaseModel):
     input_schema=SalesSeasonalityInput,
     description=(
         "Find what each month usually brings: how far it runs above or below the "
-        "underlying level, with a likely range, as the Stats Compass app does. Daily "
+        "year's average, with a likely range, as the Stats Compass app does. Daily "
         "or weekly rows, optionally per group."
     ),
     tier="workflow",

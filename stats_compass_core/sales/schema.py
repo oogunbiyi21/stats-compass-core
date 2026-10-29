@@ -136,22 +136,22 @@ def build_series(df: pd.DataFrame, cols: SalesColumns) -> SalesSeries:
     needed = [cols.date_column, cols.value_column, *group_by]
     missing = [c for c in needed if c not in df.columns]
     if missing:
-        raise ValueError(
-            f"Column(s) not found: {missing}. The columns are: {list(df.columns)}"
-        )
+        raise ValueError(missing_columns(missing, df.columns))
     dates = pd.to_datetime(df[cols.date_column], errors="coerce")
     bad = df.loc[dates.isna() & df[cols.date_column].notna(), cols.date_column]
     if len(bad):
+        if len(bad) == 1:
+            raise ValueError(f"1 date in '{cols.date_column}' couldn't be read: '{bad.iloc[0]}'.")
         raise ValueError(
-            f"{len(bad)} date(s) in '{cols.date_column}' could not be read, for "
-            f"example {bad.iloc[0]!r}."
+            f"{len(bad)} dates in '{cols.date_column}' couldn't be read, for example '{bad.iloc[0]}'."
         )
     values = pd.to_numeric(df[cols.value_column], errors="coerce")
     bad = df.loc[values.isna() & df[cols.value_column].notna(), cols.value_column]
     if len(bad):
+        if len(bad) == 1:
+            raise ValueError(f"1 value in '{cols.value_column}' isn't a number: '{bad.iloc[0]}'.")
         raise ValueError(
-            f"{len(bad)} value(s) in '{cols.value_column}' are not numbers, for "
-            f"example {bad.iloc[0]!r}."
+            f"{len(bad)} values in '{cols.value_column}' aren't numbers, for example '{bad.iloc[0]}'."
         )
     frame = pd.DataFrame({"date": dates.dt.normalize(), "value": values})
     for c in group_by:
@@ -192,7 +192,7 @@ def detect_freq(dates: pd.DatetimeIndex) -> Freq:
     """
     dates = dates.sort_values()
     if len(dates) < 2:
-        raise ValueError("There is only one date, so there is no history to compare with.")
+        raise ValueError("There's only one date, so there's no history to compare with.")
     gaps = np.diff(dates.to_numpy()).astype("timedelta64[D]").astype(int)
     if len(set(dates.dayofweek)) == 1 and (gaps % 7 == 0).all():
         weekly_freq(dates)  # one weekday: never raises here
@@ -216,7 +216,7 @@ def windows_from_flags(
     week for weekly.
     """
     if flag_column not in df.columns:
-        raise ValueError(f"Column '{flag_column}' not found.")
+        raise ValueError(missing_columns([flag_column], df.columns))
     truthy = {"1", "1.0", "true", "yes", "y", "t"}
     flags = df[flag_column].map(lambda v: str(v).strip().lower() in truthy)
     group_by = list(cols.group_by or [])
@@ -266,19 +266,17 @@ def windows_from_calendar(
     The calendar's group columns are matched by name with ``group_by``; a
     group column it lacks means the promotion ran in every value of it.
     """
-    for c in [start_column, end_column, *([name_column] if name_column else [])]:
-        if c not in calendar.columns:
-            raise ValueError(
-                f"Column '{c}' not found in the promotion calendar. Its columns are: "
-                f"{list(calendar.columns)}"
-            )
+    wanted = [start_column, end_column, *([name_column] if name_column else [])]
+    missing = [c for c in wanted if c not in calendar.columns]
+    if missing:
+        raise ValueError(missing_columns(missing, calendar.columns, where=" in the promotion calendar"))
     group_by = [c for c in (cols.group_by or []) if c in calendar.columns]
     windows = []
     for _, row in calendar.iterrows():
         start, end = pd.to_datetime(row[start_column], errors="coerce"), pd.to_datetime(row[end_column], errors="coerce")
         if pd.isna(start) or pd.isna(end):
             raise ValueError(
-                f"A promotion's dates could not be read: {row[start_column]!r} to {row[end_column]!r}."
+                f"A promotion's dates couldn't be read: '{row[start_column]}' to '{row[end_column]}'."
             )
         windows.append(
             PromotionWindow(
@@ -298,6 +296,15 @@ def windows_for(group: GroupSeries, windows: list[PromotionWindow], group_by: li
         w for w in windows
         if not w.group or all(labels.get(c) == str(v) for c, v in w.group.items())
     ]
+
+
+def missing_columns(missing: list[str], columns, where: str = "") -> str:
+    """"Couldn't find the column 'week'. The columns are: date, retailer, units."."""
+    names = [f"'{c}'" for c in missing]
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" and {names[-1]}"
+    noun = "column" if len(names) == 1 else "columns"
+    whose = "Its" if where else "The"
+    return f"Couldn't find the {noun} {listed}{where}. {whose} columns are: {', '.join(map(str, columns))}."
 
 
 def _week_span(first: pd.Timestamp, last: pd.Timestamp, week_label: WeekLabel) -> tuple[pd.Timestamp, pd.Timestamp]:

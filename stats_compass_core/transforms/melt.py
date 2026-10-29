@@ -66,7 +66,11 @@ def melt(state: DataFrameState, params: MeltInput) -> DataFrameQueryResult:
     wanted = [*params.id_columns, *(params.value_columns or [])]
     missing = [c for c in wanted if c not in df.columns]
     if missing:
-        raise ValueError(f"Columns not found in DataFrame: {missing}")
+        names = ", ".join(f"'{c}'" for c in missing)
+        raise ValueError(
+            f"Couldn't find {'the column' if len(missing) == 1 else 'the columns'} {names}. "
+            f"The columns are: {', '.join(map(str, df.columns))}."
+        )
     for name in (params.variable_name, params.value_name):
         if name in params.id_columns:
             raise ValueError(f"'{name}' is already a kept column; choose another name for the new column.")
@@ -83,7 +87,7 @@ def melt(state: DataFrameState, params: MeltInput) -> DataFrameQueryResult:
             code="NON_NUMERIC_VALUES",
             columns=non_numeric[:10],
             message=(
-                f"{len(non_numeric)} melted column(s) are not numeric, so '{params.value_name}' "
+                f"{len(non_numeric)} melted {'column isn' if len(non_numeric) == 1 else 'columns aren'}'t numeric, so '{params.value_name}' "
                 f"may hold text. Convert it with convert_dtype before analysing it."
             ),
         ))
