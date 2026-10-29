@@ -42,6 +42,11 @@ exclude zero while the lift is still ``expected``. Both levels are in
   |error| of this estimator applied to single days, measured like the lift's
   reference. It is not the lift's interval, which is for the window's total.
 
+**Weekly input** (``freq="W"``): the same estimator on weeks. The window is
+every week it touches (``weeks_overlapping``), and every ``*_days`` argument
+must be whole weeks: a 28-day baseline is four weeks, 21 post days are three.
+``series`` then holds one row per week, labelled as the input is.
+
 Not measured: pull-forward. Customers who would have bought after the window
 but bought inside it inflate the lift, and the dip they leave is excluded from
 the fit rather than netted off.
@@ -59,7 +64,13 @@ import pandas as pd
 from scipy import stats
 
 from stats_compass_core.results import ToolWarning
-from stats_compass_core.series._common import Insufficient
+from stats_compass_core.series._common import (
+    Freq,
+    Insufficient,
+    WeekLabel,
+    weekly_freq,
+    weeks_overlapping,
+)
 from stats_compass_core.series.decompose import Decomposition, Method, decompose
 
 Kind = Literal["count", "money"]
@@ -135,6 +146,8 @@ def its_lift(
     min_reference: int = 20,
     series_days_before: int | None = None,
     series_days_after: int | None = None,
+    freq: Freq = "D",
+    week_label: WeekLabel = "end",
     **decompose_options: Any,
 ) -> LiftFacts | Insufficient:
     """Estimate one window's lift on one daily series.
@@ -164,6 +177,8 @@ def its_lift(
         series_days_before, series_days_after: Ask for ``series``: each day
             from this many days before the window to this many after, clipped
             to the history. Both None (the default) leaves ``series`` None.
+        freq, week_label: ``"W"`` for weekly input, and which day of its week
+            each date names; see the module notes and ``decompose``.
         **decompose_options: Passed to ``decompose`` (``max_gap_days``,
             ``annual_smoothing_days``, ``fourier_terms``, ``robust``).
 
@@ -185,6 +200,20 @@ def its_lift(
     if end < start:
         raise ValueError("window ends before it starts")
     length = (end - start).days + 1
+    weekly = freq == "W"
+    if weekly:
+        for name, days in (
+            ("baseline_days", baseline_days),
+            ("baseline_lookback_days", baseline_lookback_days),
+            ("post_days", post_days),
+            ("series_days_before", days_before),
+            ("series_days_after", days_after),
+        ):
+            if days % 7:
+                raise ValueError(
+                    f"weekly input counts whole weeks: {name} must be a multiple "
+                    f"of 7, not {days}"
+                )
 
     def tail(w: Window) -> tuple[date, date]:
         return (w[0], w[1] + timedelta(days=post_days))
@@ -196,6 +225,7 @@ def its_lift(
         periods=periods,
         exclude=exclusions,
         trend_window_days=baseline_days,
+        **({"freq": "W", "week_label": week_label} if weekly else {}),
         **decompose_options,
     )
     if isinstance(dec, Insufficient):
@@ -203,13 +233,37 @@ def its_lift(
 
     observed_series = values.copy()
     observed_series.index = pd.DatetimeIndex(observed_series.index).normalize()
-    observed = observed_series.reindex(pd.date_range(start, end)).astype(float)
+    unit = "weeks" if weekly else "days"
+    step = pd.Timedelta(days=7 if weekly else 1)
+    if weekly:
+        # The window's weeks on the input's own weekly grid, and the counts
+        # of days read in weeks from here on.
+        labels = _window_weeks(observed_series.index, start, end, week_label)
+        length = len(labels)
+        start, end = labels[0], labels[-1]
+        observed = observed_series.reindex(labels).astype(float)
+        steps = {
+            "baseline": baseline_days // 7,
+            "lookback": baseline_lookback_days // 7,
+            "post": post_days // 7,
+            "before": days_before // 7,
+            "after": days_after // 7,
+        }
+    else:
+        observed = observed_series.reindex(pd.date_range(start, end)).astype(float)
+        steps = {
+            "baseline": baseline_days,
+            "lookback": baseline_lookback_days,
+            "post": post_days,
+            "before": days_before,
+            "after": days_after,
+        }
     present = observed.notna()
     if int(present.sum()) * 2 < length:
         return Insufficient(
             needs=(length + 1) // 2,
             has=int(present.sum()),
-            unit="days",
+            unit=unit,
             reason="TOO_FEW_POINTS",
         )
 
@@ -220,16 +274,18 @@ def its_lift(
             observed_series,
             start,
             present,
-            baseline_days,
-            baseline_lookback_days,
+            steps["baseline"],
+            steps["lookback"],
             min_baseline_share,
+            step=step,
+            unit=unit,
         )
         if isinstance(est, Insufficient):
             return est, None
-        errs = d.expectation_errors(length, delete_after_days=post_days)
+        errs = d.expectation_errors(length, delete_after_days=steps["post"])
         if len(errs) < min_reference:
             short = Insufficient(
-                needs=min_reference, has=len(errs), unit="days", reason="TOO_SHORT"
+                needs=min_reference, has=len(errs), unit=unit, reason="TOO_SHORT"
             )
             return short, None
         return est, errs
@@ -282,9 +338,11 @@ def its_lift(
             dec,
             observed_series,
             prior_window,
-            baseline_days,
-            baseline_lookback_days,
+            steps["baseline"],
+            steps["lookback"],
             min_baseline_share,
+            step=step,
+            week_label=week_label if weekly else None,
         )
         if isinstance(prior, str):
             prior_info = {"prior_unavailable": prior}
@@ -342,12 +400,27 @@ def its_lift(
         **baseline_info,
         **prior_info,
     }
+    if weekly:
+        params["n_window_weeks_with_data"] = params.pop("n_window_days_with_data")
+        params.update(
+            input_freq="W",
+            week_label=week_label,
+            window_weeks=[day.date().isoformat() for day in labels],
+        )
     series: tuple[CounterfactualDay, ...] | None = None
     if want_series:
-        day_errors = dec.expectation_errors(1, delete_after_days=post_days)
+        day_errors = dec.expectation_errors(1, delete_after_days=steps["post"])
         half = _ranked_half_width(day_errors["error"].to_numpy(), level)
         series = _series(
-            dec, observed_series, start, end, cf_level, half, days_before, days_after
+            dec,
+            observed_series,
+            start,
+            end,
+            cf_level,
+            half,
+            steps["before"],
+            steps["after"],
+            step=step,
         )
         params.update(
             series_days_before=days_before,
@@ -388,16 +461,18 @@ def _series(
     half: float,
     days_before: int,
     days_after: int,
+    step: pd.Timedelta = pd.Timedelta(days=1),
 ) -> tuple[CounterfactualDay, ...]:
     """Each day around the window, observed against the counterfactual.
 
     Clipped to the history, and to the days the seasonal can be read one
-    period back on: before that there is no counterfactual to draw.
+    period back on: before that there is no counterfactual to draw. For
+    weekly input each row is a week (``step`` 7 days, counts in weeks).
     """
     lagged = dec._lagged_seasonal_daily()
-    first = max(start - pd.Timedelta(days=days_before), lagged.index[0])
-    last = min(end + pd.Timedelta(days=days_after), values.index.max(), lagged.index[-1])
-    days = pd.date_range(first, last)
+    first = max(start - step * days_before, lagged.index[0])
+    last = min(end + step * days_after, values.index.max(), lagged.index[-1])
+    days = pd.date_range(first, last, freq=step)
     seasonal = lagged.reindex(days)
     observed = values.reindex(days).astype(float)
     rows = []
@@ -426,21 +501,24 @@ def _estimate(
     baseline_days: int,
     lookback_days: int,
     min_share: float = MIN_BASELINE_SHARE,
+    step: pd.Timedelta = pd.Timedelta(days=1),
+    unit: str = "days",
 ) -> tuple[float, float, float, dict[str, Any]] | Insufficient:
     """Observed and counterfactual totals over the window's days with data, and the level.
 
     The estimator ``expectation_errors`` measures: seasonal read one period
     earlier, level from the adjusted baseline. The baseline walks back past
     excluded, imputed and missing days, up to ``lookback_days``, until it has
-    ``baseline_days`` real ones.
+    ``baseline_days`` real ones. For weekly input every count is in weeks and
+    ``step`` is 7 days.
     """
     lagged = dec._lagged_seasonal_daily()
-    adjusted = dec.daily - lagged
+    adjusted = dec.base - lagged
     filled = set(dec.imputed) | set(dec.excluded)
     needed = math.ceil(min_share * baseline_days)
     chosen: list[pd.Timestamp] = []
     for back in range(1, lookback_days + 1):
-        day = start - pd.Timedelta(days=back)
+        day = start - step * back
         if day < adjusted.index[0]:
             break
         if day.date() in filled or not np.isfinite(adjusted.get(day, np.nan)):
@@ -450,21 +528,27 @@ def _estimate(
             break
     if len(chosen) < needed:
         return Insufficient(
-            needs=needed, has=len(chosen), unit="days", reason="BASELINE_TOO_SHORT"
+            needs=needed, has=len(chosen), unit=unit, reason="BASELINE_TOO_SHORT"
         )
     days = present.index[present.to_numpy()]
     seasonal = lagged.reindex(days)
     if not np.isfinite(seasonal.to_numpy()).all():
         return Insufficient(
-            needs=None, has=None, unit="days", reason="NO_SEASONAL_BEFORE"
+            needs=None, has=None, unit=unit, reason="NO_SEASONAL_BEFORE"
         )
     level = float(adjusted.loc[chosen].mean())
     counterfactual = level * len(days) + float(seasonal.sum())
     observed = float(values.reindex(days).sum())
-    info = {
-        "baseline_real_days": len(chosen),
-        "baseline_first_day": min(chosen).date().isoformat(),
-    }
+    if unit == "weeks":
+        info = {
+            "baseline_real_weeks": len(chosen),
+            "baseline_first_week": min(chosen).date().isoformat(),
+        }
+    else:
+        info = {
+            "baseline_real_days": len(chosen),
+            "baseline_first_day": min(chosen).date().isoformat(),
+        }
     return observed, counterfactual, level, info
 
 
@@ -475,15 +559,34 @@ def _prior_lift(
     baseline_days: int,
     lookback_days: int,
     min_share: float = MIN_BASELINE_SHARE,
+    step: pd.Timedelta = pd.Timedelta(days=1),
+    week_label: WeekLabel | None = None,
 ) -> tuple[float, float] | str:
-    """The same estimate at the comparable prior window, or why there is none."""
+    """The same estimate at the comparable prior window, or why there is none.
+
+    ``week_label`` is set for weekly input: the prior window is then the weeks
+    it touches.
+    """
     start, end = pd.Timestamp(prior[0]), pd.Timestamp(prior[1])
-    observed = values.reindex(pd.date_range(start, end)).astype(float)
+    if week_label is not None:
+        labels = _window_weeks(values.index, start, end, week_label)
+        start = labels[0]
+        observed = values.reindex(labels).astype(float)
+    else:
+        observed = values.reindex(pd.date_range(start, end)).astype(float)
     present = observed.notna()
     if not present.any():
         return "NO_DATA_IN_PRIOR"
     estimate = _estimate(
-        dec, values, start, present, baseline_days, lookback_days, min_share
+        dec,
+        values,
+        start,
+        present,
+        baseline_days,
+        lookback_days,
+        min_share,
+        step=step,
+        unit="days" if week_label is None else "weeks",
     )
     if isinstance(estimate, Insufficient):
         return (
@@ -498,6 +601,22 @@ def _prior_lift(
         return "NONPOSITIVE_COUNTERFACTUAL"
     lift = 100 * (observed_total - counterfactual_total) / counterfactual_total
     return float(lift), float(present.mean())
+
+
+def _window_weeks(
+    index: pd.DatetimeIndex, start: pd.Timestamp, end: pd.Timestamp, week_label: WeekLabel
+) -> pd.DatetimeIndex:
+    """The weeks a window touches, on the input's weekly grid, past its ends too.
+
+    The grid runs a week beyond the window on either side, so a window after
+    the last row (no data yet) still names its weeks, and is then found to
+    have too few with data.
+    """
+    freq = weekly_freq(index)
+    first = min(index.min(), start - pd.Timedelta(days=7))
+    last = max(index.max(), end + pd.Timedelta(days=7))
+    grid = pd.date_range(first, last, freq=freq)
+    return weeks_overlapping(grid, start, end, week_label)
 
 
 def _ranked_half_width(errors: np.ndarray, level: float) -> float:

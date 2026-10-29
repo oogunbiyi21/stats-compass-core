@@ -71,6 +71,8 @@ def detect_run(
     earlier stretches sit lower, and absolute moves would make every recent
     run look large.
     """
+    if dec.unit == "week":
+        raise ValueError("detect_run needs daily input; weekly input is not supported yet")
     if min_moves < 1:
         raise ValueError("min_moves must be at least 1")
     result = _detect(dec, min_moves, real_change_alpha, min_reference)

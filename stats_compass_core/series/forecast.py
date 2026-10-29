@@ -83,6 +83,8 @@ def forecast(
         ``ForecastFacts``, or ``Insufficient(reason="TOO_SHORT")`` when the
         history holds fewer than ``min_origins`` origins.
     """
+    if dec.unit == "week":
+        raise ValueError("forecast needs daily input; weekly input is not supported yet")
     if horizon_days < 1:
         raise ValueError("horizon_days must be at least 1")
     if not 0 < level < 1:
