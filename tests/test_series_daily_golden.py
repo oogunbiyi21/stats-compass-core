@@ -293,11 +293,41 @@ def _float(s: Any) -> float | None:
         return None
 
 
+def _close_stats(got: dict, want: dict, path: str) -> list[str]:
+    """A series' or array's stats, each against the array's own scale.
+
+    A sum of values that cancel (least-squares residuals sum to about zero)
+    is rounding noise of the size of the values, not of the sum: its
+    tolerance is RTOL × √n × the array's norm, the bound on rounding in a sum.
+    The sum of squares cannot cancel and is compared relatively.
+    """
+    n = want.get("series", None)
+    if n is None:
+        n = int(np.prod(want["array"])) if "array" in want else 1
+    sumsq = _float(want["sumsq"])
+    scale = math.sqrt(max(n, 1) * sumsq) if sumsq is not None and math.isfinite(sumsq) else 0.0
+    out = []
+    for k in want:
+        if k in ("sha256", "first", "last"):
+            continue
+        if k in ("sum", "min", "max"):
+            g, w = _float(got[k]), _float(want[k])
+            if g is None or w is None or not (
+                (math.isnan(g) and math.isnan(w)) or math.isclose(g, w, rel_tol=RTOL, abs_tol=RTOL * scale)
+            ):
+                out.append(f"{path}/{k}: {got[k]} != {want[k]}")
+        else:
+            out += _close(got[k], want[k], f"{path}/{k}")
+    return out
+
+
 def _close(got: Any, want: Any, path: str = "") -> list[str]:
     """Differences beyond RTOL, ignoring exact digests and per-value pairs."""
     if isinstance(want, dict):
         if not isinstance(got, dict) or set(got) != set(want):
             return [f"{path}: keys {sorted(got) if isinstance(got, dict) else got!r} != {sorted(want)}"]
+        if "sumsq" in want:
+            return _close_stats(got, want, path)
         out = []
         for k in want:
             if k in ("sha256", "first", "last"):
