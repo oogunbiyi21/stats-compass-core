@@ -22,20 +22,23 @@ from stats_compass_core.registry import registry
 from stats_compass_core.sales import analysis, wording
 from stats_compass_core.sales.schema import (
     MAX_GROUPS,
-    PromotionWindow,
+    PromotionColumns,
     SalesColumns,
     build_series,
+    promotions,
     windows_for,
-    windows_from_calendar,
-    windows_from_flags,
 )
 from stats_compass_core.state import DataFrameState
 
 FREQUENCY = {"D": "daily", "W": "weekly"}
 
 
-def _notes(series) -> list[str]:
+def _notes(series, value_column: str, promotions_left_out: bool = False) -> list[str]:
     notes = []
+    if series.parsed_text:
+        notes.append(wording.money_parsed(value_column, series.parsed_text))
+    if promotions_left_out:
+        notes.append(wording.PROMOTIONS_LEFT_OUT if series.freq == "W" else wording.PROMOTION_DAYS_LEFT_OUT)
     if series.n_groups_found > len(series.groups):
         notes.append(
             f"{series.n_groups_found} groups were found; the {MAX_GROUPS} with the most "
@@ -51,8 +54,8 @@ def _notes(series) -> list[str]:
 # =============================================================================
 
 
-class SalesVerdictInput(SalesColumns):
-    """Input for sales_verdict."""
+class SalesVerdictInput(SalesColumns, PromotionColumns):
+    """Input for sales_verdict. Promotions, if given, are left out of what's expected."""
 
     period_start: date | None = Field(
         default=None,
@@ -65,6 +68,8 @@ class SalesVerdictInput(SalesColumns):
 
     @model_validator(mode="after")
     def _both_or_neither(self):
+        if self.promotion_sources() > 1:
+            raise ValueError("Give the promotions one way, or not at all: windows, promo_column, or calendar_dataframe.")
         if (self.period_start is None) != (self.period_end is None):
             raise ValueError("Give both period_start and period_end, or neither.")
         if self.period_start and self.period_end and self.period_end < self.period_start:
@@ -89,19 +94,25 @@ class SalesVerdictResult(BaseModel):
         "Judge a period's sales against the history before it, as the Stats Compass "
         "app does: Expected, Real change, Noise, or Not enough data. Works on daily or "
         "weekly rows (detected from the dates), optionally per group such as retailer "
-        "and product. Default period: the latest week."
+        "and product. Default period: the latest week. Give the promotions (a list, a "
+        "flag column or a calendar) and they're left out of what's expected, as the app does."
     ),
     tier="workflow",
 )
 def sales_verdict(state: DataFrameState, params: SalesVerdictInput) -> SalesVerdictResult:
-    series = build_series(state.get_dataframe(params.dataframe_name), params)
+    df = state.get_dataframe(params.dataframe_name)
+    series = build_series(df, params)
+    promos = promotions(state, df, params, series)
     period = (
         (params.period_start, params.period_end)
         if params.period_start
         else analysis.default_period([g.values for g in series.groups], series.freq)
     )
     rows = [
-        analysis.judge_period(g, series.freq, series.week_label, params.kind, period, params.currency)
+        analysis.judge_period(
+            g, series.freq, series.week_label, params.kind, period, params.currency,
+            windows_for(g, promos, series.group_by) if promos is not None else None,
+        )
         for g in series.groups
     ]
     rows.sort(key=lambda r: (analysis.ORDER[r.verdict], -abs((r.observed or 0) - (r.expected or 0))))
@@ -114,7 +125,11 @@ def sales_verdict(state: DataFrameState, params: SalesVerdictInput) -> SalesVerd
         ),
         rows=rows,
         groups_found=series.n_groups_found,
-        notes=_notes(series),
+        notes=_notes(series, params.value_column, promotions_left_out=bool(promos)) + [
+            n for n in [wording.chance_note(
+                sum(r.verdict != "insufficient" for r in rows), sum(r.verdict == "real change" for r in rows),
+            )] if n
+        ],
     )
 
 
@@ -123,8 +138,14 @@ def sales_verdict(state: DataFrameState, params: SalesVerdictInput) -> SalesVerd
 # =============================================================================
 
 
-class SalesSeasonalityInput(SalesColumns):
-    """Input for sales_seasonality."""
+class SalesSeasonalityInput(SalesColumns, PromotionColumns):
+    """Input for sales_seasonality. Promotions, if given, are left out, so the months show the season."""
+
+    @model_validator(mode="after")
+    def _at_most_one_source(self):
+        if self.promotion_sources() > 1:
+            raise ValueError("Give the promotions one way, or not at all: windows, promo_column, or calendar_dataframe.")
+        return self
 
 
 class SalesSeasonalityResult(BaseModel):
@@ -142,13 +163,22 @@ class SalesSeasonalityResult(BaseModel):
     description=(
         "Find what each month usually brings: how far it runs above or below the "
         "year's average, with a likely range, as the Stats Compass app does. Daily "
-        "or weekly rows, optionally per group."
+        "or weekly rows, optionally per group. Give the promotions and they're left out, "
+        "so the months show the season rather than this year's Black Friday."
     ),
     tier="workflow",
 )
 def sales_seasonality(state: DataFrameState, params: SalesSeasonalityInput) -> SalesSeasonalityResult:
-    series = build_series(state.get_dataframe(params.dataframe_name), params)
-    rows = [analysis.seasonality(g, series.freq, series.week_label) for g in series.groups]
+    df = state.get_dataframe(params.dataframe_name)
+    series = build_series(df, params)
+    promos = promotions(state, df, params, series)
+    rows = [
+        analysis.seasonality(
+            g, series.freq, series.week_label,
+            windows_for(g, promos, series.group_by) if promos is not None else None,
+        )
+        for g in series.groups
+    ]
     if len(rows) == 1:
         summary = rows[0].summary
     else:
@@ -159,7 +189,7 @@ def sales_seasonality(state: DataFrameState, params: SalesSeasonalityInput) -> S
         frequency=FREQUENCY[series.freq],
         rows=rows,
         groups_found=series.n_groups_found,
-        notes=_notes(series),
+        notes=_notes(series, params.value_column),
     )
 
 
@@ -168,30 +198,9 @@ def sales_seasonality(state: DataFrameState, params: SalesSeasonalityInput) -> S
 # =============================================================================
 
 
-class PromotionLiftInput(SalesColumns):
+class PromotionLiftInput(SalesColumns, PromotionColumns):
     """Input for promotion_lift. Give the promotions one way: windows, promo_column, or a calendar."""
 
-    windows: list[PromotionWindow] | None = Field(
-        default=None,
-        description="The promotions, each with a first and last day, and optionally a name and group.",
-    )
-    promo_column: str | None = Field(
-        default=None,
-        description=(
-            "A column flagging promotion rows (1, true or yes). Each group's run of "
-            "consecutive flagged dates is one promotion."
-        ),
-    )
-    calendar_dataframe: str | None = Field(
-        default=None,
-        description=(
-            "A DataFrame with one row per promotion (a promotion calendar). Its group "
-            "columns are matched with group_by by name."
-        ),
-    )
-    calendar_start_column: str = Field(default="start", description="The calendar's first-day column.")
-    calendar_end_column: str = Field(default="end", description="The calendar's last-day column.")
-    calendar_name_column: str | None = Field(default=None, description="The calendar's name column, if any.")
     include_series: bool = Field(
         default=False,
         description="Return each period around each promotion, actual against expected, for a chart.",
@@ -199,8 +208,7 @@ class PromotionLiftInput(SalesColumns):
 
     @model_validator(mode="after")
     def _one_source(self):
-        given = [x is not None for x in (self.windows, self.promo_column, self.calendar_dataframe)]
-        if sum(given) != 1:
+        if self.promotion_sources() != 1:
             raise ValueError("Give the promotions one way: windows, promo_column, or calendar_dataframe.")
         return self
 
@@ -228,15 +236,7 @@ class PromotionLiftResult(BaseModel):
 def promotion_lift(state: DataFrameState, params: PromotionLiftInput) -> PromotionLiftResult:
     df = state.get_dataframe(params.dataframe_name)
     series = build_series(df, params)
-    if params.windows is not None:
-        windows = list(params.windows)
-    elif params.promo_column is not None:
-        windows = windows_from_flags(df, params, params.promo_column, series.freq)
-    else:
-        windows = windows_from_calendar(
-            state.get_dataframe(params.calendar_dataframe), params,
-            params.calendar_start_column, params.calendar_end_column, params.calendar_name_column,
-        )
+    windows = promotions(state, df, params, series)
     if not windows:
         raise ValueError("No promotions were found to measure.")
     rows = []
@@ -253,5 +253,5 @@ def promotion_lift(state: DataFrameState, params: PromotionLiftInput) -> Promoti
         frequency=FREQUENCY[series.freq],
         rows=rows,
         groups_found=series.n_groups_found,
-        notes=_notes(series),
+        notes=_notes(series, params.value_column),
     )

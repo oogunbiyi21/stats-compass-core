@@ -9,7 +9,8 @@ whole weeks.
 
 from __future__ import annotations
 
-from datetime import date
+import math
+from datetime import date, timedelta
 from typing import Any, Literal
 
 import pandas as pd
@@ -29,7 +30,7 @@ from stats_compass_core.series import (
     month_effects,
     verdict,
 )
-from stats_compass_core.series._common import WeekLabel, weekly_freq, weeks_overlapping
+from stats_compass_core.series._common import WeekLabel, week_days, weekly_freq, weeks_overlapping
 
 METHOD = "fourier"
 DAILY_PERIODS = (7, 365)
@@ -55,6 +56,21 @@ def _decompose_options(freq: Freq, week_label: WeekLabel) -> dict[str, Any]:
 
 def _unit(freq: Freq) -> str:
     return "weeks" if freq == "W" else "days"
+
+
+def _exclusions(windows: list[PromotionWindow] | None) -> list[tuple[date, date]]:
+    """Promotions to leave out of a fit: each, and the 3 weeks after it (as the app does)."""
+    return [(w.start, w.end + timedelta(days=POST_DAYS)) for w in windows or []]
+
+
+def _warnings(*sources) -> list[str]:
+    """Every warning, once, in order: the decomposition's (filled weeks) and the statistic's."""
+    seen: list[str] = []
+    for source in sources:
+        for w in getattr(source, "warnings", None) or []:
+            if w.message not in seen:
+                seen.append(w.message)
+    return seen
 
 
 def _history_length(values: pd.Series, freq: Freq) -> int:
@@ -86,6 +102,7 @@ class PeriodRow(BaseModel):
     expected_high: float | None = None
     change_pct: float | None = Field(default=None, description="Percent change vs the previous period of the same length.")
     p_value: float | None = None
+    promotions_in_period: list[str] = Field(default_factory=list, description="Promotions that ran during the period, if any were given.")
     insufficient_reason: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
@@ -105,6 +122,7 @@ def judge_period(
     kind: str,
     period: tuple[date, date],
     currency: str | None,
+    promotions: list[PromotionWindow] | None = None,
 ) -> PeriodRow:
     values = group.values
     start, end = pd.Timestamp(period[0]), pd.Timestamp(period[1])
@@ -123,6 +141,7 @@ def judge_period(
         min_points = 1
         weekly_period = len(labels) == 1
         prior_name = "week" if len(labels) == 1 else f"{len(labels)} weeks"
+        period_days = (week_days(first, week_label)[0], week_days(last, week_label)[1])
     else:
         days = pd.date_range(start, end)
         period_values = values.reindex(days)
@@ -131,33 +150,54 @@ def judge_period(
         min_points = min(5, len(days))
         weekly_period = len(days) == 7
         prior_name = "week" if len(days) == 7 else f"{len(days)} days"
+        period_days = (first, last)
     base = PeriodRow(
         group=group.label, verdict="insufficient", label=wording.VERDICT_LABEL["insufficient"], summary="",
         period_start=first.date().isoformat(), period_end=last.date().isoformat(),
     )
-    dec = decompose(history, **_decompose_options(freq, week_label))
+    running = [
+        w.name or "a promotion" for w in promotions or []
+        if pd.Timestamp(w.start) <= period_days[1] and pd.Timestamp(w.end) >= period_days[0]
+    ]
+    base = base.model_copy(update={"promotions_in_period": running})
+    dec = decompose(history, exclude=_exclusions(promotions), **_decompose_options(freq, week_label))
     facts = dec if isinstance(dec, Insufficient) else verdict(
         dec, period_values, kind=SERIES_KIND[kind], min_points=min_points, **CAL
     )
     if isinstance(facts, Insufficient):
+        rows_before = values.dropna()
+        rows_before = rows_before[rows_before.index < first]
+        if facts.reason == "TOO_FEW_POINTS" and facts.has == 0 and len(rows_before):
+            # A product whose rows stopped before the period: delisted, say.
+            summary = wording.no_rows_since(rows_before.index[-1].date(), freq == "W", week_label)
+        else:
+            summary = wording.insufficient(
+                facts.reason, facts.needs, facts.has, facts.unit, context="period",
+                weeks_of_history=_history_length(values[values.index <= last], freq) if freq == "W" else None,
+            )
         return base.model_copy(update={
-            "summary": wording.insufficient(facts.reason, facts.needs, facts.has, facts.unit, context="period"),
+            "summary": summary,
             "insufficient_reason": facts.reason,
+            # A product with no rows since says so; its trimmed weeks needn't be listed too.
+            "warnings": [] if summary.startswith("There are no sales") else _warnings(dec),
         })
     low, high = facts.expected_range
     change_abs, change_pct = facts.change_vs_prior
+    detail = wording.period_detail(facts.expected, low, high, change_pct, kind, currency, prior_name)
+    if running:
+        detail += " " + wording.promotions_in_period(running, weekly_period)
     return base.model_copy(update={
         "verdict": facts.verdict,
         "label": wording.VERDICT_LABEL[facts.verdict],
         "summary": wording.period_sentence(facts.verdict, facts.observed, facts.expected, kind, currency, weekly_period),
-        "detail": wording.period_detail(facts.expected, low, high, change_pct, kind, currency, prior_name),
+        "detail": detail,
         "observed": facts.observed,
         "expected": facts.expected,
         "expected_low": low,
         "expected_high": high,
         "change_pct": change_pct,
         "p_value": facts.p_value,
-        "warnings": [w.message for w in facts.warnings],
+        "warnings": _warnings(dec, facts),
     })
 
 
@@ -187,15 +227,20 @@ class SeasonalityRow(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
-def seasonality(group: GroupSeries, freq: Freq, week_label: WeekLabel) -> SeasonalityRow:
+def seasonality(
+    group: GroupSeries, freq: Freq, week_label: WeekLabel, promotions: list[PromotionWindow] | None = None
+) -> SeasonalityRow:
+    """Each month's effect. With promotions given, their weeks (and the 3 after) are
+    left out, so the months show the season, not this year's Black Friday."""
     unit = _unit(freq)
-    dec = decompose(group.values, **_decompose_options(freq, week_label))
+    dec = decompose(group.values, exclude=_exclusions(promotions), **_decompose_options(freq, week_label))
     effects = dec if isinstance(dec, Insufficient) else month_effects(dec, level=LEVEL)
     if isinstance(effects, Insufficient):
         return SeasonalityRow(
             group=group.label, found=False,
             summary=wording.insufficient(effects.reason, effects.needs, effects.has, effects.unit, context="seasonality"),
             insufficient_reason=effects.reason,
+            warnings=_warnings(dec),
         )
     months = [
         MonthRow(month=r.month, name=wording.MONTHS[r.month - 1], effect_pct=r.effect_pct, lower=r.lower, upper=r.upper,
@@ -203,12 +248,15 @@ def seasonality(group: GroupSeries, freq: Freq, week_label: WeekLabel) -> Season
         for r in effects.rows
     ]
     length = _history_length(group.values, freq)
+    basis = f"Based on {wording.history(length, unit)} of data. Each range is where the month's effect likely lies (90%)."
+    if dec.excluded:
+        basis += " " + (wording.PROMOTIONS_LEFT_OUT if freq == "W" else wording.PROMOTION_DAYS_LEFT_OUT)
     return SeasonalityRow(
         group=group.label, found=True,
         summary=wording.seasonality_sentence(effects.rows),
         months=months,
-        basis=f"Based on {wording.history(length, unit)} of data. Each range is where the month's effect likely lies (90%).",
-        warnings=[w.message for w in effects.warnings],
+        basis=basis,
+        warnings=_warnings(dec, effects),
     )
 
 
@@ -248,6 +296,11 @@ class LiftRow(BaseModel):
     p_value: float | None = None
     periods_in_window: list[str] = Field(default_factory=list, description="The weeks (or days) counted as the promotion.")
     series: list[LiftPoint] | None = Field(default=None, description="Each period around it, actual against expected, for a chart.")
+    after_summary: str | None = Field(
+        default=None, description="The 3 weeks (or 21 days) just after it, against expected: a dip if customers stocked up."
+    )
+    after_pct: float | None = Field(default=None, description="Sales in the weeks after, in percent vs expected.")
+    after_difference: float | None = Field(default=None, description="Sales in the weeks after, minus expected.")
     insufficient_reason: str | None = None
     warnings: list[str] = Field(default_factory=list)
 
@@ -280,19 +333,26 @@ def lift(
         baseline_days=BASELINE_DAYS,
         baseline_lookback_days=BASELINE_LOOKBACK_DAYS,
         level=LEVEL,
-        series_days_before=SERIES_DAYS_BEFORE if include_series else None,
-        series_days_after=SERIES_DAYS_AFTER if include_series else None,
+        # The weeks after are always read, for the pull-forward check.
+        series_days_before=SERIES_DAYS_BEFORE if include_series else 0,
+        series_days_after=SERIES_DAYS_AFTER,
         **CAL,
         **options,
     )
     if isinstance(facts, Insufficient):
+        reason_code = facts.reason
+        present = group.values.dropna()
+        first_year = len(present) and pd.Timestamp(window.start) < present.index[0] + pd.Timedelta(days=365 + BASELINE_DAYS)
+        if reason_code == "BASELINE_TOO_SHORT" and first_year:
+            # The baseline is short because nothing a year back gives its season.
+            reason_code = "NO_SEASONAL_BEFORE"
         reason = wording.insufficient(
-            facts.reason, facts.needs, facts.has, facts.unit, context="promotion",
+            reason_code, facts.needs, facts.has, facts.unit, context="promotion",
             weeks_of_history=_history_length(group.values, freq),
         )
         return base.model_copy(update={
             "summary": f"{name}, {wording.span(window.start, window.end)}: {reason}",
-            "insufficient_reason": facts.reason,
+            "insufficient_reason": reason_code,
         })
     value = wording.lift_value(facts.estimate_pct, facts.estimate_abs, kind, currency)
     amount_text = wording.lift_amount(facts.estimate_abs, kind, currency)
@@ -300,16 +360,21 @@ def lift(
     periods = facts.params.get("window_weeks") or [
         d.date().isoformat() for d in pd.date_range(window.start, window.end)
     ]
-    series = None
-    if facts.series is not None:
-        series = [
-            LiftPoint(date=p.date.isoformat(), actual=p.actual, expected=p.expected, low=p.low, high=p.high, in_promotion=p.in_window)
-            for p in facts.series
-        ]
+    points = [
+        LiftPoint(date=p.date.isoformat(), actual=p.actual, expected=p.expected, low=p.low, high=p.high, in_promotion=p.in_window)
+        for p in facts.series or []
+    ]
+    after = _after(points, periods[-1], facts.params.get("series_band_half_width"), freq, kind, currency)
+    summary = wording.lift_sentence(name, window.start, window.end, value, amount_text, range_text, facts.verdict)
+    if after and not after["summary"].endswith("about as expected."):
+        summary += " " + after["summary"]
     return base.model_copy(update={
         "verdict": facts.verdict,
         "label": wording.VERDICT_LABEL[facts.verdict],
-        "summary": wording.lift_sentence(name, window.start, window.end, value, amount_text, range_text, facts.verdict),
+        "summary": summary,
+        "after_summary": after["summary"] if after else None,
+        "after_pct": after["pct"] if after else None,
+        "after_difference": after["difference"] if after else None,
         "value": value,
         "amount": amount_text,
         "range": range_text,
@@ -321,9 +386,33 @@ def lift(
         "expected_total": facts.counterfactual_total,
         "p_value": facts.p_value,
         "periods_in_window": periods,
-        "series": series,
-        "warnings": [w.message for w in facts.warnings],
+        "series": points if include_series else None,
+        "warnings": _warnings(facts),
     })
+
+
+def _after(points: list[LiftPoint], last_in_window: str, half: float | None, freq: Freq, kind: str, currency: str | None) -> dict | None:
+    """The weeks just after a promotion against expected, from the lift's own series.
+
+    The expected line is the lift's counterfactual, carried on. A difference
+    counts as a dip (or a rise) only beyond the range those weeks usually
+    vary by: one step's 90% half-width times the square root of the steps.
+    """
+    steps = POST_DAYS // 7 if freq == "W" else POST_DAYS
+    after = [p for p in points if p.date > last_in_window and not p.in_promotion and p.actual is not None][:steps]
+    if not after:
+        return None
+    actual = sum(p.actual for p in after)
+    expected = sum(p.expected for p in after)
+    difference = actual - expected
+    pct = 100 * difference / expected if expected > 0 else None
+    beyond = half is not None and abs(difference) > half * math.sqrt(len(after))
+    unit = "weeks" if freq == "W" else "days"
+    return {
+        "summary": wording.after_promotion(pct, difference, len(after), unit, beyond, kind, currency),
+        "pct": pct,
+        "difference": difference,
+    }
 
 
 def overview(rows: list[Any], what: str) -> str:
