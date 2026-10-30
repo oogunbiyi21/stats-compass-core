@@ -10,6 +10,7 @@ whole weeks.
 from __future__ import annotations
 
 import math
+import re
 from datetime import date, timedelta
 from typing import Any, Literal
 
@@ -63,14 +64,33 @@ def _exclusions(windows: list[PromotionWindow] | None) -> list[tuple[date, date]
     return [(w.start, w.end + timedelta(days=POST_DAYS)) for w in windows or []]
 
 
-def _warnings(*sources) -> list[str]:
-    """Every warning, once, in order: the decomposition's (filled weeks) and the statistic's."""
+def _warnings(values: pd.Series, freq: Freq, *sources) -> list[str]:
+    """Every warning, once, in order (the decomposition's, then the statistic's), said plainly."""
     seen: list[str] = []
+    gaps = None
     for source in sources:
         for w in getattr(source, "warnings", None) or []:
-            if w.message not in seen:
-                seen.append(w.message)
+            leading = re.match(r"\s*(\d+)", w.message)
+            if gaps is None:
+                gaps = _weekend_share(values, freq)
+            text = wording.plain_warning(
+                w.code, w.message, int(leading.group(1)) if leading else None,
+                MAX_GAP_DAYS[freq] // (7 if freq == "W" else 1), gaps,
+            )
+            if text not in seen:
+                seen.append(text)
     return seen
+
+
+def _weekend_share(values: pd.Series, freq: Freq) -> float:
+    """Of the days with no row between the first and the last, the share on a Saturday or Sunday."""
+    if freq != "D":
+        return 0.0
+    present = values.dropna().index
+    if len(present) < 2:
+        return 0.0
+    missing = pd.date_range(present.min(), present.max()).difference(present)
+    return float((missing.dayofweek >= 5).mean()) if len(missing) else 0.0
 
 
 def _history_length(values: pd.Series, freq: Freq) -> int:
@@ -179,7 +199,7 @@ def judge_period(
             "summary": summary,
             "insufficient_reason": facts.reason,
             # A product with no rows since says so; its trimmed weeks needn't be listed too.
-            "warnings": [] if summary.startswith("There are no sales") else _warnings(dec),
+            "warnings": [] if summary.startswith("There are no sales") else _warnings(values, freq, dec),
         })
     low, high = facts.expected_range
     change_abs, change_pct = facts.change_vs_prior
@@ -197,7 +217,7 @@ def judge_period(
         "expected_high": high,
         "change_pct": change_pct,
         "p_value": facts.p_value,
-        "warnings": _warnings(dec, facts),
+        "warnings": _warnings(values, freq, dec, facts),
     })
 
 
@@ -240,7 +260,7 @@ def seasonality(
             group=group.label, found=False,
             summary=wording.insufficient(effects.reason, effects.needs, effects.has, effects.unit, context="seasonality"),
             insufficient_reason=effects.reason,
-            warnings=_warnings(dec),
+            warnings=_warnings(group.values, freq, dec),
         )
     months = [
         MonthRow(month=r.month, name=wording.MONTHS[r.month - 1], effect_pct=r.effect_pct, lower=r.lower, upper=r.upper,
@@ -256,7 +276,7 @@ def seasonality(
         summary=wording.seasonality_sentence(effects.rows),
         months=months,
         basis=basis,
-        warnings=_warnings(dec, effects),
+        warnings=_warnings(group.values, freq, dec, effects),
     )
 
 
@@ -290,7 +310,13 @@ class LiftRow(BaseModel):
     estimate_pct: float | None = None
     interval_pct: tuple[float, float] | None = None
     estimate: float | None = None
-    interval: tuple[float, float] | None = None
+    interval: tuple[float, float] | None = Field(
+        default=None,
+        description=(
+            "The likely range as an amount. When there's a percentage range it's that range "
+            "applied to the expected total, so the two always agree with each other and the verdict."
+        ),
+    )
     observed_total: float | None = None
     expected_total: float | None = None
     p_value: float | None = None
@@ -354,9 +380,20 @@ def lift(
             "summary": f"{name}, {wording.span(window.start, window.end)}: {reason}",
             "insufficient_reason": reason_code,
         })
+    # One basis for both ranges. The verdict and the percentage range rank the
+    # past errors as percentages of what was expected then; the series' amount
+    # range ranks them as raw amounts, which on a series that has grown (or
+    # shrunk) understates (or overstates) today's uncertainty. So the amount
+    # range shown is the percentage range applied to today's expected total.
+    interval = facts.interval_abs
+    if facts.interval_pct is not None and facts.counterfactual_total > 0:
+        interval = (
+            facts.counterfactual_total * facts.interval_pct[0] / 100,
+            facts.counterfactual_total * facts.interval_pct[1] / 100,
+        )
     value = wording.lift_value(facts.estimate_pct, facts.estimate_abs, kind, currency)
     amount_text = wording.lift_amount(facts.estimate_abs, kind, currency)
-    range_text = wording.lift_range(facts.verdict, facts.interval_pct, facts.interval_abs, kind, currency)
+    range_text = wording.lift_range(facts.verdict, facts.interval_pct, interval, kind, currency)
     periods = facts.params.get("window_weeks") or [
         d.date().isoformat() for d in pd.date_range(window.start, window.end)
     ]
@@ -381,13 +418,13 @@ def lift(
         "estimate_pct": facts.estimate_pct,
         "interval_pct": facts.interval_pct,
         "estimate": facts.estimate_abs,
-        "interval": facts.interval_abs,
+        "interval": interval,
         "observed_total": facts.observed_total,
         "expected_total": facts.counterfactual_total,
         "p_value": facts.p_value,
         "periods_in_window": periods,
         "series": points if include_series else None,
-        "warnings": _warnings(facts),
+        "warnings": _warnings(group.values, freq, facts),
     })
 
 
@@ -398,8 +435,10 @@ def _after(points: list[LiftPoint], last_in_window: str, half: float | None, fre
     counts as a dip (or a rise) only beyond the range those weeks usually
     vary by: one step's 90% half-width times the square root of the steps.
     """
-    steps = POST_DAYS // 7 if freq == "W" else POST_DAYS
-    after = [p for p in points if p.date > last_in_window and not p.in_promotion and p.actual is not None][:steps]
+    # The 3 weeks after, by the calendar: days without a row (a closed
+    # weekend) are left out of the sums, not counted as part of the span.
+    end = (pd.Timestamp(last_in_window) + pd.Timedelta(days=POST_DAYS)).date().isoformat()
+    after = [p for p in points if last_in_window < p.date <= end and not p.in_promotion and p.actual is not None]
     if not after:
         return None
     actual = sum(p.actual for p in after)
@@ -407,9 +446,13 @@ def _after(points: list[LiftPoint], last_in_window: str, half: float | None, fre
     difference = actual - expected
     pct = 100 * difference / expected if expected > 0 else None
     beyond = half is not None and abs(difference) > half * math.sqrt(len(after))
-    unit = "weeks" if freq == "W" else "days"
+    if freq == "W":
+        steps, unit = len(after), "weeks"
+    else:
+        days = (pd.Timestamp(after[-1].date) - pd.Timestamp(last_in_window)).days
+        steps, unit = (POST_DAYS // 7, "weeks") if days > 14 else (days, "days")
     return {
-        "summary": wording.after_promotion(pct, difference, len(after), unit, beyond, kind, currency),
+        "summary": wording.after_promotion(pct, difference, steps, unit, beyond, kind, currency),
         "pct": pct,
         "difference": difference,
     }
