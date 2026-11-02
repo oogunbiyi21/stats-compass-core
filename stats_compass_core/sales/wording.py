@@ -349,6 +349,38 @@ def chance_note(judged: int, real_changes: int) -> str | None:
     )
 
 
+def plain_warning(code: str, message: str, n: int | None, max_gap: int, weekend_share: float) -> str:
+    """A series warning, said plainly. The series' own wording is pinned (the app
+    reads it), so it's reworded here, by its code, rather than changed there."""
+    def count(k: int, unit: str) -> str:
+        return f"{k:,} {unit[:-1] if k == 1 else unit}"
+
+    if code in ("IMPUTED_DAYS", "IMPUTED_WEEKS") and n is not None:
+        unit = "days" if code == "IMPUTED_DAYS" else "weeks"
+        verb = "had no data and was" if n == 1 else "had no data and were"
+        text = (
+            f"{count(n, unit)} {verb} filled in from the {unit} either side "
+            f"(gaps of up to {count(max_gap, unit)} are filled)."
+        )
+        if unit == "days" and weekend_share >= 0.6:
+            text += (
+                " Most are Saturdays and Sundays: if nothing sells on those days, give them as 0, "
+                "since filling them in adds sales that didn't happen."
+            )
+        return text
+    if code in ("TRIMMED_DAYS", "TRIMMED_WEEKS") and n is not None:
+        unit = "days" if code == "TRIMMED_DAYS" else "weeks"
+        return f"{count(n, unit)} with no data before the first row or after the last {'was' if n == 1 else 'were'} left out."
+    if code == "ANNUAL_DROPPED":
+        return (
+            "There isn't enough history to allow for the time of year: what's expected follows "
+            "the recent level only, so its range is wider."
+        )
+    if code == "RECENT_DAYS_FILLED":
+        return "Few recent days have real data to read the current level from, so what's expected is less certain."
+    return message
+
+
 def money_parsed(column: str, example: str) -> str:
     """"Money written as text in 'Shipped COGS' (for example '£1,234.56') was read as numbers."."""
     return f"Money written as text in '{column}' (for example '{example}') was read as numbers."

@@ -179,7 +179,7 @@ class TestFilledWeeks:
             dataframe_name="sales", date_column="Week ending", value_column="Shipped COGS", group_by=["ASIN"],
         ))
         pan = next(r for r in result.rows if r.group == "B0SIM00001")
-        assert any("2 week(s) with no data were filled" in w for w in pan.warnings)
+        assert "2 weeks had no data and were filled in from the weeks either side (gaps of up to 2 weeks are filled)." in pan.warnings
 
 
 class TestChance:
@@ -188,3 +188,40 @@ class TestChance:
             "With 43 groups judged, about 1 could show a real change by chance alone: look for a cause before acting on one."
         )
         assert wording.chance_note(43, 0) is None and wording.chance_note(5, 1) is None
+
+
+class TestOneBasis:
+    """The amount range is the percentage range applied to the expected total (0.1.44).
+
+    On TATASTEEL's turnover, which grew many times over its 21 years, the
+    series' own amount range ranked raw errors from years when turnover was
+    far smaller: it read +15% to +65% while the percentage range, the verdict's
+    basis, read −19% to +99% (Expected, p 0.20).
+    """
+
+    def test_the_two_ranges_agree(self):
+        from pathlib import Path
+
+        df = pd.read_csv(Path(__file__).parents[1] / "stats_compass_core" / "datasets" / "TATASTEEL.csv")
+        result = promotion_lift(state_with(t=df), PromotionLiftInput(
+            dataframe_name="t", date_column="Date", value_column="Turnover",
+            windows=[{"name": "W", "start": "2020-11-02", "end": "2020-11-13"}],
+        ))
+        row = result.rows[0]
+        lo, hi = row.interval_pct
+        assert row.interval == pytest.approx((row.expected_total * lo / 100, row.expected_total * hi / 100))
+        assert (row.interval[0] > 0) == (lo > 0)  # both include zero, as the verdict says
+        assert row.verdict == "expected"
+
+    def test_weekends_with_no_rows_are_named(self):
+        from pathlib import Path
+
+        df = pd.read_csv(Path(__file__).parents[1] / "stats_compass_core" / "datasets" / "TATASTEEL.csv")
+        result = promotion_lift(state_with(t=df), PromotionLiftInput(
+            dataframe_name="t", date_column="Date", value_column="Turnover",
+            windows=[{"name": "W", "start": "2020-11-02", "end": "2020-11-13"}],
+        ))
+        filled = next(w for w in result.rows[0].warnings if "filled in" in w)
+        assert filled.startswith("2,474 days had no data and were filled in from the days either side (gaps of up to 7 days are filled).")
+        assert filled.endswith("Most are Saturdays and Sundays: if nothing sells on those days, give them as 0, since filling them in adds sales that didn't happen.")
+        assert not any("(s)" in w for w in result.rows[0].warnings)
