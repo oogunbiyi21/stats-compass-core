@@ -191,7 +191,8 @@ class TestChance:
 
 
 class TestOneBasis:
-    """The amount range is the percentage range applied to the expected total (0.1.44).
+    """The amount range is the test's percentage range applied to the expected total (0.1.44);
+    since 0.1.45 the percentage range shown is the test inverted (test_sales_lift_ranges.py).
 
     On TATASTEEL's turnover, which grew many times over its 21 years, the
     series' own amount range ranked raw errors from years when turnover was
@@ -208,8 +209,11 @@ class TestOneBasis:
             windows=[{"name": "W", "start": "2020-11-02", "end": "2020-11-13"}],
         ))
         row = result.rows[0]
+        e = row.estimate_pct / 100
+        q = (row.interval[1] - row.estimate) / row.expected_total  # the test's half-width
+        assert row.interval == pytest.approx((row.expected_total * (e - q), row.expected_total * (e + q)))
         lo, hi = row.interval_pct
-        assert row.interval == pytest.approx((row.expected_total * lo / 100, row.expected_total * hi / 100))
+        assert (lo, hi) == pytest.approx((100 * (e - q) / (1 + q), 100 * (e + q) / (1 - q)))
         assert (row.interval[0] > 0) == (lo > 0)  # both include zero, as the verdict says
         assert row.verdict == "expected"
 
