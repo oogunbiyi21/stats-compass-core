@@ -194,11 +194,33 @@ def lift_range(
     if verdict == "expected":
         return None
     if interval_pct is not None:
+        if interval_pct[1] is None:
+            return f"likely above {signed_pct(interval_pct[0])}"
         return f"likely between {signed_pct(interval_pct[0])} and {signed_pct(interval_pct[1])}"
     return (
         f"likely between {signed_amount(interval_abs[0], kind, currency)} and "
         f"{signed_amount(interval_abs[1], kind, currency)}"
     )
+
+
+ONE_EARLIER_YEAR = (
+    "Judged against one earlier year: a season that's busier than last year for other reasons can look like a sale effect."
+)
+
+
+def closures(runs: list[tuple[date, date]]) -> str:
+    """"Runs of days with no sales were taken as closures and left out of what's expected: 24 December 2010 – 3 January 2011."."""
+    named = [span(a, b) for a, b in runs[:3]]
+    more = len(runs) - len(named)
+    listed = ", ".join(named[:-1]) + f" and {named[-1]}" if len(named) > 1 else named[0]
+    if more:
+        listed = ", ".join(named) + f" and {more} more"
+    return f"Runs of days with no sales were taken as closures and left out of what's expected: {listed}."
+
+
+def after_closure(days: int) -> str:
+    """"It started 3 days after a closure: orders held over from the closure can look like a sale effect."."""
+    return f"It started {days} {'day' if days == 1 else 'days'} after a closure: orders held over from the closure can look like a sale effect."
 
 
 def lift_sentence(name: str, first: date, last: date, value: str, amount_text: str, range_text: str | None, verdict: str) -> str:

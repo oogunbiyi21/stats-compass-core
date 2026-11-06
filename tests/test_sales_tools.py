@@ -15,7 +15,7 @@ import pytest
 
 pytest.importorskip("statsmodels")
 
-from stats_compass_core.sales import wording  # noqa: E402
+from stats_compass_core.sales import analysis, wording  # noqa: E402
 from stats_compass_core.sales.schema import (  # noqa: E402
     MAX_GROUPS,
     SalesColumns,
@@ -220,8 +220,11 @@ class TestLift:
             noise_band="none", post_days=21, baseline_lookback_days=84, level=0.9,
             seasonal_band_z=2.0, noise_band_z=2.5, real_change_alpha=0.05,
         )
-        assert row.estimate_pct == core.estimate_pct and row.interval_pct == core.interval_pct
-        assert row.summary == "SUMMER40, 14 May \u2013 3 June 2026: +32%, 914,436 more than expected; likely between +13% and +51%. Real change."
+        assert row.estimate_pct == core.estimate_pct
+        # Since 0.1.45 the percentage range is the engine's test inverted (the app's
+        # +13% to +51% widens with the lift); the engine gets the same in its own release.
+        assert row.interval_pct == pytest.approx(analysis._percent_range(core.estimate_pct, core.interval_pct))
+        assert row.summary == "SUMMER40, 14 May \u2013 3 June 2026: +32%, 914,436 more than expected; likely between +11% and +63%. Real change."
 
     def test_from_a_promotion_calendar_by_group(self):
         calendar = pd.DataFrame([{"retailer": "Tesco", "product": "Choc 100g", "start": "2026-05-31", "end": "2026-06-27", "mechanic": "2 for £3"}])

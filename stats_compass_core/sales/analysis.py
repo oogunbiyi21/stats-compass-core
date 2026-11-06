@@ -44,6 +44,14 @@ BASELINE_LOOKBACK_DAYS = 84
 POST_DAYS = 21
 SERIES_DAYS_BEFORE = 28
 SERIES_DAYS_AFTER = 21
+# A run of this many days or more with no sales, in a store that sells on most
+# days, is a closure: those days are left out as missing, not read as zero sales.
+CLOSURE_MIN_DAYS = 3
+# Under two years of history before a promotion, its season is read from one earlier year.
+ONE_YEAR_HISTORY_DAYS = 730
+# A promotion starting this soon after a closure can carry orders held over from it
+# (on UCI Online Retail II, the first week after the Christmas closure did, both years).
+REOPENING_DAYS = 14
 
 Outcome = Literal["expected", "noise", "real change", "insufficient"]
 ORDER = {"real change": 0, "noise": 1, "expected": 2, "insufficient": 3}
@@ -64,17 +72,26 @@ def _exclusions(windows: list[PromotionWindow] | None) -> list[tuple[date, date]
     return [(w.start, w.end + timedelta(days=POST_DAYS)) for w in windows or []]
 
 
-def _warnings(values: pd.Series, freq: Freq, *sources) -> list[str]:
-    """Every warning, once, in order (the decomposition's, then the statistic's), said plainly."""
+def _warnings(values: pd.Series, freq: Freq, *sources, closed_days: int = 0) -> list[str]:
+    """Every warning, once, in order (the decomposition's, then the statistic's), said plainly.
+
+    ``closed_days`` were closures given to the decomposition as missing: they're
+    named in their own note, so they don't count as days with no data.
+    """
     seen: list[str] = []
     gaps = None
     for source in sources:
         for w in getattr(source, "warnings", None) or []:
             leading = re.match(r"\s*(\d+)", w.message)
+            n = int(leading.group(1)) if leading else None
+            if w.code == "IMPUTED_DAYS" and n is not None and closed_days:
+                n -= closed_days
+                if n <= 0:
+                    continue
             if gaps is None:
                 gaps = _weekend_share(values, freq)
             text = wording.plain_warning(
-                w.code, w.message, int(leading.group(1)) if leading else None,
+                w.code, w.message, n,
                 MAX_GAP_DAYS[freq] // (7 if freq == "W" else 1), gaps,
             )
             if text not in seen:
@@ -308,13 +325,19 @@ class LiftRow(BaseModel):
     amount: str | None = Field(default=None, description="'£9,144 more than expected'.")
     range: str | None = Field(default=None, description="'likely between +13% and +51%'; none beside an expected verdict.")
     estimate_pct: float | None = None
-    interval_pct: tuple[float, float] | None = None
+    interval_pct: tuple[float, float | None] | None = Field(
+        default=None,
+        description=(
+            "The likely range in percent: the test inverted, so it widens with the lift and excludes "
+            "zero exactly when the verdict's test does. The top is None when it's unbounded."
+        ),
+    )
     estimate: float | None = None
     interval: tuple[float, float] | None = Field(
         default=None,
         description=(
-            "The likely range as an amount. When there's a percentage range it's that range "
-            "applied to the expected total, so the two always agree with each other and the verdict."
+            "The likely range as an amount: the estimate plus or minus the test's percentage "
+            "half-width of the expected total, so it excludes zero exactly when the percentage range does."
         ),
     )
     observed_total: float | None = None
@@ -348,8 +371,11 @@ def lift(
     )
     options = _decompose_options(freq, week_label)
     method = options.pop("method")
+    values, closures, longest = _closures(group.values, window, freq)
+    if closures:
+        options["max_gap_days"] = longest
     facts = its_lift(
-        group.values,
+        values,
         (window.start, window.end),
         kind=SERIES_KIND[kind],
         method=method,
@@ -384,16 +410,19 @@ def lift(
     # past errors as percentages of what was expected then; the series' amount
     # range ranks them as raw amounts, which on a series that has grown (or
     # shrunk) understates (or overstates) today's uncertainty. So the amount
-    # range shown is the percentage range applied to today's expected total.
+    # range shown is the test's percentage half-width applied to today's
+    # expected total. An amount's error (expected minus what would have sold)
+    # doesn't grow with the lift, so that range holds at any lift.
     interval = facts.interval_abs
     if facts.interval_pct is not None and facts.counterfactual_total > 0:
         interval = (
             facts.counterfactual_total * facts.interval_pct[0] / 100,
             facts.counterfactual_total * facts.interval_pct[1] / 100,
         )
+    interval_pct = _percent_range(facts.estimate_pct, facts.interval_pct)
     value = wording.lift_value(facts.estimate_pct, facts.estimate_abs, kind, currency)
     amount_text = wording.lift_amount(facts.estimate_abs, kind, currency)
-    range_text = wording.lift_range(facts.verdict, facts.interval_pct, interval, kind, currency)
+    range_text = wording.lift_range(facts.verdict, interval_pct, interval, kind, currency)
     periods = facts.params.get("window_weeks") or [
         d.date().isoformat() for d in pd.date_range(window.start, window.end)
     ]
@@ -416,7 +445,7 @@ def lift(
         "amount": amount_text,
         "range": range_text,
         "estimate_pct": facts.estimate_pct,
-        "interval_pct": facts.interval_pct,
+        "interval_pct": interval_pct,
         "estimate": facts.estimate_abs,
         "interval": interval,
         "observed_total": facts.observed_total,
@@ -424,8 +453,95 @@ def lift(
         "p_value": facts.p_value,
         "periods_in_window": periods,
         "series": points if include_series else None,
-        "warnings": _warnings(group.values, freq, facts),
+        "warnings": (
+            _warnings(group.values, freq, facts, closed_days=sum((b - a).days + 1 for a, b in closures))
+            + _lift_notes(group.values, window, closures)
+        ),
     })
+
+
+def _percent_range(estimate_pct: float | None, interval_pct: tuple[float, float] | None) -> tuple[float, float | None] | None:
+    """The likely range in percent, as the test inverted.
+
+    The test's range is the estimate plus or minus q, the 90% point of the
+    past errors as a percentage of what was expected. Those errors were
+    measured with no promotion; a lift L multiplies a window's percentage
+    error by (1 + L), so plus or minus q is too narrow for a large lift (on
+    UCI Online Retail II it held a +80% lift 65% of the time). The values of L
+    the test doesn't reject are those with |e − L| ≤ q(1 + L):
+    from (e − q)/(1 + q) to (e + q)/(1 − q), unbounded above when q ≥ 1.
+    It excludes zero exactly when |e| > q, as the test's range does.
+    """
+    if estimate_pct is None or interval_pct is None:
+        return interval_pct
+    e = estimate_pct / 100
+    q = max(e - interval_pct[0] / 100, interval_pct[1] / 100 - e)
+    low = 100 * (e - q) / (1 + q)
+    high = 100 * (e + q) / (1 - q) if q < 1 else None
+    return (low, high)
+
+
+def _closures(values: pd.Series, window: PromotionWindow, freq: Freq) -> tuple[pd.Series, list[tuple[date, date]], int]:
+    """Runs of CLOSURE_MIN_DAYS or more days with no sales, as missing days.
+
+    Read as zeros, a closure drags down what's expected after it (on UCI
+    Online Retail II the Christmas closure made most January windows read as a
+    real change) and widens every range through the past errors around it.
+    As missing days, they're filled from the days either side for the fit,
+    and the baseline skips them. Only in a store that sells on most days
+    (the median day isn't zero), never inside the promotion, and not when the
+    series has a real gap longer than the limit (that says it's insufficient,
+    as before). Returns the series, the runs, and the gap limit to pass.
+    """
+    limit = MAX_GAP_DAYS[freq]
+    present = values.dropna()
+    if freq != "D" or present.empty or float(present.median()) <= 0:
+        return values, [], limit
+    full = values.reindex(pd.date_range(present.index.min(), present.index.max(), freq="D"))
+    if _longest_run(full.isna()) > limit:
+        return values, [], limit
+    start, end = pd.Timestamp(window.start), pd.Timestamp(window.end)
+    runs = []
+    zero = full.eq(0).to_numpy()
+    i = 0
+    while i < len(full):
+        if not zero[i]:
+            i += 1
+            continue
+        j = i
+        while j + 1 < len(full) and zero[j + 1]:
+            j += 1
+        a, b = full.index[i], full.index[j]
+        if j - i + 1 >= CLOSURE_MIN_DAYS and (b < start or a > end):
+            runs.append((a.date(), b.date()))
+        i = j + 1
+    if not runs:
+        return values, [], limit
+    for a, b in runs:
+        full.loc[pd.Timestamp(a):pd.Timestamp(b)] = float("nan")
+    return full, runs, max(limit, _longest_run(full.isna()))
+
+
+def _longest_run(mask: pd.Series) -> int:
+    longest = current = 0
+    for flag in mask.to_numpy():
+        current = current + 1 if flag else 0
+        longest = max(longest, current)
+    return longest
+
+
+def _lift_notes(values: pd.Series, window: PromotionWindow, closures: list[tuple[date, date]]) -> list[str]:
+    """Notes on what the promotion was judged against: closures left out, one shortly before it, and one earlier year."""
+    notes = []
+    if closures:
+        notes.append(wording.closures(closures))
+        since = [(window.start - b).days for _, b in closures if b < window.start]
+        if since and min(since) <= REOPENING_DAYS:
+            notes.append(wording.after_closure(min(since)))
+    present = values.dropna()
+    if len(present) and (pd.Timestamp(window.start) - present.index[0]).days < ONE_YEAR_HISTORY_DAYS:
+        notes.append(wording.ONE_EARLIER_YEAR)
+    return notes
 
 
 def _after(points: list[LiftPoint], last_in_window: str, half: float | None, freq: Freq, kind: str, currency: str | None) -> dict | None:
