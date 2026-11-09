@@ -333,13 +333,17 @@ def promotions_in_period(names: list[str], weekly_period: bool) -> str:
     return f"{what} had promotions: {', '.join(names[:-1])} and {names[-1]}."
 
 
-def after_promotion(pct: float | None, difference: float, steps: int, unit: str, beyond: bool, kind: str, currency: str | None) -> str:
+def after_promotion(
+    pct: float | None, difference: float, steps: int, unit: str, beyond: bool, kind: str, currency: str | None,
+    before_next: bool = False,
+) -> str:
     """What happened in the weeks just after a promotion: a dip, if customers stocked up.
 
     ``beyond`` says whether the difference is larger than those weeks usually
-    vary; only then is a reason offered.
+    vary; only then is a reason offered. ``before_next``: another promotion
+    started in those weeks, and only the days before it were judged.
     """
-    span_text = f"the {steps} {unit[:-1] if steps == 1 else unit} after"
+    span_text = f"the {steps} {unit[:-1] if steps == 1 else unit} {'before the next promotion' if before_next else 'after'}"
     if not beyond:
         return f"In {span_text}, sales were about as expected."
     size = f"{abs(round(pct))}% " if pct is not None else ""
@@ -349,6 +353,11 @@ def after_promotion(pct: float | None, difference: float, steps: int, unit: str,
             f"customers may have stocked up."
         )
     return f"In {span_text}, sales stayed {size}above expected ({amount(difference, kind, currency)} more)."
+
+
+def after_interrupted(days: int) -> str:
+    """"The next promotion started 5 days later, so the weeks after can't be judged."."""
+    return f"The next promotion started {days} {'day' if days == 1 else 'days'} later, so the weeks after can't be judged."
 
 
 PROMOTIONS_LEFT_OUT = "Promotion weeks, and the 3 weeks after each, were left out of what's expected."

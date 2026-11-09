@@ -52,6 +52,8 @@ ONE_YEAR_HISTORY_DAYS = 730
 # A promotion starting this soon after a closure can carry orders held over from it
 # (on UCI Online Retail II, the first week after the Christmas closure did, both years).
 REOPENING_DAYS = 14
+# The fewest clear days before the next promotion for the weeks after one to be judged.
+MIN_AFTER_DAYS = 7
 
 Outcome = Literal["expected", "noise", "real change", "insufficient"]
 ORDER = {"real change": 0, "noise": 1, "expected": 2, "insufficient": 3}
@@ -430,7 +432,10 @@ def lift(
         LiftPoint(date=p.date.isoformat(), actual=p.actual, expected=p.expected, low=p.low, high=p.high, in_promotion=p.in_window)
         for p in facts.series or []
     ]
-    after = _after(points, periods[-1], facts.params.get("series_band_half_width"), freq, kind, currency)
+    after = _after(
+        points, periods[-1], facts.params.get("series_band_half_width"), freq, kind, currency,
+        window.end, _next_promotion(window, others), week_label,
+    )
     summary = wording.lift_sentence(name, window.start, window.end, value, amount_text, range_text, facts.verdict)
     if after and not after["summary"].endswith("about as expected."):
         summary += " " + after["summary"]
@@ -544,17 +549,40 @@ def _lift_notes(values: pd.Series, window: PromotionWindow, closures: list[tuple
     return notes
 
 
-def _after(points: list[LiftPoint], last_in_window: str, half: float | None, freq: Freq, kind: str, currency: str | None) -> dict | None:
+def _next_promotion(window: PromotionWindow, others: list[PromotionWindow]) -> date | None:
+    """The first day another promotion takes of the 3 weeks after this one, if any does."""
+    after_end = window.end + timedelta(days=POST_DAYS)
+    starts = [max(o.start, window.end + timedelta(days=1)) for o in others if o.end > window.end and o.start <= after_end]
+    return min(starts) if starts else None
+
+
+def _after(
+    points: list[LiftPoint], last_in_window: str, half: float | None, freq: Freq, kind: str, currency: str | None,
+    window_end: date | None = None, next_start: date | None = None, week_label: WeekLabel = "end",
+) -> dict | None:
     """The weeks just after a promotion against expected, from the lift's own series.
 
     The expected line is the lift's counterfactual, carried on. A difference
     counts as a dip (or a rise) only beyond the range those weeks usually
     vary by: one step's 90% half-width times the square root of the steps.
+
+    Another promotion starting in those weeks would read as this one's
+    after-effect (SUMMER40's "stayed 19% above expected" was FLASH20), so only
+    the days before it are judged, and with fewer than MIN_AFTER_DAYS of them,
+    nothing is: the sentence says why.
     """
     # The 3 weeks after, by the calendar: days without a row (a closed
     # weekend) are left out of the sums, not counted as part of the span.
     end = (pd.Timestamp(last_in_window) + pd.Timedelta(days=POST_DAYS)).date().isoformat()
     after = [p for p in points if last_in_window < p.date <= end and not p.in_promotion and p.actual is not None]
+    clear_days = None
+    if next_start is not None and window_end is not None:
+        cut = pd.Timestamp(next_start)
+        last_day = (lambda d: week_days(d, week_label)[1]) if freq == "W" else (lambda d: d)  # noqa: E731
+        after = [p for p in after if last_day(pd.Timestamp(p.date)) < cut]
+        clear_days = (next_start - window_end).days - 1
+        if clear_days < MIN_AFTER_DAYS or not after:
+            return {"summary": wording.after_interrupted((next_start - window_end).days), "pct": None, "difference": None}
     if not after:
         return None
     actual = sum(p.actual for p in after)
@@ -564,11 +592,13 @@ def _after(points: list[LiftPoint], last_in_window: str, half: float | None, fre
     beyond = half is not None and abs(difference) > half * math.sqrt(len(after))
     if freq == "W":
         steps, unit = len(after), "weeks"
+    elif clear_days is not None:
+        steps, unit = clear_days, "days"
     else:
         days = (pd.Timestamp(after[-1].date) - pd.Timestamp(last_in_window)).days
         steps, unit = (POST_DAYS // 7, "weeks") if days > 14 else (days, "days")
     return {
-        "summary": wording.after_promotion(pct, difference, steps, unit, beyond, kind, currency),
+        "summary": wording.after_promotion(pct, difference, steps, unit, beyond, kind, currency, before_next=clear_days is not None),
         "pct": pct,
         "difference": difference,
     }

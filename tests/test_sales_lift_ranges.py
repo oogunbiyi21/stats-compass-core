@@ -106,3 +106,43 @@ class TestOneEarlierYear:
 
     def test_not_with_two_years(self):
         assert wording.ONE_EARLIER_YEAR not in lift(store(days=900), "2026-09-07", "2026-09-13").warnings
+
+
+def lift_among(df: pd.DataFrame, start: str, end: str, others: list[tuple[str, str]]):
+    """The row for one promotion, measured with others in the same data (each left out of the others' fits)."""
+    state = DataFrameState()
+    state.set_dataframe(df, name="s", operation="upload")
+    windows = [{"name": "Sale", "start": start, "end": end}] + [{"name": f"Other {i}", "start": a, "end": b} for i, (a, b) in enumerate(others)]
+    rows = promotion_lift(state, PromotionLiftInput(dataframe_name="s", date_column="Date", value_column="Sales", windows=windows)).rows
+    return next(r for r in rows if r.promotion == "Sale")
+
+
+class TestTheWeeksAfter:
+    """Another promotion inside the 3 weeks after one isn't that one's after-effect (0.1.46).
+
+    On the sale checker's demo store, SUMMER40's weeks after read "stayed 19%
+    above expected": that was FLASH20, 12 days later.
+    """
+
+    def test_judged_up_to_the_next_promotion(self):
+        row = lift_among(store(closed=False), "2026-03-02", "2026-03-08", [("2026-03-20", "2026-03-26")])
+        assert row.after_summary.startswith("In the 11 days before the next promotion, ")
+
+    def test_too_soon_to_judge(self):
+        row = lift_among(store(closed=False), "2026-03-02", "2026-03-08", [("2026-03-13", "2026-03-19")])
+        assert row.after_summary == "The next promotion started 5 days later, so the weeks after can't be judged."
+        assert row.after_pct is None and row.after_difference is None
+
+    def test_unchanged_without_one(self):
+        for others in ([], [("2026-04-20", "2026-04-26")]):
+            assert lift_among(store(closed=False), "2026-03-02", "2026-03-08", others).after_summary.startswith("In the 3 weeks after, ")
+
+    def test_weekly(self):
+        daily = store(closed=False)
+        weekly = (daily.assign(Date=pd.to_datetime(daily["Date"])).set_index("Date")["Sales"].resample("W-SAT").sum()
+                  .iloc[1:-1].reset_index())
+        weekly["Date"] = weekly["Date"].dt.strftime("%Y-%m-%d")
+        row = lift_among(weekly, "2026-04-05", "2026-04-18", [("2026-05-03", "2026-05-09")])
+        assert row.after_summary.startswith("In the 2 weeks before the next promotion, ")
+        row = lift_among(weekly, "2026-04-05", "2026-04-18", [("2026-04-22", "2026-04-28")])
+        assert row.after_summary == "The next promotion started 4 days later, so the weeks after can't be judged."
